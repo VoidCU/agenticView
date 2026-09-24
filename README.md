@@ -10,18 +10,44 @@ Run one command inside any project and a browser tab opens onto an isometric off
 - **Agents that can see.** Workers can take screenshots of a URL, and you can paste screenshots into any chat.
 - **Your own session, mirrored.** Plugin hooks show what your Claude Code terminal session is doing as a robot in the office too.
 
+## Requirements
+
+- **Claude Code** 2.x (the CLI, the desktop app, or the VS Code extension all work).
+- **Node.js 22 or newer** on your PATH (`node --version`).
+- A browser. The office is a normal web page served on `127.0.0.1`.
+- For real agents, credentials for at least one provider (see [Providers and credentials](#providers-and-credentials)). You can try the whole UI without any credentials using demo mode (below).
+
 ## Install
 
-Inside Claude Code:
+### 1. Add the plugin inside Claude Code
+
+Open Claude Code in any folder and run:
 
 ```
-/plugin marketplace add agenticview/agenticview
+/plugin marketplace add VoidCU/agenticView
 /plugin install agenticview@agenticview
 ```
 
-Then restart Claude Code once so the plugin can record where it was installed.
+The first command registers this repository as a plugin marketplace. The second installs the `agenticview` plugin from it. Accept the prompts.
 
-Requirements: Node 22 or newer. The first launch installs the plugin's dependencies (about a minute); later launches start in a second.
+### 2. Restart Claude Code once
+
+Close and reopen Claude Code (or start a new session with `claude`). On start, the plugin's `SessionStart` hook writes the plugin's install location to `~/.agenticview/plugin-root`; the `/agenticview` command needs that file.
+
+### 3. Give agents a way to run
+
+Pick one:
+
+- **Claude (default):** set `ANTHROPIC_API_KEY` in your shell environment (get one at platform.claude.com). The Agent SDK does **not** reuse your Claude Code login. Alternatively put the key in `~/.agenticview/config.json`:
+
+  ```json
+  { "providers": { "claude": { "apiKey": "sk-ant-..." } } }
+  ```
+
+- **Codex:** `npm i -g @openai/codex`, then `codex login`.
+- **Gemini:** `npm i -g @google/gemini-cli`, then `gemini` once to sign in (or set `GEMINI_API_KEY`).
+
+You can install the plugin first and add credentials later; the office shows each provider's status and why one is unavailable.
 
 ## Use
 
@@ -30,7 +56,53 @@ Requirements: Node 22 or newer. The first launch installs the plugin's dependenc
 | `/agenticview` | The office for the current project |
 | `/agenticview-hub` | The Hub: global agents plus your list of known projects |
 
-Outside Claude Code the same thing works with `npx agenticview open --project <path>` or `npx agenticview hub`.
+Run `/agenticview` inside a project (Claude Code must be started in the project folder). Claude runs the launcher, and the first time it installs the plugin's own dependencies (about a minute; later launches take a second). It then prints a line like:
+
+```
+AgenticView: http://127.0.0.1:52210/#token=3f9c...
+```
+
+and opens it in your browser. Keep that Claude Code session open; it hosts the server. The `#token=` part is the access key for that office, so use the exact link printed.
+
+### Test drive in a project (5 minutes)
+
+1. In a project folder, run `claude`, then `/agenticview`. A browser tab opens onto the office with **Atlas** on the podium.
+2. Click the empty desk marked **New agent**. Name it `Nova`, specialty `frontend`, leave the provider on *Default*, keep *Edit files* and *Shell* on, choose *Edits are fine, ask for the rest*, and click **Create agent**. A robot appears at the desk.
+3. Type into the command bar at the bottom: `Add a README section that explains how to run the tests`, and press Enter. Atlas reads the roster, assigns the work to Nova (watch the beam), waits for her, and reports back. Nova's desk shows the files she touches.
+4. Click Nova to open her chat and ask her something directly, for example `Which test framework does this project use?`.
+5. Switch to VS Code or `git diff` to review what changed. Everything the agents do is in your working tree; nothing is committed for you.
+6. Try `/agenticview-hub` to create a **global** agent, then open the project again: the global agent waits in the Lobby and can be given work here or copied into the project.
+
+### Try it with no credentials (demo mode)
+
+To see the office without any API keys, start the server by hand with scripted agents that echo what you send:
+
+```
+AGENTICVIEW_FAKE=1 node "$(cat ~/.agenticview/plugin-root)/bin/agenticview.mjs" open --project .
+```
+
+(On Windows PowerShell: `$env:AGENTICVIEW_FAKE=1; node "$(Get-Content ~/.agenticview/plugin-root)/bin/agenticview.mjs" open --project .`)
+
+### Without the plugin (from a clone)
+
+```
+git clone https://github.com/VoidCU/agenticView.git
+cd agenticView && npm install --omit=dev
+node bin/agenticview.mjs open --project /path/to/your/project
+node bin/agenticview.mjs hub
+```
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `/agenticview` says `plugin-root` is missing | The SessionStart hook has not run yet. Restart Claude Code once, then retry. |
+| `AgenticView needs its launch link` page | You opened the address without its `#token=` part. Use the exact link the command printed, or run `/agenticview` again (it reuses the running server and prints the link). |
+| Provider shows *unavailable* in the office | Hover the chip or open Settings to read the reason: usually a missing key or CLI. Fix it, restart the office (`/agenticview` again after stopping the old one), and reload the page. Provider checks are cached for a minute. |
+| Claude agent fails immediately | `ANTHROPIC_API_KEY` is not visible to the shell Claude Code runs in. Set it in `~/.agenticview/config.json` instead. |
+| Codex worker cannot edit files on Windows | Codex's Windows sandbox cannot write. Use *auto-edit* or *auto* (both run unsandboxed there) or run under WSL. |
+| Gemini reports a `GOOGLE_CLOUD_PROJECT` error | Your Google account type needs that variable set; see the link in the error. |
+| Port or stale office | Each project has one server. If a stale one lingers, delete its file in `~/.agenticview/instances/` and rerun. |
 
 Inside the office:
 

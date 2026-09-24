@@ -13,7 +13,7 @@
       "version": "0.1.0",
       "source": {
         "source": "github",
-        "repo": "agenticview/agenticview"
+        "repo": "VoidCU/agenticView"
       },
       "tags": ["agents", "3d", "visualization"]
     }

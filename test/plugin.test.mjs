@@ -26,7 +26,7 @@ test("marketplace.json lists the plugin with a github source", () => {
   assert.equal(m.plugins.length, 1);
   assert.equal(m.plugins[0].name, "agenticview");
   assert.equal(m.plugins[0].source.source, "github");
-  assert.match(m.plugins[0].source.repo, /^[\w.-]+\/agenticview$/);
+  assert.match(m.plugins[0].source.repo, /^[\w.-]+\/agenticview$/i);
 });
 
 test("skills have frontmatter and launch through the recorded plugin root", () => {
@@ -35,7 +35,8 @@ test("skills have frontmatter and launch through the recorded plugin root", () =
     assert.match(md, /^---\nname: /);
     assert.match(md, /\ndescription: .+/);
     assert.ok(md.includes(`node "$(cat ~/.agenticview/plugin-root)/bin/agenticview.mjs" ${cmd}`), `${name} must run ${cmd}`);
-    assert.match(md, /npx agenticview/);
+    assert.match(md, /plugin-root/);
+    assert.match(md, /bin\/agenticview\.mjs" (open|hub)/);
   }
 });
 
