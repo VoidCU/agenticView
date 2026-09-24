@@ -7,6 +7,7 @@ import {
   levelFor,
   type Task,
   type TaskKind,
+  type TaskLogEntry,
   type TaskStatus,
 } from "@agenticview/shared";
 import { JsonStore } from "../store/jsonStore.js";
@@ -100,6 +101,17 @@ export class TaskService {
       const cur = await this.store.read(id);
       if (!cur) return;
       const next: Task = { ...cur, log: [...cur.log, { ts: new Date().toISOString(), type, text }].slice(-TASK_LOG_CAP) };
+      await this.store.write(id, next);
+      this.onChange(next);
+    });
+  }
+
+  /** Replace the most recent log entry (used to coalesce streamed text). No-op when the log is empty. */
+  replaceLastLog(id: string, entry: TaskLogEntry): Promise<void> {
+    return this.locked(id, async () => {
+      const cur = await this.store.read(id);
+      if (!cur || cur.log.length === 0) return;
+      const next: Task = { ...cur, log: [...cur.log.slice(0, -1), entry] };
       await this.store.write(id, next);
       this.onChange(next);
     });

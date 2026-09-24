@@ -167,7 +167,7 @@ export class ClaudeRuntime {
                         return { content: [{ type: "text", text: `ERROR: ${e.message}` }], isError: true };
                     }
                 }));
-                options.mcpServers = { agenticview: sdk.createSdkMcpServer({ name: "agenticview", version: "0.1.0", tools }) };
+                options.mcpServers = { agenticview: sdk.createSdkMcpServer({ name: "agenticview", version: "0.1.0", tools: tools }) };
             }
             if (subset.permissionMode === "default") {
                 const onPermission = req.onPermission;

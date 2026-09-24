@@ -1,0 +1,367 @@
+import { join } from "node:path";
+import { z } from "zod";
+import { isTerminal, newId, ProviderSchema, } from "@agenticview/shared";
+import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
+import { buildRosterPreamble } from "./preamble.js";
+import { MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
+const SessionFileSchema = z.record(z.string(), z.object({ provider: ProviderSchema, sessionId: z.string() }));
+const LOG_COALESCE_LIMIT = 2000;
+/** Runs tasks on runtimes, keeps the Manager's map truthful, and mediates permissions and questions. */
+export class Orchestrator {
+    deps;
+    aborts = new Map();
+    active = new Set();
+    queue = [];
+    waiters = new Map();
+    pendingPermissions = new Map();
+    pendingQuestions = new Map();
+    pumping = false;
+    constructor(deps) {
+        this.deps = deps;
+    }
+    running() {
+        return this.active.size;
+    }
+    resolveProvider(agent) {
+        const s = this.deps.settings();
+        if (agent.provider) {
+            return { provider: agent.provider, model: agent.model ?? s.providerModels[agent.provider] ?? undefined };
+        }
+        const provider = s.defaultProvider ?? s.globalDefaultProvider;
+        const model = agent.model ?? s.defaultModel ?? s.globalDefaultModel ?? s.providerModels[provider] ?? undefined;
+        return { provider, model: model ?? undefined };
+    }
+    /** Returns a human-readable problem when the agent's provider cannot run, else undefined. */
+    async providerProblem(agent) {
+        const { provider } = this.resolveProvider(agent);
+        const runtime = this.deps.runtimes.get(provider);
+        if (!runtime)
+            return `provider ${provider} unavailable: not configured`;
+        const status = await runtime.check();
+        if (!status.ok)
+            return `provider ${provider} unavailable: ${status.reason ?? "unknown reason"}`;
+        return undefined;
+    }
+    emitAgent(agent) {
+        this.deps.bus.emit({ type: "agent.updated", agent });
+    }
+    async handleUserMessage(input) {
+        const agent = await this.deps.registry.get(input.agentId);
+        if (!agent)
+            throw new Error(`Unknown agent ${input.agentId}`);
+        const world = this.deps.world;
+        let projectPath;
+        if (world.kind === "project") {
+            projectPath = world.projectPath;
+        }
+        else if (agent.role === "manager") {
+            projectPath = input.projectPath ?? "";
+        }
+        else {
+            if (!input.projectPath)
+                throw new Error("projectPath is required to chat with a global agent from the hub");
+            if (!this.deps.knownProjects().some((p) => p.path === input.projectPath))
+                throw new Error(`${input.projectPath} is not a known project`);
+            projectPath = input.projectPath;
+        }
+        const isManager = agent.role === "manager";
+        const task = await this.deps.tasks.create({
+            kind: isManager ? "request" : "chat",
+            title: input.text.length > 80 ? `${input.text.slice(0, 77)}...` : input.text,
+            description: input.text,
+            createdBy: "user",
+            assigneeId: agent.id,
+            projectPath,
+            images: input.images ?? [],
+        });
+        await this.deps.tasks.log(task.id, "user", input.text);
+        await this.deps.tasks.transition(task.id, "assigned");
+        this.startTask(task.id);
+        return task;
+    }
+    startTask(taskId) {
+        void (async () => {
+            const cur = await this.deps.tasks.get(taskId);
+            if (!cur)
+                return;
+            if (cur.status === "queued")
+                await this.deps.tasks.transition(taskId, "assigned");
+            this.queue.push(taskId);
+            await this.pump();
+        })().catch((e) => console.error("[agenticview] startTask failed", e));
+    }
+    async pump() {
+        if (this.pumping)
+            return;
+        this.pumping = true;
+        try {
+            while (this.queue.length > 0) {
+                const id = this.queue[0];
+                const task = await this.deps.tasks.get(id);
+                if (!task || task.status !== "assigned") {
+                    this.queue.shift();
+                    continue;
+                }
+                const agent = await this.deps.registry.get(task.assigneeId);
+                const isManager = agent?.role === "manager";
+                if (!isManager && this.active.size >= this.deps.settings().maxConcurrentRuns)
+                    break;
+                this.queue.shift();
+                if (!isManager)
+                    this.active.add(id);
+                void this.execute(task).finally(() => {
+                    this.active.delete(id);
+                    void this.pump();
+                });
+            }
+        }
+        finally {
+            this.pumping = false;
+        }
+    }
+    async awaitTask(taskId) {
+        const cur = await this.deps.tasks.get(taskId);
+        if (!cur)
+            throw new Error(`Unknown task ${taskId}`);
+        if (isTerminal(cur.status))
+            return cur;
+        return new Promise((resolve) => {
+            const list = this.waiters.get(taskId) ?? [];
+            list.push(resolve);
+            this.waiters.set(taskId, list);
+        });
+    }
+    settle(task) {
+        const list = this.waiters.get(task.id);
+        this.waiters.delete(task.id);
+        for (const fn of list ?? [])
+            fn(task);
+    }
+    async cancel(taskId) {
+        const cur = await this.deps.tasks.get(taskId);
+        if (!cur || isTerminal(cur.status))
+            return;
+        const idx = this.queue.indexOf(taskId);
+        if (idx >= 0)
+            this.queue.splice(idx, 1);
+        this.aborts.get(taskId)?.abort();
+        const next = await this.deps.tasks.transition(taskId, "cancelled");
+        this.active.delete(taskId);
+        this.settle(next);
+        void this.pump();
+    }
+    respondPermission(id, allow) {
+        const fn = this.pendingPermissions.get(id);
+        if (!fn)
+            return;
+        this.pendingPermissions.delete(id);
+        this.deps.bus.emit({ type: "permission.resolved", id });
+        fn(allow);
+    }
+    respondQuestion(id, answer) {
+        const fn = this.pendingQuestions.get(id);
+        if (!fn)
+            return;
+        this.pendingQuestions.delete(id);
+        this.deps.bus.emit({ type: "question.resolved", id });
+        fn(answer);
+    }
+    async setWaiting(taskId, waiting) {
+        try {
+            const cur = await this.deps.tasks.get(taskId);
+            if (!cur)
+                return;
+            if (waiting && cur.status === "running")
+                await this.deps.tasks.transition(taskId, "waiting");
+            else if (!waiting && cur.status === "waiting")
+                await this.deps.tasks.transition(taskId, "running");
+        }
+        catch {
+            // The task was cancelled or finished meanwhile; nothing to restore.
+        }
+    }
+    async requestPermission(taskId, agentId, req) {
+        await this.setWaiting(taskId, true);
+        this.deps.bus.emit({ type: "permission.request", id: req.id, agentId, taskId, tool: req.tool, input: req.input });
+        const allow = await new Promise((resolve) => this.pendingPermissions.set(req.id, resolve));
+        await this.setWaiting(taskId, false);
+        return allow;
+    }
+    async askUser(taskId, agentId, question) {
+        const id = newId("u");
+        await this.setWaiting(taskId, true);
+        this.deps.bus.emit({ type: "question.request", id, agentId, taskId, question });
+        const answer = await new Promise((resolve) => this.pendingQuestions.set(id, resolve));
+        await this.setWaiting(taskId, false);
+        return answer;
+    }
+    sessionKey(task, agent) {
+        if (agent.role === "manager")
+            return this.deps.world.kind === "project" ? this.deps.world.projectPath : "hub";
+        return task.projectPath || "hub";
+    }
+    sessionFile(agentId) {
+        return join(this.deps.root, "sessions", `${agentId}.json`);
+    }
+    async loadSession(agent, key, provider) {
+        const file = await readJsonFile(this.sessionFile(agent.id), SessionFileSchema, {});
+        const entry = file[key];
+        return entry && entry.provider === provider ? entry.sessionId : undefined;
+    }
+    async saveSession(agent, key, provider, sessionId) {
+        const file = await readJsonFile(this.sessionFile(agent.id), SessionFileSchema, {});
+        file[key] = { provider, sessionId };
+        await writeJsonFile(this.sessionFile(agent.id), file);
+    }
+    async buildPrompt(task, agent) {
+        let text;
+        if (task.kind === "request") {
+            const preamble = buildRosterPreamble(await this.deps.info(), await this.deps.registry.list(), await this.deps.tasks.list());
+            text = `${preamble}\n\n## User request\n${task.description}`;
+        }
+        else if (task.kind === "work") {
+            text = `${task.title}\n\n${task.description}`;
+        }
+        else {
+            text = task.description;
+        }
+        void agent;
+        return [{ type: "text", text }, ...task.images.map((path) => ({ type: "image", path }))];
+    }
+    bridgeToolsFor(task, agent) {
+        if (agent.role === "manager") {
+            return managerTools({
+                world: this.deps.world,
+                registry: this.deps.registry,
+                tasks: this.deps.tasks,
+                requestTask: task,
+                managerId: agent.id,
+                knownProjects: () => this.deps.knownProjects(),
+                startTask: (id) => this.startTask(id),
+                awaitTask: (id) => this.awaitTask(id),
+                askUser: (t, a, q) => this.askUser(t, a, q),
+                setWaiting: (t, w) => this.setWaiting(t, w),
+                emitAgent: (a) => this.emitAgent(a),
+                checkProvider: (a) => this.providerProblem(a),
+            });
+        }
+        return this.deps.workerTools?.(agent, task) ?? [];
+    }
+    async appendLog(taskId, ev) {
+        const cur = await this.deps.tasks.get(taskId);
+        if (!cur)
+            return;
+        const last = cur.log[cur.log.length - 1];
+        if (ev.type === "text" && last && last.type === "text" && last.text.length < LOG_COALESCE_LIMIT) {
+            await this.deps.tasks.replaceLastLog(taskId, { ...last, text: last.text + ev.text });
+            return;
+        }
+        const text = ev.type === "text" ? ev.text
+            : ev.type === "tool_start" ? `${ev.name} ${JSON.stringify(ev.input).slice(0, 300)}`
+                : ev.type === "tool_end" ? `${ev.name} ${ev.ok ? "ok" : "failed"}: ${ev.summary}`
+                    : ev.type === "file_changed" ? `${ev.kind} ${ev.path}`
+                        : ev.type === "permission" ? `${ev.tool} needs permission`
+                            : ev.text;
+        await this.deps.tasks.log(taskId, ev.type, text);
+    }
+    async finish(task, status, patch) {
+        const cur = await this.deps.tasks.get(task.id);
+        if (!cur || isTerminal(cur.status))
+            return cur;
+        try {
+            if (cur.status === "queued")
+                await this.deps.tasks.transition(task.id, "assigned");
+            if (cur.status === "queued" || cur.status === "assigned" || cur.status === "waiting")
+                await this.deps.tasks.transition(task.id, "running");
+            return await this.deps.tasks.transition(task.id, status, patch);
+        }
+        catch {
+            return this.deps.tasks.get(task.id);
+        }
+    }
+    async execute(task) {
+        const { tasks, registry, bus } = this.deps;
+        const ac = new AbortController();
+        this.aborts.set(task.id, ac);
+        const runId = newId("r");
+        let final;
+        try {
+            const agent = await registry.get(task.assigneeId);
+            if (!agent) {
+                final = await this.finish(task, "failed", { error: `unknown agent ${task.assigneeId}` });
+                return;
+            }
+            const problem = await this.providerProblem(agent);
+            if (problem) {
+                final = await this.finish(task, "failed", { error: problem });
+                return;
+            }
+            const { provider, model } = this.resolveProvider(agent);
+            const runtime = this.deps.runtimes.get(provider);
+            await tasks.transition(task.id, "running");
+            const key = this.sessionKey(task, agent);
+            const sessionId = await this.loadSession(agent, key, provider);
+            const cwd = task.projectPath || process.cwd();
+            const bridgeTools = this.bridgeToolsFor(task, agent);
+            this.deps.toolRegistry.register(runId, bridgeTools);
+            const req = {
+                runId,
+                agent,
+                cwd,
+                prompt: await this.buildPrompt(task, agent),
+                systemPrompt: agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
+                sessionId,
+                tools: agent.tools,
+                bridgeTools,
+                permissionMode: agent.permissionMode,
+                model,
+                onPermission: (p) => this.requestPermission(task.id, agent.id, p),
+            };
+            let chain = Promise.resolve();
+            const sink = (ev) => {
+                bus.emit({ type: "run.event", taskId: task.id, agentId: agent.id, event: ev });
+                chain = chain.then(() => this.appendLog(task.id, ev)).catch(() => undefined);
+            };
+            let result;
+            try {
+                result = await runtime.run(req, sink, ac.signal);
+            }
+            finally {
+                this.deps.toolRegistry.release(runId);
+            }
+            await chain;
+            const usedSession = result.sessionId ?? sessionId;
+            const session = usedSession ? { provider, sessionId: usedSession } : undefined;
+            if (usedSession)
+                await this.saveSession(agent, key, provider, usedSession);
+            if (result.stopReason === "aborted") {
+                final = await tasks.get(task.id);
+                if (final && !isTerminal(final.status))
+                    final = await this.finish(task, "failed", { error: "aborted", session });
+                return;
+            }
+            if (result.stopReason === "done") {
+                final = await this.finish(task, "done", { result: result.text, session });
+            }
+            else {
+                final = await this.finish(task, "failed", { error: result.error ?? result.stopReason, result: result.text || undefined, session });
+            }
+        }
+        catch (e) {
+            final = await this.finish(task, "failed", { error: e.message });
+        }
+        finally {
+            this.aborts.delete(task.id);
+            const settled = final ?? (await tasks.get(task.id));
+            if (settled && isTerminal(settled.status)) {
+                if (settled.status !== "cancelled")
+                    await tasks.awardXp(registry, settled);
+                const agent = await registry.get(settled.assigneeId);
+                if (agent)
+                    this.emitAgent(agent);
+                this.settle(settled);
+            }
+        }
+    }
+}
+//# sourceMappingURL=orchestrator.js.map

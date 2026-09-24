@@ -179,7 +179,7 @@ export class ClaudeRuntime implements Runtime {
       if (req.model) options.model = req.model;
       if (req.bridgeTools.length > 0) {
         const tools = req.bridgeTools.map((t) =>
-          sdk.tool(t.name, t.description, t.schema as never, async (args: unknown) => {
+          sdk.tool(t.name, t.description, t.schema, async (args: unknown) => {
             try {
               return { content: [{ type: "text" as const, text: await t.handler(args as Record<string, unknown>) }] };
             } catch (e) {
@@ -187,7 +187,7 @@ export class ClaudeRuntime implements Runtime {
             }
           }),
         );
-        options.mcpServers = { agenticview: sdk.createSdkMcpServer({ name: "agenticview", version: "0.1.0", tools }) };
+        options.mcpServers = { agenticview: sdk.createSdkMcpServer({ name: "agenticview", version: "0.1.0", tools: tools as never }) };
       }
       if (subset.permissionMode === "default") {
         const onPermission = req.onPermission;

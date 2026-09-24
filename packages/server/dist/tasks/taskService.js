@@ -72,6 +72,17 @@ export class TaskService {
             this.onChange(next);
         });
     }
+    /** Replace the most recent log entry (used to coalesce streamed text). No-op when the log is empty. */
+    replaceLastLog(id, entry) {
+        return this.locked(id, async () => {
+            const cur = await this.store.read(id);
+            if (!cur || cur.log.length === 0)
+                return;
+            const next = { ...cur, log: [...cur.log.slice(0, -1), entry] };
+            await this.store.write(id, next);
+            this.onChange(next);
+        });
+    }
     /** Called on boot: anything still running or waiting was interrupted by a server restart. */
     async recoverInterrupted() {
         const out = [];

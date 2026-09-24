@@ -1,0 +1,32 @@
+import { type Agent, type Task } from "@agenticview/shared";
+import type { BridgeTool } from "../runtimes/types.js";
+import type { AgentRegistry, WorldRef } from "../agents/registry.js";
+import type { TaskService } from "../tasks/taskService.js";
+export declare const MANAGER_SYSTEM_PROMPT = "You are the Manager of an AgenticView office: a team of AI coding agents (\"workers\") that edit a real software project.\n\nRules:\n- The \"Roster\" and \"Open tasks\" preamble at the top of each message is authoritative and freshly generated. Trust it over memory. Call list_agents or list_tasks if you need to re-check.\n- Understand the request first. Read the project (you have read-only file tools) when a decision depends on the code.\n- Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits.\n- Split work into self-contained assignments. Each assign_task description must stand alone: what to change, where (files or folders), how to verify. Never assign the same file to two workers at once.\n- assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.\n- Use ask_user only when a decision truly needs the user.\n- You never edit files yourself.\n- End with a short report for the user: what was done, by whom, and anything left open.";
+export declare function workerSystemPrompt(agent: Agent, projectPath: string): string;
+export interface ManagerToolContext {
+    world: WorldRef;
+    registry: AgentRegistry;
+    tasks: TaskService;
+    requestTask: Task;
+    managerId: string;
+    knownProjects: () => {
+        path: string;
+        name: string;
+    }[];
+    startTask: (taskId: string) => void;
+    awaitTask: (taskId: string) => Promise<Task>;
+    askUser: (taskId: string, agentId: string, question: string) => Promise<string>;
+    setWaiting: (taskId: string, waiting: boolean) => Promise<void>;
+    emitAgent: (agent: Agent) => void;
+    checkProvider: (agent: Agent) => Promise<string | undefined>;
+}
+/** Resolve the target project for an assignment, or return an error string. */
+export declare function resolveAssignmentTarget(ctx: Pick<ManagerToolContext, "world" | "knownProjects">, agent: Agent, projectPath: string | undefined): {
+    ok: true;
+    projectPath: string;
+} | {
+    ok: false;
+    error: string;
+};
+export declare function managerTools(ctx: ManagerToolContext): BridgeTool[];

@@ -91,3 +91,16 @@ describe("TaskService", () => {
     await expect(s.awardXp(reg, { ...done, assigneeId: "w_missing" })).resolves.toBeUndefined();
   });
 });
+
+describe("TaskService.replaceLastLog", () => {
+  it("replaces the last entry only and is a no-op without entries", async () => {
+    const s = new TaskService(join(dir, "tasks"), onChange);
+    const t = await mk(s);
+    await s.replaceLastLog(t.id, { ts: "x", type: "text", text: "nothing" });
+    expect((await s.get(t.id))!.log).toEqual([]);
+    await s.log(t.id, "text", "a");
+    await s.log(t.id, "text", "b");
+    await s.replaceLastLog(t.id, { ts: "x", type: "text", text: "bc" });
+    expect((await s.get(t.id))!.log.map((l) => l.text)).toEqual(["a", "bc"]);
+  });
+});
