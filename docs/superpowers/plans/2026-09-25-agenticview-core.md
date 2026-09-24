@@ -223,7 +223,7 @@ describe("TaskSchema", () => {
       queued: ["assigned", "cancelled"],
       assigned: ["running", "cancelled"],
       running: ["waiting", "done", "failed", "cancelled"],
-      waiting: ["running", "cancelled"],
+      waiting: ["running", "failed", "cancelled"],
       done: [], failed: [], cancelled: [],
     });
   });
@@ -341,7 +341,7 @@ export const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   queued: ["assigned", "cancelled"],
   assigned: ["running", "cancelled"],
   running: ["waiting", "done", "failed", "cancelled"],
-  waiting: ["running", "cancelled"],
+  waiting: ["running", "failed", "cancelled"],
   done: [], failed: [], cancelled: [],
 };
 export const TaskLogEntrySchema = z.object({ ts: z.string(), type: z.string(), text: z.string() });

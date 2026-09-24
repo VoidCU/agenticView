@@ -33,7 +33,7 @@ describe("TaskSchema", () => {
       queued: ["assigned", "cancelled"],
       assigned: ["running", "cancelled"],
       running: ["waiting", "done", "failed", "cancelled"],
-      waiting: ["running", "cancelled"],
+      waiting: ["running", "failed", "cancelled"],
       done: [],
       failed: [],
       cancelled: [],
