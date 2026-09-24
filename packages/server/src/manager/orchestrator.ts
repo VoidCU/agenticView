@@ -103,6 +103,7 @@ export class Orchestrator {
     if (world.kind === "project") {
       projectPath = world.projectPath;
     } else if (agent.role === "manager") {
+      if (input.projectPath && !this.deps.knownProjects().some((p) => p.path === input.projectPath)) throw new Error(`${input.projectPath} is not a known project`);
       projectPath = input.projectPath ?? "";
     } else {
       if (!input.projectPath) throw new Error("projectPath is required to chat with a global agent from the hub");
@@ -259,7 +260,8 @@ export class Orchestrator {
     let text: string;
     if (task.kind === "request") {
       const preamble = buildRosterPreamble(await this.deps.info(), await this.deps.registry.list(), await this.deps.tasks.list());
-      text = `${preamble}\n\n## User request\n${task.description}`;
+      const target = this.deps.world.kind === "hub" && task.projectPath ? `\n\nTarget project: ${task.projectPath} (pass this as projectPath to assign_task)` : "";
+      text = `${preamble}${target}\n\n## User request\n${task.description}`;
     } else if (task.kind === "work") {
       text = `${task.title}\n\n${task.description}`;
     } else {

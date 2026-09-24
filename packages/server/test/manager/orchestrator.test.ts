@@ -302,4 +302,16 @@ describe("Orchestrator", () => {
     expect(info.knownProjects.map((p) => p.path)).toContain(proj);
     expect(info.kind).toBe("project");
   });
+
+  it("hub: a request that names a project tells the manager the target project", async () => {
+    await writeJsonFile(join(home, "config.json"), { knownProjects: [{ path: proj, name: "proj", lastOpened: "" }] });
+    const ctx = await setup(async function* () { yield { type: "text", text: "ok" }; }, { hub: true });
+    const m = await ctx.reg.ensureManager();
+    const t = await ctx.orch.handleUserMessage({ agentId: m.id, text: "tidy up", projectPath: proj });
+    await ctx.orch.awaitTask(t.id);
+    const prompt = ctx.fake.runs[0]!.prompt[0];
+    expect(prompt.type === "text" ? prompt.text : "").toContain(`Target project: ${proj}`);
+    expect(t.projectPath).toBe(proj);
+    await expect(ctx.orch.handleUserMessage({ agentId: m.id, text: "x", projectPath: "C:/nope" })).rejects.toThrow(/not a known project/);
+  });
 });
