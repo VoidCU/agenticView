@@ -5,7 +5,7 @@ export const ProjectSettingsSchema = z.object({
     defaultModel: z.string().nullable().default(null),
     maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
 });
-const ProviderConfigSchema = z.object({ apiKey: z.string().optional(), model: z.string().optional() }).default({});
+const ProviderConfigSchema = z.object({ apiKey: z.string().optional(), model: z.string().optional() }).prefault({});
 export const KnownProjectSchema = z.object({ path: z.string(), name: z.string(), lastOpened: z.string() });
 export const GlobalConfigSchema = z.object({
     defaultProvider: ProviderSchema.default("claude"),
@@ -13,7 +13,7 @@ export const GlobalConfigSchema = z.object({
     maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
     providers: z
         .object({ claude: ProviderConfigSchema, codex: ProviderConfigSchema, gemini: ProviderConfigSchema })
-        .default({}),
+        .prefault({}),
     knownProjects: z.array(KnownProjectSchema).default([]),
 });
 //# sourceMappingURL=settings.js.map

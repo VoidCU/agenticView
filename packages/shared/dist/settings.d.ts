@@ -1,152 +1,46 @@
 import { z } from "zod";
 export declare const ProjectSettingsSchema: z.ZodObject<{
-    defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodEnum<["claude", "codex", "gemini"]>>>;
+    defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        gemini: "gemini";
+    }>>>;
     defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     maxConcurrentRuns: z.ZodDefault<z.ZodNumber>;
-}, "strip", z.ZodTypeAny, {
-    defaultProvider: "claude" | "codex" | "gemini" | null;
-    defaultModel: string | null;
-    maxConcurrentRuns: number;
-}, {
-    defaultProvider?: "claude" | "codex" | "gemini" | null | undefined;
-    defaultModel?: string | null | undefined;
-    maxConcurrentRuns?: number | undefined;
-}>;
+}, z.core.$strip>;
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 export declare const KnownProjectSchema: z.ZodObject<{
     path: z.ZodString;
     name: z.ZodString;
     lastOpened: z.ZodString;
-}, "strip", z.ZodTypeAny, {
-    path: string;
-    name: string;
-    lastOpened: string;
-}, {
-    path: string;
-    name: string;
-    lastOpened: string;
-}>;
+}, z.core.$strip>;
 export type KnownProject = z.infer<typeof KnownProjectSchema>;
 export declare const GlobalConfigSchema: z.ZodObject<{
-    defaultProvider: z.ZodDefault<z.ZodEnum<["claude", "codex", "gemini"]>>;
+    defaultProvider: z.ZodDefault<z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        gemini: "gemini";
+    }>>;
     defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     maxConcurrentRuns: z.ZodDefault<z.ZodNumber>;
-    providers: z.ZodDefault<z.ZodObject<{
-        claude: z.ZodDefault<z.ZodObject<{
+    providers: z.ZodPrefault<z.ZodObject<{
+        claude: z.ZodPrefault<z.ZodObject<{
             apiKey: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
-        }, "strip", z.ZodTypeAny, {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        }, {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        }>>;
-        codex: z.ZodDefault<z.ZodObject<{
+        }, z.core.$strip>>;
+        codex: z.ZodPrefault<z.ZodObject<{
             apiKey: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
-        }, "strip", z.ZodTypeAny, {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        }, {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        }>>;
-        gemini: z.ZodDefault<z.ZodObject<{
+        }, z.core.$strip>>;
+        gemini: z.ZodPrefault<z.ZodObject<{
             apiKey: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
-        }, "strip", z.ZodTypeAny, {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        }, {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        }>>;
-    }, "strip", z.ZodTypeAny, {
-        claude: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        };
-        codex: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        };
-        gemini: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        };
-    }, {
-        claude?: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        } | undefined;
-        codex?: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        } | undefined;
-        gemini?: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        } | undefined;
-    }>>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
     knownProjects: z.ZodDefault<z.ZodArray<z.ZodObject<{
         path: z.ZodString;
         name: z.ZodString;
         lastOpened: z.ZodString;
-    }, "strip", z.ZodTypeAny, {
-        path: string;
-        name: string;
-        lastOpened: string;
-    }, {
-        path: string;
-        name: string;
-        lastOpened: string;
-    }>, "many">>;
-}, "strip", z.ZodTypeAny, {
-    defaultProvider: "claude" | "codex" | "gemini";
-    defaultModel: string | null;
-    maxConcurrentRuns: number;
-    providers: {
-        claude: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        };
-        codex: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        };
-        gemini: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        };
-    };
-    knownProjects: {
-        path: string;
-        name: string;
-        lastOpened: string;
-    }[];
-}, {
-    defaultProvider?: "claude" | "codex" | "gemini" | undefined;
-    defaultModel?: string | null | undefined;
-    maxConcurrentRuns?: number | undefined;
-    providers?: {
-        claude?: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        } | undefined;
-        codex?: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        } | undefined;
-        gemini?: {
-            model?: string | undefined;
-            apiKey?: string | undefined;
-        } | undefined;
-    } | undefined;
-    knownProjects?: {
-        path: string;
-        name: string;
-        lastOpened: string;
-    }[] | undefined;
-}>;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
 export type GlobalConfig = z.infer<typeof GlobalConfigSchema>;
