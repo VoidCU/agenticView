@@ -1,0 +1,21 @@
+{
+  "name": "agenticview",
+  "owner": {
+    "name": "AgenticView contributors"
+  },
+  "metadata": {
+    "description": "AgenticView plugin marketplace"
+  },
+  "plugins": [
+    {
+      "name": "agenticview",
+      "description": "Gamified 3D office for your coding agents (Claude, Codex, Gemini) with a delegating Manager.",
+      "version": "0.1.0",
+      "source": {
+        "source": "github",
+        "repo": "agenticview/agenticview"
+      },
+      "tags": ["agents", "3d", "visualization"]
+    }
+  ]
+}

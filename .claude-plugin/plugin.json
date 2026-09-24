@@ -1,0 +1,13 @@
+{
+  "name": "agenticview",
+  "displayName": "AgenticView",
+  "description": "Gamified 3D office for your coding agents: Claude, Codex, or Gemini workers in project or global scope, with a Manager that maps the roster and delegates tasks.",
+  "version": "0.1.0",
+  "author": {
+    "name": "AgenticView contributors"
+  },
+  "license": "MIT",
+  "keywords": ["agents", "3d", "visualization", "manager", "codex", "gemini"],
+  "skills": "skills/",
+  "hooks": "hooks/hooks.json"
+}
