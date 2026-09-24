@@ -11,6 +11,11 @@ export interface GeminiRuntimeOptions {
     which?: Which;
 }
 export declare const GEMINI_MISSING_REASON = "Install the Gemini CLI (npm i -g @google/gemini-cli) and sign in, or set GEMINI_API_KEY.";
+/**
+ * npm installs CLIs on Windows as `.cmd` shims that Node cannot spawn directly. Resolve the shim's
+ * target script so we can run it with `process.execPath`. Returns undefined when the file is not a shim.
+ */
+export declare function resolveNodeShim(bin: string): Promise<string | undefined>;
 /** Pure mapping from one Gemini stream-json line to RunEvents. Returns `result` when the line is the final result. */
 export declare function mapGeminiLine(line: string): {
     events: RunEvent[];

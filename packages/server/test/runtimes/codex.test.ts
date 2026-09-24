@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { defaultAgent } from "@agenticview/shared";
-import { CodexRuntime, type CodexSdk } from "../../src/runtimes/codex.js";
+import { CodexRuntime, sandboxFor, type CodexSdk } from "../../src/runtimes/codex.js";
 import type { RunRequest } from "../../src/runtimes/types.js";
 
 const agent = defaultAgent({ name: "C", role: "worker", scope: "project", specialty: "", provider: "codex" });
@@ -74,7 +74,7 @@ describe("CodexRuntime", () => {
     const res = await rt.run(req({ model: "gpt-5-codex" }), (e) => events.push(e.type), new AbortController().signal);
     expect(events).toEqual(["status", "text", "file_changed", "file_changed", "tool_start", "tool_end", "tool_start", "tool_end"]);
     expect(res).toMatchObject({ stopReason: "done", sessionId: "th1", text: "Hi", usage: { inputTokens: 3, outputTokens: 4 } });
-    expect(cap.threadOpts).toMatchObject({ workingDirectory: "C:/p", skipGitRepoCheck: true, model: "gpt-5-codex", sandboxMode: "workspace-write" });
+    expect(cap.threadOpts).toMatchObject({ workingDirectory: "C:/p", skipGitRepoCheck: true, model: "gpt-5-codex", sandboxMode: process.platform === "win32" ? "danger-full-access" : "workspace-write" });
     const cfg = cap.ctor!.config as Record<string, any>;
     expect(cfg.mcp_servers.agenticview).toMatchObject({ command: process.execPath, args: ["C:/bridge.js"], env: { AGENTICVIEW_BRIDGE_URL: "http://127.0.0.1:1", AGENTICVIEW_RUN_ID: "r_1", AGENTICVIEW_BRIDGE_TOKEN: "t0k" } });
     expect(cfg.approval_policy).toBe("never");
@@ -92,7 +92,7 @@ describe("CodexRuntime", () => {
     expect(cap.input).toEqual([{ type: "text", text: "You are C.\n\nlook" }, { type: "local_image", path: "C:/s/a.png" }]);
     const cap2: Capture = {};
     await new CodexRuntime({ sdk: fakeSdk(cap2), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "codex" }).run(req({ permissionMode: "ask" }), () => {}, new AbortController().signal);
-    expect(cap2.threadOpts!.sandboxMode).toBe("workspace-write");
+    expect(cap2.threadOpts!.sandboxMode).toBe("read-only");
   });
 
   it("reports turn failures, errors, and thrown SDK errors", async () => {
@@ -120,5 +120,28 @@ describe("CodexRuntime", () => {
     expect(s).toMatchObject({ provider: "codex", ok: false });
     expect(s.reason).toMatch(/Codex CLI/);
     expect((await new CodexRuntime({ sdk: fakeSdk({}), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "/bin/codex" }).check()).ok).toBe(true);
+  });
+});
+
+describe("CodexRuntime edge cases", () => {
+  it("does not report file changes when the patch failed", async () => {
+    const evs = [
+      { type: "thread.started", thread_id: "t9" },
+      { type: "item.completed", item: { id: "f", type: "file_change", status: "failed", changes: [{ path: "a.ts", kind: "add" }] } },
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ];
+    const seen: unknown[] = [];
+    await new CodexRuntime({ sdk: fakeSdk({}, evs), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "codex" }).run(req(), (e) => seen.push(e), new AbortController().signal);
+    expect(seen).toEqual([{ type: "status", text: "patch failed: a.ts" }]);
+  });
+
+  it("maps auto-edit per platform and never uses the sandbox for auto", () => {
+    expect(sandboxFor("auto", "win32")).toBe("danger-full-access");
+    expect(sandboxFor("auto", "linux")).toBe("danger-full-access");
+    expect(sandboxFor("auto-edit", "win32")).toBe("danger-full-access");
+    expect(sandboxFor("auto-edit", "linux")).toBe("workspace-write");
+    expect(sandboxFor("auto-edit", "darwin")).toBe("workspace-write");
+    expect(sandboxFor("ask", "win32")).toBe("read-only");
+    expect(sandboxFor("ask", "linux")).toBe("read-only");
   });
 });

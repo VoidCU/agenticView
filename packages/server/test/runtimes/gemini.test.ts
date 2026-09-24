@@ -115,3 +115,53 @@ describe("GeminiRuntime", () => {
     expect((await rt().check()).ok).toBe(true);
   });
 });
+
+describe("GeminiRuntime on Windows-style installs", () => {
+  it("spawns node directly on the shim's target script when the binary is an npm .cmd shim", async () => {
+    const shimDir = join(cwd, "npm");
+    const entry = join(shimDir, "node_modules", "@google", "gemini-cli", "dist", "index.js");
+    await mkdir(join(shimDir, "node_modules", "@google", "gemini-cli", "dist"), { recursive: true });
+    await writeFile(entry, "");
+    const shimBody = [
+      "@ECHO off",
+      "GOTO start",
+      ":find_dp0",
+      "SET dp0=%~dp0",
+      "EXIT /b",
+      ":start",
+      "SETLOCAL",
+      "CALL :find_dp0",
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%dp0%\\node.exe"  "%dp0%\\node_modules\\@google\\gemini-cli\\dist\\index.js" %*',
+      "",
+    ].join("\r\n");
+    await writeFile(join(shimDir, "gemini.cmd"), shimBody);
+    const calls: { cmd: string; args: string[] }[] = [];
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      calls.push({ cmd, args });
+      return nodeSpawn(process.execPath, [fixture, ...args.slice(1)], opts as never);
+    }) as never;
+    const runtime = new GeminiRuntime({ bridgeEntry: "x", bridgeUrl: () => "u", spawn, which: async () => join(shimDir, "gemini.cmd") });
+    const res = await runtime.run(req(), () => {}, new AbortController().signal);
+    expect(res.stopReason).toBe("done");
+    expect(calls[0]!.cmd).toBe(process.execPath);
+    expect(calls[0]!.args[0]).toBe(entry);
+    expect(calls[0]!.args).toContain("-p");
+  });
+
+  it("sends very long prompts on stdin instead of the command line", async () => {
+    let seen: { argv: string[]; stdinLength?: number } | undefined;
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      const child = nodeSpawn(process.execPath, [fixture, ...args], { ...opts, env: { ...(opts.env as Record<string, string>), FAKE_GEMINI_MODE: "stdin" } } as never);
+      let buf = "";
+      child.stderr.on("data", (d) => { buf += String(d); const line = buf.split("\n").find((l) => l.includes("stdinLength")); if (line) { try { seen = JSON.parse(line); } catch { /* wait */ } } });
+      return child;
+    }) as never;
+    const runtime = new GeminiRuntime({ bridgeEntry: "x", bridgeUrl: () => "u", spawn, which: async () => "gemini" });
+    const big = "x".repeat(40_000);
+    const res = await runtime.run(req({ prompt: [{ type: "text", text: big }] }), () => {}, new AbortController().signal);
+    expect(res.stopReason).toBe("done");
+    expect(seen!.stdinLength).toBeGreaterThanOrEqual(40_000);
+    const p = seen!.argv[seen!.argv.indexOf("-p") + 1]!;
+    expect(p.length).toBeLessThan(200);
+  });
+});

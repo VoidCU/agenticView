@@ -1,11 +1,32 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { mkdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { which as defaultWhich } from "./which.js";
 export const GEMINI_MISSING_REASON = "Install the Gemini CLI (npm i -g @google/gemini-cli) and sign in, or set GEMINI_API_KEY.";
 const APPROVAL = { auto: "yolo", "auto-edit": "auto_edit", ask: "auto_edit" };
 const WRITE_TOOLS = new Set(["write_file", "replace", "edit", "edit_file"]);
+/** Prompts longer than this go on stdin; Windows limits a command line to 32 K characters. */
+const MAX_ARG_PROMPT = 30_000;
+const STDIN_MARKER = "The full task is provided on standard input above. Follow it.";
+/**
+ * npm installs CLIs on Windows as `.cmd` shims that Node cannot spawn directly. Resolve the shim's
+ * target script so we can run it with `process.execPath`. Returns undefined when the file is not a shim.
+ */
+export async function resolveNodeShim(bin) {
+    if (!/\.(cmd|bat)$/i.test(bin))
+        return undefined;
+    try {
+        const body = await readFile(bin, "utf8");
+        const m = body.match(/"%dp0%\\([^"]+?\.(?:m?js|cjs))"/i);
+        if (!m)
+            return undefined;
+        return join(dirname(bin), m[1]);
+    }
+    catch {
+        return undefined;
+    }
+}
 function contentText(content) {
     if (typeof content === "string")
         return content;
@@ -138,7 +159,8 @@ export class GeminiRuntime {
             const textParts = req.prompt.filter((p) => p.type === "text").map((p) => (p.type === "text" ? p.text : ""));
             const images = req.prompt.filter((p) => p.type === "image").map((p) => (p.type === "image" ? p.path : ""));
             const promptText = [req.systemPrompt, ...textParts, images.length ? `Attached images:\n${images.map((i) => `@${i}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
-            const args = ["-p", promptText, "--output-format", "stream-json", "--approval-mode", APPROVAL[req.permissionMode]];
+            const viaStdin = promptText.length > MAX_ARG_PROMPT;
+            const args = ["-p", viaStdin ? STDIN_MARKER : promptText, "--output-format", "stream-json", "--approval-mode", APPROVAL[req.permissionMode]];
             if (req.model)
                 args.push("-m", req.model);
             if (req.sessionId)
@@ -151,7 +173,14 @@ export class GeminiRuntime {
                     env[k] = v;
             if (this.opts.apiKey && !env.GEMINI_API_KEY)
                 env.GEMINI_API_KEY = this.opts.apiKey;
-            child = this.spawn(this.opts.bin ?? "gemini", args, { cwd: req.cwd, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+            const binName = this.opts.bin ?? "gemini";
+            const resolved = (await this.which(binName)) ?? binName;
+            const shimTarget = await resolveNodeShim(resolved);
+            const command = shimTarget ? process.execPath : resolved;
+            const finalArgs = shimTarget ? [shimTarget, ...args] : args;
+            child = this.spawn(command, finalArgs, { cwd: req.cwd, env, stdio: [viaStdin ? "pipe" : "ignore", "pipe", "pipe"], windowsHide: true });
+            if (viaStdin)
+                child.stdin?.end(promptText);
             signal.addEventListener("abort", onAbort, { once: true });
             const stderr = [];
             child.stderr?.on("data", (d) => {

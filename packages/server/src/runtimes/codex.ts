@@ -17,7 +17,15 @@ export interface CodexRuntimeOptions {
 
 export const CODEX_MISSING_REASON = "Install the Codex CLI (npm i -g @openai/codex) and sign in with `codex login` or set CODEX_API_KEY.";
 
-const SANDBOX: Record<PermissionMode, SandboxMode> = { auto: "danger-full-access", "auto-edit": "workspace-write", ask: "workspace-write" };
+/**
+ * Permission mode → Codex sandbox. `ask` cannot prompt through the SDK, so it is read-only (the most
+ * restrictive setting). Codex's Windows sandbox cannot write files, so `auto-edit` needs full access there.
+ */
+export function sandboxFor(mode: PermissionMode, platform: NodeJS.Platform = process.platform): SandboxMode {
+  if (mode === "ask") return "read-only";
+  if (mode === "auto") return "danger-full-access";
+  return platform === "win32" ? "danger-full-access" : "workspace-write";
+}
 
 function textOf(blocks: unknown): string {
   if (!Array.isArray(blocks)) return "";
@@ -53,6 +61,10 @@ export function mapCodexEvent(ev: ThreadEvent, started: Set<string>): RunEvent[]
       break;
     case "file_change":
       if (ev.type === "item.completed") {
+        if (item.status === "failed") {
+          out.push({ type: "status", text: `patch failed: ${(item.changes ?? []).map((c) => c.path).join(", ")}` });
+          break;
+        }
         for (const c of item.changes ?? []) {
           out.push({ type: "file_changed", path: c.path, kind: c.kind === "add" ? "create" : c.kind === "delete" ? "delete" : "modify" });
         }
@@ -119,7 +131,7 @@ export class CodexRuntime implements Runtime {
         };
       }
       const codex = new sdk.Codex({ env, config: config as never });
-      const threadOpts = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: SANDBOX[req.permissionMode], ...(req.model ? { model: req.model } : {}) };
+      const threadOpts = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: sandboxFor(req.permissionMode), ...(req.model ? { model: req.model } : {}) };
       const thread = req.sessionId ? codex.resumeThread(req.sessionId, threadOpts) : codex.startThread(threadOpts);
 
       const input: UserInput[] = [];

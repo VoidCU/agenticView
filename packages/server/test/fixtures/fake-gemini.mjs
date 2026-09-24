@@ -1,7 +1,6 @@
 // Fake `gemini` CLI used by gemini.test.ts. Prints its argv to stderr as JSON, then streams JSONL on stdout.
-// Env FAKE_GEMINI_MODE: "ok" (default) | "fail" | "hang" | "maxturns"
+// Env FAKE_GEMINI_MODE: "ok" (default) | "fail" | "hang" | "maxturns" | "stdin"
 const mode = process.env.FAKE_GEMINI_MODE ?? "ok";
-console.error(JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }));
 
 const lines = [
   { type: "init", session_id: "g1", model: "gemini-2.5-pro" },
@@ -15,21 +14,35 @@ const lines = [
 
 const emit = (o) => process.stdout.write((typeof o === "string" ? o : JSON.stringify(o)) + "\n");
 
-if (mode === "fail") {
-  emit(lines[0]);
-  console.error("boom: something broke");
-  process.exit(1);
+async function readStdin() {
+  if (process.stdin.isTTY) return "";
+  let data = "";
+  process.stdin.setEncoding("utf8");
+  for await (const chunk of process.stdin) data += chunk;
+  return data;
 }
-if (mode === "maxturns") {
-  emit(lines[0]);
-  emit({ type: "result", status: "error", error: "turn limit" });
-  process.exit(53);
-}
-if (mode === "hang") {
-  emit(lines[0]);
-  setInterval(() => undefined, 1000);
-} else {
+
+const main = async () => {
+  const stdinText = mode === "stdin" ? await readStdin() : "";
+  console.error(JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), ...(mode === "stdin" ? { stdinLength: stdinText.length } : {}) }));
+
+  if (mode === "fail") {
+    emit(lines[0]);
+    console.error("boom: something broke");
+    process.exit(1);
+  }
+  if (mode === "maxturns") {
+    emit(lines[0]);
+    emit({ type: "result", status: "error", error: "turn limit" });
+    process.exit(53);
+  }
+  if (mode === "hang") {
+    emit(lines[0]);
+    setInterval(() => undefined, 1000);
+    return;
+  }
   for (const l of lines) emit(l);
   emit({ type: "result", status: "success", stats: { total_tokens: 12 } });
   process.exit(0);
-}
+};
+main();
