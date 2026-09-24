@@ -13,6 +13,7 @@ import { apiRoutes, staticRoutes } from "./api/http.js";
 import { attachWs } from "./api/ws.js";
 import type { Agent, Task } from "@agenticview/shared";
 import type { Orchestrator } from "./manager/orchestrator.js";
+import { workerTools } from "./manager/workerTools.js";
 
 export interface ServerOptions {
   world: WorldRef;
@@ -44,7 +45,8 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
   const bridgeUrl = () => `http://${HOST}:${port}`;
 
   const runtimes = opts.runtimes ?? (await (await import("./runtimes/index.js")).createRuntimes({ bridgeUrl }));
-  const world = await createWorld(opts.world, { runtimes, bus, toolRegistry, bridgeUrl, workerTools: opts.workerTools });
+  const workerToolsFor = opts.workerTools ?? ((agent: Agent, task: Task) => workerTools({ projectPath: task.projectPath || process.cwd(), agent }));
+  const world = await createWorld(opts.world, { runtimes, bus, toolRegistry, bridgeUrl, workerTools: workerToolsFor });
 
   const app = new Hono();
   app.get("/healthz", (c) => c.json({ ok: true, world: opts.world.kind }));

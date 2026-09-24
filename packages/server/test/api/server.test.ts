@@ -169,3 +169,22 @@ describe("server", () => {
     await rm(dir, { recursive: true, force: true });
   });
 });
+
+describe("worker bridge tools", () => {
+  it("gives screenshot-enabled workers a take_screenshot tool by default", async () => {
+    let seen: string[] = [];
+    const fake = new FakeRuntime(async function* (req) {
+      seen = req.bridgeTools.map((t) => t.name);
+      yield { type: "text", text: "ok" };
+    });
+    const { s } = await boot({ runtimes: new Map([["claude", fake]]) });
+    const a = await open(s.url, "tok");
+    await until(a.msgs, (m) => m.type === "snapshot");
+    a.ws.send(JSON.stringify({ type: "agent.create", agent: { name: "Eye", specialty: "", tools: { edit: true, shell: false, web: false, screenshot: true } } }));
+    const created = await until(a.msgs, (m) => m.type === "agent.updated" && m.agent.name === "Eye");
+    a.ws.send(JSON.stringify({ type: "chat.send", agentId: created.agent.id, text: "look" }));
+    await until(a.msgs, (m) => m.type === "task.updated" && m.task.status === "done" && m.task.assigneeId === created.agent.id);
+    expect(seen).toEqual(["take_screenshot"]);
+    a.ws.close();
+  });
+});

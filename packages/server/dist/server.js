@@ -7,6 +7,7 @@ import { createWorld } from "./world.js";
 import { requireToken } from "./api/auth.js";
 import { apiRoutes, staticRoutes } from "./api/http.js";
 import { attachWs } from "./api/ws.js";
+import { workerTools } from "./manager/workerTools.js";
 const HOST = "127.0.0.1";
 /** Boot one world (project or hub) behind a localhost, token-guarded HTTP + WebSocket server. */
 export async function createServer(opts) {
@@ -15,7 +16,8 @@ export async function createServer(opts) {
     let port = 0;
     const bridgeUrl = () => `http://${HOST}:${port}`;
     const runtimes = opts.runtimes ?? (await (await import("./runtimes/index.js")).createRuntimes({ bridgeUrl }));
-    const world = await createWorld(opts.world, { runtimes, bus, toolRegistry, bridgeUrl, workerTools: opts.workerTools });
+    const workerToolsFor = opts.workerTools ?? ((agent, task) => workerTools({ projectPath: task.projectPath || process.cwd(), agent }));
+    const world = await createWorld(opts.world, { runtimes, bus, toolRegistry, bridgeUrl, workerTools: workerToolsFor });
     const app = new Hono();
     app.get("/healthz", (c) => c.json({ ok: true, world: opts.world.kind }));
     app.route("/", bridgeRoutes(toolRegistry));
