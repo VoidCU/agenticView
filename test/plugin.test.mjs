@@ -20,13 +20,12 @@ test("plugin.json is valid and points at skills and hooks that exist", () => {
   assert.ok(existsSync(join(root, "skills", "agenticview-hub", "SKILL.md")));
 });
 
-test("marketplace.json lists the plugin with a github source", () => {
+test("marketplace.json lists the plugin as this repository itself (no second clone, no SSH)", () => {
   const m = readJson(".claude-plugin/marketplace.json");
   assert.equal(m.name, "agenticview");
   assert.equal(m.plugins.length, 1);
   assert.equal(m.plugins[0].name, "agenticview");
-  assert.equal(m.plugins[0].source.source, "github");
-  assert.match(m.plugins[0].source.repo, /^[\w.-]+\/agenticview$/i);
+  assert.equal(m.plugins[0].source, "./");
 });
 
 test("skills have frontmatter and launch through the recorded plugin root", () => {
