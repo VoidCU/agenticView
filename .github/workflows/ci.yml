@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Bundles are committed and current
+        run: git diff --quiet -- packages/server/dist packages/web/dist
+      - name: End-to-end smoke (web)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e

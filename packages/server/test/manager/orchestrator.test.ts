@@ -41,6 +41,16 @@ async function setup(script: FakeScript, opts: { runtimes?: Map<Provider, Runtim
   return { world, orch: world.orchestrator, reg: world.registry, tasks: world.tasks, msgs, fake, bus };
 }
 
+async function waitFor<T>(fn: () => Promise<T | undefined | false> | T | undefined | false, ms = 8000): Promise<T> {
+  const t0 = Date.now();
+  for (;;) {
+    const v = await fn();
+    if (v) return v as T;
+    if (Date.now() - t0 > ms) throw new Error("waitFor timed out");
+    await new Promise((r) => setTimeout(r, 15));
+  }
+}
+
 const deferred = <T,>() => {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((r) => (resolve = r));
@@ -127,8 +137,10 @@ describe("Orchestrator", () => {
     await ctx.reg.create({ name: "Nova", specialty: "" });
     const m = await ctx.reg.ensureManager();
     const t = await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" });
-    await new Promise((r) => setTimeout(r, 150));
-    const statuses = (await ctx.tasks.list()).filter((x) => x.kind === "work").map((x) => x.status).sort();
+    const statuses = await waitFor(async () => {
+      const s = (await ctx.tasks.list()).filter((x) => x.kind === "work").map((x) => x.status).sort();
+      return s.length === 2 && s.includes("running") ? s : undefined;
+    });
     expect(statuses).toEqual(["assigned", "running"]);
     expect(ctx.orch.running()).toBe(1);
     gate.resolve();
@@ -152,8 +164,7 @@ describe("Orchestrator", () => {
     await ctx.reg.create({ name: "Nova", specialty: "" });
     const m = await ctx.reg.ensureManager();
     const t = await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" });
-    await new Promise((r) => setTimeout(r, 100));
-    const child = (await ctx.tasks.list()).find((x) => x.kind === "work")!;
+    const child = await waitFor(async () => (await ctx.tasks.list()).find((x) => x.kind === "work" && x.status === "running"));
     expect(child.status).toBe("running");
     await ctx.orch.cancel(child.id);
     const final = await ctx.orch.awaitTask(t.id);
@@ -189,8 +200,7 @@ describe("Orchestrator", () => {
     });
     const w = await ctx.reg.create({ name: "Nova", specialty: "", permissionMode: "ask" });
     const t = await ctx.orch.handleUserMessage({ agentId: w.id, text: "do" });
-    await new Promise((r) => setTimeout(r, 50));
-    const preq = ctx.msgs.find((x) => x.type === "permission.request");
+    const preq = await waitFor(() => ctx.msgs.find((x) => x.type === "permission.request"));
     expect(preq).toMatchObject({ type: "permission.request", id: "p1", agentId: w.id, taskId: t.id, tool: "Bash" });
     ctx.orch.respondPermission("p1", true);
     expect((await ctx.orch.awaitTask(t.id)).result).toBe("true");
@@ -198,8 +208,7 @@ describe("Orchestrator", () => {
 
     const m = await ctx.reg.ensureManager();
     const r = await ctx.orch.handleUserMessage({ agentId: m.id, text: "theme?" });
-    await new Promise((r) => setTimeout(r, 50));
-    const q = ctx.msgs.find((x) => x.type === "question.request");
+    const q = await waitFor(() => ctx.msgs.find((x) => x.type === "question.request"));
     expect(q).toMatchObject({ type: "question.request", agentId: m.id, taskId: r.id, question: "Which colour?" });
     expect((await ctx.tasks.get(r.id))!.status).toBe("waiting");
     ctx.orch.respondQuestion((q as { id: string }).id, "blue");
@@ -286,8 +295,7 @@ describe("Orchestrator", () => {
     const first = await setup(async function* () { await new Promise(() => {}); });
     const w = await first.reg.create({ name: "N", specialty: "" });
     const t = await first.orch.handleUserMessage({ agentId: w.id, text: "hang" });
-    await new Promise((r) => setTimeout(r, 50));
-    expect((await first.tasks.get(t.id))!.status).toBe("running");
+    await waitFor(async () => (await first.tasks.get(t.id))!.status === "running");
     const second = await setup(async function* () { yield { type: "text", text: "x" }; });
     expect((await second.tasks.get(t.id))).toMatchObject({ status: "failed", error: "interrupted" });
     const info = await second.world.info();

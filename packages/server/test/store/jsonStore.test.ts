@@ -62,3 +62,28 @@ describe("paths", () => {
     expect(gi).toBe("events.log\nsessions/\nuploads/\n");
   });
 });
+
+describe("writeJsonFile under concurrent readers", () => {
+  it("still lands the write when the target is briefly held open (Windows EPERM on rename)", async () => {
+    const { open } = await import("node:fs/promises");
+    const file = join(dir, "held.json");
+    await writeJsonFile(file, { id: "a", n: 1 });
+    const handle = await open(file, "r");
+    setTimeout(() => void handle.close(), 60);
+    await writeJsonFile(file, { id: "a", n: 2 });
+    expect(await readJsonFile(file, S, { id: "x", n: 0 })).toEqual({ id: "a", n: 2 });
+  });
+
+  it("survives 200 interleaved reads and writes of the same record", async () => {
+    const s = new JsonStore(join(dir, "busy"), S);
+    await s.write("k", { id: "k", n: 0 });
+    const ops: Promise<unknown>[] = [];
+    for (let i = 1; i <= 100; i++) {
+      ops.push(s.write("k", { id: "k", n: i }));
+      ops.push(s.read("k"));
+      ops.push(s.list());
+    }
+    await Promise.all(ops);
+    expect((await s.read("k"))!.n).toBe(100);
+  });
+});

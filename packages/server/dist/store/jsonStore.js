@@ -1,22 +1,61 @@
 import { mkdir, readFile, writeFile, rename, readdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
-function isENOENT(e) {
-    return e?.code === "ENOENT";
+function code(e) {
+    return e?.code;
 }
-/** Atomic JSON write: write to a temp file in the same directory, then rename over the target. */
-export async function writeJsonFile(file, value) {
-    await mkdir(dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
-    try {
-        await writeFile(tmp, JSON.stringify(value, null, 2), "utf8");
-        await rename(tmp, file);
+function isENOENT(e) {
+    return code(e) === "ENOENT";
+}
+/** Windows reports these when a rename target is momentarily held open by a reader. */
+const TRANSIENT = new Set(["EPERM", "EBUSY", "EACCES"]);
+const MAX_ATTEMPTS = 30;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function renameWithRetry(tmp, file) {
+    for (let attempt = 0;; attempt++) {
+        try {
+            await rename(tmp, file);
+            return;
+        }
+        catch (e) {
+            if (!TRANSIENT.has(code(e) ?? "") || attempt >= MAX_ATTEMPTS - 1)
+                throw e;
+            await sleep(Math.min(5 * 2 ** Math.min(attempt, 5), 200));
+        }
     }
-    catch (e) {
-        await unlink(tmp).catch(() => undefined);
-        throw e;
-    }
+}
+/** One write chain per path: later writes wait for earlier ones, so "last write wins" holds. */
+const inflight = new Map();
+/** Wait for any in-flight write to `file`, so a read never lands inside the rename window. */
+async function settled(file) {
+    const p = inflight.get(file);
+    if (p)
+        await p;
+}
+/** Atomic JSON write: temp file in the same directory, then rename over the target. Serialized per path. */
+export function writeJsonFile(file, value) {
+    const prev = inflight.get(file) ?? Promise.resolve();
+    const work = prev.then(async () => {
+        await mkdir(dirname(file), { recursive: true });
+        const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+        try {
+            await writeFile(tmp, JSON.stringify(value, null, 2), "utf8");
+            await renameWithRetry(tmp, file);
+        }
+        catch (e) {
+            await unlink(tmp).catch(() => undefined);
+            throw e;
+        }
+    });
+    const chain = work.then(() => undefined, () => undefined);
+    inflight.set(file, chain);
+    void chain.then(() => {
+        if (inflight.get(file) === chain)
+            inflight.delete(file);
+    });
+    return work;
 }
 export async function readJsonFile(file, schema, fallback) {
+    await settled(file);
     try {
         return schema.parse(JSON.parse(await readFile(file, "utf8")));
     }
@@ -38,8 +77,10 @@ export class JsonStore {
         return join(this.dir, `${id}.json`);
     }
     async read(id) {
+        const file = this.file(id);
+        await settled(file);
         try {
-            return this.schema.parse(JSON.parse(await readFile(this.file(id), "utf8")));
+            return this.schema.parse(JSON.parse(await readFile(file, "utf8")));
         }
         catch (e) {
             if (isENOENT(e))
@@ -71,8 +112,10 @@ export class JsonStore {
         return out;
     }
     async delete(id) {
+        const file = this.file(id);
+        await settled(file);
         try {
-            await unlink(this.file(id));
+            await unlink(file);
             return true;
         }
         catch (e) {

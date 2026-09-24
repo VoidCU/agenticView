@@ -1,5 +1,5 @@
 import type { ZodType } from "zod";
-/** Atomic JSON write: write to a temp file in the same directory, then rename over the target. */
+/** Atomic JSON write: temp file in the same directory, then rename over the target. Serialized per path. */
 export declare function writeJsonFile(file: string, value: unknown): Promise<void>;
 export declare function readJsonFile<T>(file: string, schema: ZodType<T>, fallback: T): Promise<T>;
 /** One JSON file per record (`<dir>/<id>.json`), validated with a zod schema on every read and write. */
