@@ -1074,6 +1074,25 @@ h3 {
   letter-spacing: 0.02em;
 }
 
+.file-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.file-chip {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.18);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  color: #bbf7d0;
+  transition: opacity 250ms linear;
+}
+
 .pad-btn {
   pointer-events: auto;
   display: inline-flex;

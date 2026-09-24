@@ -2,7 +2,8 @@ import { Suspense, useMemo } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import type { Agent } from "@agenticview/shared";
-import { useStore, sortedAgents } from "../state/store";
+import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
+import { useEffect, useState } from "react";
 import { layoutFor, nextDeskFor, nextLobbyFor, LOBBY_Z, type Spot } from "./layout";
 import { Robot } from "./Robot";
 import { Beam } from "./Beam";
@@ -45,6 +46,30 @@ function Desk({ spot, color }: { spot: Spot; color: string }) {
         <meshStandardMaterial color="#3a4058" roughness={0.6} />
       </mesh>
     </group>
+  );
+}
+
+/** Chips naming the files an agent touched in the last few seconds, floating above its desk and fading out. */
+function FileChips({ agentId, spot }: { agentId: string; spot: Spot }) {
+  const feed = useStore((s) => s.feed[agentId]);
+  const [chips, setChips] = useState<FileChip[]>([]);
+  useEffect(() => {
+    const update = () => setChips(fileChipsFor(feed ?? []));
+    update();
+    const id = setInterval(update, 250);
+    return () => clearInterval(id);
+  }, [feed]);
+  if (chips.length === 0) return null;
+  return (
+    <Html center position={[spot.x, baseFor(spot) + 1.75, spot.z - 0.9]} distanceFactor={12} zIndexRange={[12, 0]} style={{ pointerEvents: "none" }}>
+      <div className="file-chips">
+        {chips.map((c) => (
+          <span key={c.path} className="file-chip" style={{ opacity: c.opacity }} title={c.path}>
+            ✎ {c.name}
+          </span>
+        ))}
+      </div>
+    </Html>
   );
 }
 
@@ -172,6 +197,7 @@ function Scene({ onCreate }: { onCreate: () => void }) {
           <group key={a.id}>
             {spot.zone !== "podium" && <Desk spot={spot} color={a.appearance.color} />}
             <Robot agent={a} spot={spot} baseY={baseFor(spot)} />
+            {spot.zone !== "podium" && <FileChips agentId={a.id} spot={spot} />}
           </group>
         );
       })}

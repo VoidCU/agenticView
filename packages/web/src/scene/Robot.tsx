@@ -6,6 +6,7 @@ import type { Agent } from "@agenticview/shared";
 import { STATUS_COLORS, useAgentStatus, useStore } from "../state/store";
 import { PermissionActions } from "../hud/PermissionToast";
 import type { Spot } from "./layout";
+import { levelAccents } from "./accents";
 
 interface Props {
   agent: Agent;
@@ -80,6 +81,8 @@ export function Robot({ agent, spot, baseY = 0, bubbleOverride, facing = FACE_CA
   const seed = useMemo(() => agent.id.split("").reduce((n, c) => n + c.charCodeAt(0), 0) % 100, [agent.id]);
   const statusColor = STATUS_COLORS[status];
   const busy = status === "thinking" || status === "editing";
+  const accents = levelAccents(agent.stats.level);
+  const accent = agent.appearance.accent;
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
@@ -128,6 +131,24 @@ export function Robot({ agent, spot, baseY = 0, bubbleOverride, facing = FACE_CA
           <sphereGeometry args={[0.09, 12, 12]} />
           <meshStandardMaterial color={statusColor} emissive={statusColor} emissiveIntensity={0.8} toneMapped={false} />
         </mesh>
+        {accents.secondAntenna && (
+          <group position={[0.22, 1.5, 0]} rotation={[0, 0, -0.45]}>
+            <mesh position={[0, 0.14, 0]}>
+              <cylinderGeometry args={[0.022, 0.022, 0.28, 8]} />
+              <meshStandardMaterial color="#c9ced9" metalness={0.6} roughness={0.35} />
+            </mesh>
+            <mesh position={[0, 0.32, 0]}>
+              <sphereGeometry args={[0.06, 10, 10]} />
+              <meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={0.9} toneMapped={false} />
+            </mesh>
+          </group>
+        )}
+        {accents.crown && (
+          <mesh position={[0, 1.46, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.36, 0.045, 8, 24]} />
+            <meshStandardMaterial color="#ffd166" emissive="#ffd166" emissiveIntensity={0.7} metalness={0.8} roughness={0.25} toneMapped={false} />
+          </mesh>
+        )}
         <mesh position={[0, 0.34, 0]}>
           <cylinderGeometry args={[0.34, 0.42, 0.16, 20]} />
           <meshStandardMaterial color="#232635" roughness={0.6} metalness={0.3} />
@@ -137,6 +158,12 @@ export function Robot({ agent, spot, baseY = 0, bubbleOverride, facing = FACE_CA
         <torusGeometry args={[selected ? 0.86 : 0.78, 0.05, 8, 40]} />
         <meshStandardMaterial color={statusColor} emissive={statusColor} emissiveIntensity={busy || status === "waiting" ? 1.1 : 0.55} toneMapped={false} />
       </mesh>
+      {accents.glowRing && (
+        <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.95, 1.25, 48]} />
+          <meshBasicMaterial color={accent === "#ffffff" ? agent.appearance.color : accent} transparent opacity={0.22} toneMapped={false} />
+        </mesh>
+      )}
       <Html center distanceFactor={12} position={[0, 2.35, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
         {/* Stop DOM events here: fiber listens on the canvas wrapper, so a click on the tag would otherwise count as a "pointer missed" and deselect. */}
         <div

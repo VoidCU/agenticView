@@ -273,6 +273,29 @@ export function useAgentStatus(agentId: string): AgentStatus {
   });
 }
 
+export const FILE_CHIP_MS = 6000;
+export const FILE_CHIP_MAX = 3;
+
+export interface FileChip {
+  name: string;
+  path: string;
+  /** 1 when fresh, fading to 0 at FILE_CHIP_MS. */
+  opacity: number;
+}
+
+/** The last few files an agent touched recently, for the chips floating above its desk. */
+export function fileChipsFor(feed: FeedItem[], now: number = Date.now()): FileChip[] {
+  const chips: FileChip[] = [];
+  for (let i = feed.length - 1; i >= 0 && chips.length < FILE_CHIP_MAX; i--) {
+    const item = feed[i]!;
+    if (!("event" in item) || item.event.type !== "file_changed") continue;
+    const age = now - item.ts;
+    if (age >= FILE_CHIP_MS) break;
+    chips.unshift({ name: basename(item.event.path), path: item.event.path, opacity: 1 - age / FILE_CHIP_MS });
+  }
+  return chips;
+}
+
 export function selectManager(s: Store): Agent | undefined {
   return Object.values(s.agents).find((a) => a.role === "manager");
 }
