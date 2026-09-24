@@ -21,6 +21,8 @@ export interface RunRequest {
     sessionId?: string;
     tools: ToolAllowance;
     bridgeTools: BridgeTool[];
+    /** Per-run token for the HTTP bridge; set by the orchestrator when bridgeTools is non-empty. */
+    bridgeToken?: string;
     permissionMode: PermissionMode;
     model?: string;
     maxTurns?: number;

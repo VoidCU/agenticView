@@ -303,7 +303,7 @@ export class Orchestrator {
             const sessionId = await this.loadSession(agent, key, provider);
             const cwd = task.projectPath || process.cwd();
             const bridgeTools = this.bridgeToolsFor(task, agent);
-            this.deps.toolRegistry.register(runId, bridgeTools);
+            const { token: bridgeToken } = this.deps.toolRegistry.register(runId, bridgeTools);
             const req = {
                 runId,
                 agent,
@@ -313,6 +313,7 @@ export class Orchestrator {
                 sessionId,
                 tools: agent.tools,
                 bridgeTools,
+                bridgeToken,
                 permissionMode: agent.permissionMode,
                 model,
                 onPermission: (p) => this.requestPermission(task.id, agent.id, p),
