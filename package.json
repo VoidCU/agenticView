@@ -1,0 +1,28 @@
+{
+  "name": "agenticview",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gamified 3D office for your coding agents (Claude, Codex, Gemini) as a Claude Code plugin",
+  "workspaces": [
+    "packages/*"
+  ],
+  "bin": {
+    "agenticview": "bin/agenticview.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w packages/server && npm run build -w packages/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b packages/shared packages/server",
+    "release": "npm run build && git diff --quiet -- packages/server/dist packages/web/dist || (echo \"dist out of date: commit rebuilt bundles\" && exit 1)"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

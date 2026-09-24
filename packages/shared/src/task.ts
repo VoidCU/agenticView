@@ -1,0 +1,48 @@
+import { z } from "zod";
+import { ProviderSchema } from "./agent.js";
+
+export const TaskStatusSchema = z.enum(["queued", "assigned", "running", "waiting", "done", "failed", "cancelled"]);
+export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+export const TaskKindSchema = z.enum(["request", "work", "chat"]);
+export type TaskKind = z.infer<typeof TaskKindSchema>;
+
+export const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
+  queued: ["assigned", "cancelled"],
+  assigned: ["running", "cancelled"],
+  running: ["waiting", "done", "failed", "cancelled"],
+  waiting: ["running", "cancelled"],
+  done: [],
+  failed: [],
+  cancelled: [],
+};
+
+export const TERMINAL_STATUSES: readonly TaskStatus[] = ["done", "failed", "cancelled"];
+export function isTerminal(status: TaskStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}
+
+export const TaskLogEntrySchema = z.object({ ts: z.string(), type: z.string(), text: z.string() });
+export type TaskLogEntry = z.infer<typeof TaskLogEntrySchema>;
+
+export const TaskSchema = z.object({
+  id: z.string(),
+  kind: TaskKindSchema,
+  title: z.string(),
+  description: z.string(),
+  status: TaskStatusSchema,
+  createdBy: z.string(),
+  assigneeId: z.string(),
+  parentId: z.string().optional(),
+  projectPath: z.string(),
+  session: z.object({ provider: ProviderSchema, sessionId: z.string() }).optional(),
+  images: z.array(z.string()),
+  result: z.string().optional(),
+  error: z.string().optional(),
+  log: z.array(TaskLogEntrySchema),
+  createdAt: z.string(),
+  startedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+});
+export type Task = z.infer<typeof TaskSchema>;
+
+export const TASK_LOG_CAP = 500;
