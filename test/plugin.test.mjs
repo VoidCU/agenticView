@@ -14,8 +14,10 @@ test("plugin.json is valid and points at skills and hooks that exist", () => {
   assert.equal(plugin.name, "agenticview");
   assert.match(plugin.version, /^\d+\.\d+\.\d+$/);
   assert.ok(plugin.description.length > 20);
-  assert.equal(plugin.skills, "skills/");
-  assert.equal(plugin.hooks, "hooks/hooks.json");
+  // skills/ and hooks/hooks.json are discovered by convention at the plugin root; declaring them is rejected by the validator.
+  assert.equal(plugin.skills, undefined);
+  assert.equal(plugin.hooks, undefined);
+  assert.ok(existsSync(join(root, "hooks", "hooks.json")));
   assert.ok(existsSync(join(root, "skills", "agenticview", "SKILL.md")));
   assert.ok(existsSync(join(root, "skills", "agenticview-hub", "SKILL.md")));
 });

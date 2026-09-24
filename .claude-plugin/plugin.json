@@ -7,7 +7,5 @@
     "name": "AgenticView contributors"
   },
   "license": "MIT",
-  "keywords": ["agents", "3d", "visualization", "manager", "codex", "gemini"],
-  "skills": "skills/",
-  "hooks": "hooks/hooks.json"
+  "keywords": ["agents", "3d", "visualization", "manager", "codex", "gemini"]
 }
