@@ -149,7 +149,7 @@ export class CodexRuntime {
                     failure = ev.message;
                 for (const mapped of mapCodexEvent(ev, started)) {
                     if (mapped.type === "text")
-                        text += mapped.text;
+                        text += (text ? "\n\n" : "") + mapped.text;
                     sink(mapped);
                 }
             }

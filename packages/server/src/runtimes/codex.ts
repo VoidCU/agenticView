@@ -150,7 +150,7 @@ export class CodexRuntime implements Runtime {
         else if (ev.type === "turn.failed") failure = ev.error?.message ?? "turn failed";
         else if (ev.type === "error") failure = ev.message;
         for (const mapped of mapCodexEvent(ev, started)) {
-          if (mapped.type === "text") text += mapped.text;
+          if (mapped.type === "text") text += (text ? "\n\n" : "") + mapped.text;
           sink(mapped);
         }
       }

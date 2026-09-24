@@ -50,7 +50,13 @@ Inside the office:
 
 The settings panel in the office shows each provider's status and the reason when one is unavailable. Creating an agent on an unavailable provider is refused with that reason.
 
-Only Claude supports interactive permission prompts. For Codex and Gemini, the `ask` mode maps to the most restrictive non-interactive setting each CLI offers, and the office says so.
+Only Claude supports interactive permission prompts. For Codex and Gemini, the `ask` mode maps to the most restrictive non-interactive setting each CLI offers, and the office says so:
+
+| Agent permission mode | Claude | Codex | Gemini |
+|---|---|---|---|
+| `ask` | prompts you in the office | `read-only` sandbox | `auto_edit` approval mode |
+| `auto-edit` | accept edits | `workspace-write` sandbox (`danger-full-access` on Windows, where Codex's sandbox cannot write files) | `auto_edit` |
+| `auto` | bypass permissions | `danger-full-access` | `yolo` |
 
 Gemini reads MCP servers from settings files, so while a Gemini worker with custom tools runs, AgenticView temporarily adds an `agenticview` entry to `<project>/.gemini/settings.json` and restores the file afterwards.
 

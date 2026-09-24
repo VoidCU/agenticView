@@ -135,6 +135,17 @@ describe("CodexRuntime edge cases", () => {
     expect(seen).toEqual([{ type: "status", text: "patch failed: a.ts" }]);
   });
 
+  it("separates consecutive agent messages in the result text", async () => {
+    const evs = [
+      { type: "thread.started", thread_id: "t10" },
+      { type: "item.completed", item: { id: "m1", type: "agent_message", text: "I'll do it." } },
+      { type: "item.completed", item: { id: "m2", type: "agent_message", text: "Done." } },
+      { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } },
+    ];
+    const res = await new CodexRuntime({ sdk: fakeSdk({}, evs), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "codex" }).run(req(), () => {}, new AbortController().signal);
+    expect(res.text).toBe("I'll do it.\n\nDone.");
+  });
+
   it("maps auto-edit per platform and never uses the sandbox for auto", () => {
     expect(sandboxFor("auto", "win32")).toBe("danger-full-access");
     expect(sandboxFor("auto", "linux")).toBe("danger-full-access");
