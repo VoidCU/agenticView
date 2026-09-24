@@ -10,6 +10,7 @@
     "sourceMap": true,
     "composite": true,
     "noUncheckedIndexedAccess": true,
+    "newLine": "lf",
     "lib": ["ES2022", "DOM"]
   }
 }

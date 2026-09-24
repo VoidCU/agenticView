@@ -1,0 +1,8 @@
+# Keep every text file LF in the repo and on checkout, on every OS, so the committed
+# build bundles compare byte-for-byte with a fresh `npm run build` in CI.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.woff binary
+*.woff2 binary
+*.ico binary

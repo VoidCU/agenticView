@@ -45,7 +45,8 @@ export async function resolveNodeShim(bin: string): Promise<string | undefined> 
     const body = await readFile(bin, "utf8");
     const m = body.match(/"%dp0%\\([^"]+?\.(?:m?js|cjs))"/i);
     if (!m) return undefined;
-    return join(dirname(bin), m[1]!);
+    // The shim spells its target with backslashes; normalise so this also resolves on POSIX (tests, WSL).
+    return join(dirname(bin), ...m[1]!.split(/[\\/]+/));
   } catch {
     return undefined;
   }
