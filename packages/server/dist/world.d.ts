@@ -32,3 +32,5 @@ export declare function readGlobalConfig(): Promise<GlobalConfig>;
 export declare function rememberProject(projectPath: string): Promise<GlobalConfig>;
 /** Wire persistence, registry, tasks, and the orchestrator for one project or the hub. */
 export declare function createWorld(ref: WorldRef, opts: WorldOptions): Promise<World>;
+/** Wire form of a task: identical minus the (potentially large) log. */
+export declare function toWire(task: Task): Task;

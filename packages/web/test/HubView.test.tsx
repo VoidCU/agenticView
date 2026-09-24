@@ -11,6 +11,8 @@ beforeEach(() => {
   useStore.getState().reset();
   useStore.getState().apply({
     type: "snapshot",
+    permissions: [],
+    questions: [],
     world: {
       kind: "hub",
       name: "Hub",

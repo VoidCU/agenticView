@@ -113,7 +113,16 @@ export const useStore = create<Store>()((set, get) => ({
         for (const a of msg.agents) agents[a.id] = a;
         const tasks: Record<string, Task> = {};
         for (const t of msg.tasks) tasks[t.id] = t;
-        set({ world: msg.world, agents, tasks, providers: msg.providers, settings: msg.settings });
+        set({
+          world: msg.world,
+          agents,
+          tasks,
+          providers: msg.providers,
+          settings: msg.settings,
+          // The server is the source of truth for prompts still waiting on the user (reload / reconnect).
+          permissions: (msg.permissions ?? []).map((p) => ({ id: p.id, agentId: p.agentId, taskId: p.taskId, tool: p.tool, input: p.input })),
+          questions: (msg.questions ?? []).map((q) => ({ id: q.id, agentId: q.agentId, taskId: q.taskId, question: q.question })),
+        });
         return;
       }
       case "agent.updated":

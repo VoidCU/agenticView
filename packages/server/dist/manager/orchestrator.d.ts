@@ -1,4 +1,4 @@
-import { type Agent, type Provider, type ProjectSettings, type Task, type WorldInfo } from "@agenticview/shared";
+import { type Agent, type Provider, type ProjectSettings, type PendingPermissionInfo, type PendingQuestionInfo, type Task, type WorldInfo } from "@agenticview/shared";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
 import type { BridgeTool, Runtime } from "../runtimes/types.js";
@@ -58,7 +58,15 @@ export declare class Orchestrator {
     private pump;
     awaitTask(taskId: string): Promise<Task>;
     private settle;
+    /** Cancel a task; a request also cancels every non-terminal child it spawned. */
     cancel(taskId: string): Promise<void>;
+    /** Prompts currently waiting on the user, for snapshots and reconnecting tabs. */
+    pending(): {
+        permissions: PendingPermissionInfo[];
+        questions: PendingQuestionInfo[];
+    };
+    /** A task that ended (or was cancelled) can no longer be waiting on anyone: deny/close its prompts. */
+    private resolvePendingFor;
     respondPermission(id: string, allow: boolean): void;
     respondQuestion(id: string, answer: string): void;
     private setWaiting;

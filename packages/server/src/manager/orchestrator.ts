@@ -8,6 +8,8 @@ import {
   type PromptPart,
   type Provider,
   type ProjectSettings,
+  type PendingPermissionInfo,
+  type PendingQuestionInfo,
   type RunEvent,
   type Task,
   type WorldInfo,
@@ -61,8 +63,8 @@ export class Orchestrator {
   private readonly active = new Set<string>();
   private readonly queue: string[] = [];
   private readonly waiters = new Map<string, Array<(t: Task) => void>>();
-  private readonly pendingPermissions = new Map<string, (allow: boolean) => void>();
-  private readonly pendingQuestions = new Map<string, (answer: string) => void>();
+  private readonly pendingPermissions = new Map<string, { info: PendingPermissionInfo; resolve: (allow: boolean) => void }>();
+  private readonly pendingQuestions = new Map<string, { info: PendingQuestionInfo; resolve: (answer: string) => void }>();
   private pumping = false;
 
   constructor(private readonly deps: WorldDeps) {}
@@ -179,6 +181,7 @@ export class Orchestrator {
     for (const fn of list ?? []) fn(task);
   }
 
+  /** Cancel a task; a request also cancels every non-terminal child it spawned. */
   async cancel(taskId: string): Promise<void> {
     const cur = await this.deps.tasks.get(taskId);
     if (!cur || isTerminal(cur.status)) return;
@@ -187,24 +190,42 @@ export class Orchestrator {
     this.aborts.get(taskId)?.abort();
     const next = await this.deps.tasks.transition(taskId, "cancelled");
     this.active.delete(taskId);
+    this.resolvePendingFor(taskId);
     this.settle(next);
+    if (cur.kind === "request") {
+      for (const child of await this.deps.tasks.children(taskId)) if (!isTerminal(child.status)) await this.cancel(child.id);
+    }
     void this.pump();
   }
 
+  /** Prompts currently waiting on the user, for snapshots and reconnecting tabs. */
+  pending(): { permissions: PendingPermissionInfo[]; questions: PendingQuestionInfo[] } {
+    return {
+      permissions: [...this.pendingPermissions.values()].map((p) => p.info),
+      questions: [...this.pendingQuestions.values()].map((q) => q.info),
+    };
+  }
+
+  /** A task that ended (or was cancelled) can no longer be waiting on anyone: deny/close its prompts. */
+  private resolvePendingFor(taskId: string): void {
+    for (const [id, p] of this.pendingPermissions) if (p.info.taskId === taskId) this.respondPermission(id, false);
+    for (const [id, q] of this.pendingQuestions) if (q.info.taskId === taskId) this.respondQuestion(id, "");
+  }
+
   respondPermission(id: string, allow: boolean): void {
-    const fn = this.pendingPermissions.get(id);
-    if (!fn) return;
+    const entry = this.pendingPermissions.get(id);
+    if (!entry) return;
     this.pendingPermissions.delete(id);
     this.deps.bus.emit({ type: "permission.resolved", id });
-    fn(allow);
+    entry.resolve(allow);
   }
 
   respondQuestion(id: string, answer: string): void {
-    const fn = this.pendingQuestions.get(id);
-    if (!fn) return;
+    const entry = this.pendingQuestions.get(id);
+    if (!entry) return;
     this.pendingQuestions.delete(id);
     this.deps.bus.emit({ type: "question.resolved", id });
-    fn(answer);
+    entry.resolve(answer);
   }
 
   private async setWaiting(taskId: string, waiting: boolean): Promise<void> {
@@ -220,8 +241,9 @@ export class Orchestrator {
 
   async requestPermission(taskId: string, agentId: string, req: { id: string; tool: string; input: unknown }): Promise<boolean> {
     await this.setWaiting(taskId, true);
-    this.deps.bus.emit({ type: "permission.request", id: req.id, agentId, taskId, tool: req.tool, input: req.input });
-    const allow = await new Promise<boolean>((resolve) => this.pendingPermissions.set(req.id, resolve));
+    const info: PendingPermissionInfo = { id: req.id, agentId, taskId, tool: req.tool, input: req.input };
+    this.deps.bus.emit({ type: "permission.request", ...info });
+    const allow = await new Promise<boolean>((resolve) => this.pendingPermissions.set(req.id, { info, resolve }));
     await this.setWaiting(taskId, false);
     return allow;
   }
@@ -229,8 +251,9 @@ export class Orchestrator {
   async askUser(taskId: string, agentId: string, question: string): Promise<string> {
     const id = newId("u");
     await this.setWaiting(taskId, true);
-    this.deps.bus.emit({ type: "question.request", id, agentId, taskId, question });
-    const answer = await new Promise<string>((resolve) => this.pendingQuestions.set(id, resolve));
+    const info: PendingQuestionInfo = { id, agentId, taskId, question };
+    this.deps.bus.emit({ type: "question.request", ...info });
+    const answer = await new Promise<string>((resolve) => this.pendingQuestions.set(id, { info, resolve }));
     await this.setWaiting(taskId, false);
     return answer;
   }
@@ -389,6 +412,7 @@ export class Orchestrator {
       final = await this.finish(task, "failed", { error: (e as Error).message });
     } finally {
       this.aborts.delete(task.id);
+      this.resolvePendingFor(task.id);
       const settled = final ?? (await tasks.get(task.id));
       if (settled && isTerminal(settled.status)) {
         if (settled.status !== "cancelled") await tasks.awardXp(registry, settled);

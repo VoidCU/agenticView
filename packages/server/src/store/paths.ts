@@ -12,7 +12,7 @@ export function projectRoot(projectPath: string): string {
   return join(projectPath, ".agenticview");
 }
 
-const GITIGNORE = "events.log\nsessions/\nuploads/\n";
+const GITIGNORE = "events.log\nsessions/\nuploads/\ntasks/\n";
 
 /** Creates `<project>/.agenticview/.gitignore` once so agent definitions stay committable while logs do not. */
 export async function ensureProjectGitignore(projectPath: string): Promise<void> {

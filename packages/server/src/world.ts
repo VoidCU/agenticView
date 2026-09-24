@@ -18,6 +18,7 @@ import type { EventBus } from "./events/bus.js";
 import { readJsonFile, writeJsonFile } from "./store/jsonStore.js";
 import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.js";
 import type { Agent, Task } from "@agenticview/shared";
+import { cleanupGeminiSettings } from "./runtimes/gemini.js";
 
 export interface WorldOptions {
   runtimes: Map<Provider, Runtime>;
@@ -85,9 +86,13 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   });
 
   const registry = new AgentRegistry(ref);
-  const tasks = new TaskService(ref.kind === "project" ? join(root, "tasks") : join(root, "hub-tasks"), (task) => opts.bus.emit({ type: "task.updated", task }));
+  // Only state changes go on the wire, and never with the log: the web feed is built from run.events.
+  const tasks = new TaskService(ref.kind === "project" ? join(root, "tasks") : join(root, "hub-tasks"), (task, kind) => {
+    if (kind === "state") opts.bus.emit({ type: "task.updated", task: toWire(task) });
+  });
   await tasks.recoverInterrupted();
   await registry.ensureManager();
+  if (ref.kind === "project") await cleanupGeminiSettings(ref.projectPath);
 
   const info = async (): Promise<WorldInfo> => {
     const cfg = await readGlobalConfig();
@@ -152,9 +157,15 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     snapshot: async () => ({
       world: await info(),
       agents: await registry.list(),
-      tasks: await tasks.list(),
+      tasks: (await tasks.list()).map(toWire),
       providers: await providerStatuses(),
       settings: projectSettings,
+      ...orchestrator.pending(),
     }),
   };
+}
+
+/** Wire form of a task: identical minus the (potentially large) log. */
+export function toWire(task: Task): Task {
+  return { ...task, log: [] };
 }

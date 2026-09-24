@@ -9,29 +9,32 @@ export const CLAUDE_CREDENTIAL_ENV = [
 ];
 export const CLAUDE_MISSING_KEY_REASON = "Set ANTHROPIC_API_KEY (or a cloud provider env). The Agent SDK does not use the Claude Code login.";
 const READ_TOOLS = ["Read", "Glob", "Grep"];
-const EDIT_TOOLS = ["Edit", "Write", "MultiEdit"];
+const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 const WEB_TOOLS = ["WebSearch", "WebFetch"];
 const MEDIA = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
 export function claudeOptionsFor(req) {
+    const tools = [...READ_TOOLS];
     const allowed = [...READ_TOOLS];
     const disallowed = [];
     if (req.tools.edit)
-        allowed.push(...EDIT_TOOLS);
+        tools.push(...EDIT_TOOLS);
     else
         disallowed.push(...EDIT_TOOLS);
     if (req.tools.shell)
-        allowed.push("Bash");
+        tools.push("Bash");
     else
         disallowed.push("Bash");
     if (req.tools.web)
-        allowed.push(...WEB_TOOLS);
+        tools.push(...WEB_TOOLS);
     else
         disallowed.push(...WEB_TOOLS);
-    for (const t of req.bridgeTools)
+    for (const t of req.bridgeTools) {
+        tools.push(`mcp__agenticview__${t.name}`);
         allowed.push(`mcp__agenticview__${t.name}`);
+    }
     const modes = { auto: "bypassPermissions", "auto-edit": "acceptEdits", ask: "default" };
     const permissionMode = modes[req.permissionMode];
-    const out = { allowedTools: allowed, disallowedTools: disallowed, permissionMode };
+    const out = { tools, allowedTools: allowed, disallowedTools: disallowed, permissionMode };
     if (permissionMode === "bypassPermissions")
         out.allowDangerouslySkipPermissions = true;
     return out;
@@ -135,9 +138,6 @@ export class ClaudeRuntime {
     }
     async run(req, sink, signal) {
         let text = "";
-        const injectKey = Boolean(this.apiKey) && !process.env.ANTHROPIC_API_KEY;
-        if (injectKey)
-            process.env.ANTHROPIC_API_KEY = this.apiKey;
         try {
             if (signal.aborted)
                 return { text, stopReason: "aborted" };
@@ -158,6 +158,9 @@ export class ClaudeRuntime {
                 options.resume = req.sessionId;
             if (req.model)
                 options.model = req.model;
+            // The configured key goes to the SDK subprocess only, never into this process's env (other providers' CLIs inherit that).
+            if (this.apiKey && !process.env.ANTHROPIC_API_KEY)
+                options.env = { ...process.env, ANTHROPIC_API_KEY: this.apiKey };
             if (req.bridgeTools.length > 0) {
                 const tools = req.bridgeTools.map((t) => sdk.tool(t.name, t.description, t.schema, async (args) => {
                     try {
@@ -169,7 +172,8 @@ export class ClaudeRuntime {
                 }));
                 options.mcpServers = { agenticview: sdk.createSdkMcpServer({ name: "agenticview", version: "0.1.0", tools: tools }) };
             }
-            if (subset.permissionMode === "default") {
+            if (subset.permissionMode !== "bypassPermissions") {
+                // `default` prompts for edits and shell; `acceptEdits` still prompts for shell. Both need a handler or the SDK denies.
                 const onPermission = req.onPermission;
                 options.canUseTool = async (toolName, input) => {
                     if (!onPermission)
@@ -212,10 +216,6 @@ export class ClaudeRuntime {
             if (signal.aborted)
                 return { text, stopReason: "aborted" };
             return { text, stopReason: "error", error: e.message };
-        }
-        finally {
-            if (injectKey)
-                delete process.env.ANTHROPIC_API_KEY;
         }
     }
 }

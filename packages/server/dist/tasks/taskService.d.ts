@@ -11,12 +11,14 @@ export interface CreateTaskInput {
     images?: string[];
 }
 export type TaskPatch = Partial<Pick<Task, "result" | "error" | "session">>;
+/** `state`: status/result/session changed (worth broadcasting). `log`: only the log grew. */
+export type TaskChangeKind = "state" | "log";
 /** Persists tasks, enforces the transition table, and serialises writes per task id. */
 export declare class TaskService {
     private readonly onChange;
     private readonly store;
     private readonly locks;
-    constructor(dir: string, onChange: (t: Task) => void);
+    constructor(dir: string, onChange: (t: Task, kind: TaskChangeKind) => void);
     private locked;
     create(input: CreateTaskInput): Promise<Task>;
     get(id: string): Promise<Task | undefined>;

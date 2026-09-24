@@ -51,6 +51,8 @@ export function snapshot(agents: Agent[], tasks: Task[] = []): ServerMessage {
     world: { kind: "project", name: "proj", projectPath: "C:/proj", knownProjects: [] },
     agents,
     tasks,
+    permissions: [],
+    questions: [],
     providers: [
       { provider: "claude", ok: true, version: "1.0" },
       { provider: "codex", ok: false, reason: "codex CLI not installed" },

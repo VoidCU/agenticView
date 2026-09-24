@@ -56,8 +56,8 @@ async function readStdin() {
   });
 }
 
-/** Live instance files, preferring the one whose projectPath equals cwd. */
-export async function findInstances(cwd) {
+/** All instance files (live or stale); see pickInstance for targeting. */
+export async function findInstances() {
   const dir = join(globalRoot(), "instances");
   let names;
   try {
@@ -74,8 +74,17 @@ export async function findInstances(cwd) {
       /* ignore unreadable instance files */
     }
   }
-  const norm = (p) => String(p ?? "").replace(/[\\/]+$/, "").toLowerCase();
-  return out.sort((a, b) => Number(norm(b.projectPath) === norm(cwd)) - Number(norm(a.projectPath) === norm(cwd)));
+  return out;
+}
+
+function normPath(p) {
+  return String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+/** The office for this cwd, else the hub, else nothing. Never another project's office. */
+export function pickInstance(instances, cwd) {
+  const want = normPath(cwd);
+  return instances.find((i) => i.projectPath && normPath(i.projectPath) === want) ?? instances.find((i) => i.projectPath === null || i.projectPath === undefined);
 }
 
 export async function mirror(stdinText) {
@@ -88,7 +97,7 @@ export async function mirror(stdinText) {
   const event = formatHookEvent(payload);
   if (!event) return false;
   const instances = await findInstances(payload.cwd ?? process.cwd());
-  const target = instances[0];
+  const target = pickInstance(instances, payload.cwd ?? process.cwd());
   if (!target?.url || !target.token) return false;
   try {
     const res = await fetch(`${target.url}/hooks`, {

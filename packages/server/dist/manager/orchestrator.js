@@ -139,6 +139,7 @@ export class Orchestrator {
         for (const fn of list ?? [])
             fn(task);
     }
+    /** Cancel a task; a request also cancels every non-terminal child it spawned. */
     async cancel(taskId) {
         const cur = await this.deps.tasks.get(taskId);
         if (!cur || isTerminal(cur.status))
@@ -149,24 +150,46 @@ export class Orchestrator {
         this.aborts.get(taskId)?.abort();
         const next = await this.deps.tasks.transition(taskId, "cancelled");
         this.active.delete(taskId);
+        this.resolvePendingFor(taskId);
         this.settle(next);
+        if (cur.kind === "request") {
+            for (const child of await this.deps.tasks.children(taskId))
+                if (!isTerminal(child.status))
+                    await this.cancel(child.id);
+        }
         void this.pump();
     }
+    /** Prompts currently waiting on the user, for snapshots and reconnecting tabs. */
+    pending() {
+        return {
+            permissions: [...this.pendingPermissions.values()].map((p) => p.info),
+            questions: [...this.pendingQuestions.values()].map((q) => q.info),
+        };
+    }
+    /** A task that ended (or was cancelled) can no longer be waiting on anyone: deny/close its prompts. */
+    resolvePendingFor(taskId) {
+        for (const [id, p] of this.pendingPermissions)
+            if (p.info.taskId === taskId)
+                this.respondPermission(id, false);
+        for (const [id, q] of this.pendingQuestions)
+            if (q.info.taskId === taskId)
+                this.respondQuestion(id, "");
+    }
     respondPermission(id, allow) {
-        const fn = this.pendingPermissions.get(id);
-        if (!fn)
+        const entry = this.pendingPermissions.get(id);
+        if (!entry)
             return;
         this.pendingPermissions.delete(id);
         this.deps.bus.emit({ type: "permission.resolved", id });
-        fn(allow);
+        entry.resolve(allow);
     }
     respondQuestion(id, answer) {
-        const fn = this.pendingQuestions.get(id);
-        if (!fn)
+        const entry = this.pendingQuestions.get(id);
+        if (!entry)
             return;
         this.pendingQuestions.delete(id);
         this.deps.bus.emit({ type: "question.resolved", id });
-        fn(answer);
+        entry.resolve(answer);
     }
     async setWaiting(taskId, waiting) {
         try {
@@ -184,16 +207,18 @@ export class Orchestrator {
     }
     async requestPermission(taskId, agentId, req) {
         await this.setWaiting(taskId, true);
-        this.deps.bus.emit({ type: "permission.request", id: req.id, agentId, taskId, tool: req.tool, input: req.input });
-        const allow = await new Promise((resolve) => this.pendingPermissions.set(req.id, resolve));
+        const info = { id: req.id, agentId, taskId, tool: req.tool, input: req.input };
+        this.deps.bus.emit({ type: "permission.request", ...info });
+        const allow = await new Promise((resolve) => this.pendingPermissions.set(req.id, { info, resolve }));
         await this.setWaiting(taskId, false);
         return allow;
     }
     async askUser(taskId, agentId, question) {
         const id = newId("u");
         await this.setWaiting(taskId, true);
-        this.deps.bus.emit({ type: "question.request", id, agentId, taskId, question });
-        const answer = await new Promise((resolve) => this.pendingQuestions.set(id, resolve));
+        const info = { id, agentId, taskId, question };
+        this.deps.bus.emit({ type: "question.request", ...info });
+        const answer = await new Promise((resolve) => this.pendingQuestions.set(id, { info, resolve }));
         await this.setWaiting(taskId, false);
         return answer;
     }
@@ -356,6 +381,7 @@ export class Orchestrator {
         }
         finally {
             this.aborts.delete(task.id);
+            this.resolvePendingFor(task.id);
             const settled = final ?? (await tasks.get(task.id));
             if (settled && isTerminal(settled.status)) {
                 if (settled.status !== "cancelled")

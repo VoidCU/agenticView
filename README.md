@@ -54,11 +54,13 @@ Only Claude supports interactive permission prompts. For Codex and Gemini, the `
 
 | Agent permission mode | Claude | Codex | Gemini |
 |---|---|---|---|
-| `ask` | prompts you in the office | `read-only` sandbox | `auto_edit` approval mode |
+| `ask` | prompts you in the office | `read-only` sandbox | `default` approval mode (headless: unapproved tools are rejected) |
 | `auto-edit` | accept edits | `workspace-write` sandbox (`danger-full-access` on Windows, where Codex's sandbox cannot write files) | `auto_edit` |
 | `auto` | bypass permissions | `danger-full-access` | `yolo` |
 
-Gemini reads MCP servers from settings files, so while a Gemini worker with custom tools runs, AgenticView temporarily adds an `agenticview` entry to `<project>/.gemini/settings.json` and restores the file afterwards.
+Gemini reads MCP servers and tool exclusions from settings files, so while a Gemini worker runs, AgenticView temporarily adds an `agenticview-<run>` server entry and a `tools.exclude` list (for tools that agent may not use) to `<project>/.gemini/settings.json`, and restores the file when the last Gemini run in that project finishes. Concurrent runs each get their own entry; exclusions are the union of all running agents. If the server ever dies mid-run, the next launch strips the leftovers.
+
+An agent whose tools disallow both editing and shell (the Manager, for example) runs Codex in a `read-only` sandbox and Gemini with the write, shell and web tools excluded, regardless of its permission mode.
 
 ## Scopes and where data lives
 
@@ -68,7 +70,7 @@ Gemini reads MCP servers from settings files, so while a Gemini worker with cust
 | Appear in | that project's office | every office (in the Lobby) and the Hub |
 | Can work in | that project only | any known project |
 
-`<project>/.agenticview/` also holds tasks and settings. It gets its own `.gitignore` so agent definitions are committable while logs, sessions, and uploads are not. `~/.agenticview/config.json` holds global defaults, provider settings, and the list of known projects.
+`<project>/.agenticview/` also holds tasks and settings. It gets its own `.gitignore` so agent definitions and settings are committable while tasks (which carry logs), sessions, and uploads are not. `~/.agenticview/config.json` holds global defaults, provider settings, and the list of known projects.
 
 ## Security
 

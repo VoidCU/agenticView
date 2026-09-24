@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn } from "node:child_process";
-import type { ProviderStatus, RunEvent, RunResult } from "@agenticview/shared";
+import type { ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 import { type Which } from "./which.js";
 export interface GeminiRuntimeOptions {
@@ -11,6 +11,8 @@ export interface GeminiRuntimeOptions {
     which?: Which;
 }
 export declare const GEMINI_MISSING_REASON = "Install the Gemini CLI (npm i -g @google/gemini-cli) and sign in, or set GEMINI_API_KEY.";
+/** Gemini tool names to exclude for each allowance that is off. */
+export declare function excludedToolsFor(tools: ToolAllowance): string[];
 /**
  * npm installs CLIs on Windows as `.cmd` shims that Node cannot spawn directly. Resolve the shim's
  * target script so we can run it with `process.execPath`. Returns undefined when the file is not a shim.
@@ -25,6 +27,8 @@ export declare function mapGeminiLine(line: string): {
         error?: string;
     };
 };
+/** Boot-time repair: strip entries a crashed server left behind in <project>/.gemini/settings.json. */
+export declare function cleanupGeminiSettings(projectPath: string): Promise<void>;
 export declare class GeminiRuntime implements Runtime {
     private readonly opts;
     readonly provider: "gemini";
@@ -32,7 +36,5 @@ export declare class GeminiRuntime implements Runtime {
     private readonly which;
     constructor(opts: GeminiRuntimeOptions);
     check(): Promise<ProviderStatus>;
-    /** Temporarily merge the bridge MCP server into <cwd>/.gemini/settings.json; returns a restore function. */
-    private installBridgeSettings;
     run(req: RunRequest, sink: EventSink, signal: AbortSignal): Promise<RunResult>;
 }

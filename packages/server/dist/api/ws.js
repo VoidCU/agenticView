@@ -1,6 +1,18 @@
 import { WebSocketServer } from "ws";
 import { ClientMessageSchema, defaultAgent } from "@agenticview/shared";
 import { tokenOf } from "./auth.js";
+import { stat } from "node:fs/promises";
+export async function assertDirectory(path) {
+    try {
+        if (!(await stat(path)).isDirectory())
+            throw new Error(`${path} is not a directory`);
+    }
+    catch (e) {
+        if (e.code === "ENOENT")
+            throw new Error(`${path} does not exist`);
+        throw e;
+    }
+}
 async function handle(msg, world, opts, send) {
     const { orchestrator, registry, bus } = world;
     switch (msg.type) {
@@ -50,6 +62,7 @@ async function handle(msg, world, opts, send) {
         case "project.open": {
             if (world.ref.kind !== "hub" || !opts.openProject)
                 throw new Error("project.open is only available in the hub");
+            await assertDirectory(msg.path);
             send({ type: "opened", url: await opts.openProject(msg.path) });
             return;
         }
@@ -71,6 +84,8 @@ export function attachWs(server, opts) {
     });
     wss.on("connection", (ws) => {
         clients.add(ws);
+        // A protocol fault from one client must never become an unhandled 'error' that kills the process.
+        ws.on("error", () => undefined);
         const send = (m) => {
             if (ws.readyState === ws.OPEN)
                 ws.send(JSON.stringify(m));

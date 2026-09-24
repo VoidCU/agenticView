@@ -4,11 +4,25 @@ import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { which as defaultWhich } from "./which.js";
 export const GEMINI_MISSING_REASON = "Install the Gemini CLI (npm i -g @google/gemini-cli) and sign in, or set GEMINI_API_KEY.";
-const APPROVAL = { auto: "yolo", "auto-edit": "auto_edit", ask: "auto_edit" };
+/** `ask` cannot prompt through a headless CLI, so it gets the CLI's own most restrictive mode (`default`). */
+const APPROVAL = { auto: "yolo", "auto-edit": "auto_edit", ask: "default" };
 const WRITE_TOOLS = new Set(["write_file", "replace", "edit", "edit_file"]);
 /** Prompts longer than this go on stdin; Windows limits a command line to 32 K characters. */
 const MAX_ARG_PROMPT = 30_000;
 const STDIN_MARKER = "The full task is provided on standard input above. Follow it.";
+const ENTRY_PREFIX = "agenticview-";
+const MARKER_KEY = "agenticview";
+/** Gemini tool names to exclude for each allowance that is off. */
+export function excludedToolsFor(tools) {
+    const out = [];
+    if (!tools.edit)
+        out.push("write_file", "replace", "edit");
+    if (!tools.shell)
+        out.push("run_shell_command");
+    if (!tools.web)
+        out.push("google_web_search", "web_fetch");
+    return out;
+}
 /**
  * npm installs CLIs on Windows as `.cmd` shims that Node cannot spawn directly. Resolve the shim's
  * target script so we can run it with `process.execPath`. Returns undefined when the file is not a shim.
@@ -84,6 +98,136 @@ export function mapGeminiLine(line) {
     }
     return { events };
 }
+const cwdStates = new Map();
+function settingsPath(cwd) {
+    return join(cwd, ".gemini", "settings.json");
+}
+function parse(text) {
+    if (!text)
+        return {};
+    try {
+        const v = JSON.parse(text);
+        return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    }
+    catch {
+        return {};
+    }
+}
+async function writeMerged(cwd, state) {
+    const base = parse(state.original);
+    const servers = { ...(base.mcpServers ?? {}) };
+    for (const [runId, entry] of state.entries)
+        servers[`${ENTRY_PREFIX}${runId}`] = entry;
+    const merged = { ...base, mcpServers: servers };
+    const exclude = [...new Set([...state.excludes.values()].flat())];
+    if (exclude.length > 0) {
+        const baseTools = base.tools ?? {};
+        const baseExclude = Array.isArray(baseTools.exclude) ? baseTools.exclude : Array.isArray(base.excludeTools) ? base.excludeTools : [];
+        const all = [...new Set([...baseExclude, ...exclude])];
+        merged.tools = { ...baseTools, exclude: all };
+        merged.excludeTools = all;
+        merged[MARKER_KEY] = { managedExcludes: true };
+    }
+    await writeFile(settingsPath(cwd), JSON.stringify(merged, null, 2), "utf8");
+}
+function locked(state, fn) {
+    const run = state.chain.then(fn, fn);
+    state.chain = run.then(() => undefined, () => undefined);
+    return run;
+}
+/** Register this run's server entry and exclusions; returns a function that removes them again. */
+async function installSettings(cwd, runId, entry, exclude) {
+    let state = cwdStates.get(cwd);
+    if (!state) {
+        state = { original: undefined, dirCreated: false, chain: Promise.resolve(), entries: new Map(), excludes: new Map() };
+        cwdStates.set(cwd, state);
+    }
+    const s = state;
+    await locked(s, async () => {
+        if (s.entries.size === 0 && s.excludes.size === 0) {
+            try {
+                s.original = await readFile(settingsPath(cwd), "utf8");
+            }
+            catch {
+                s.original = undefined;
+            }
+            try {
+                await mkdir(join(cwd, ".gemini"), { recursive: false });
+                s.dirCreated = true;
+            }
+            catch {
+                s.dirCreated = false;
+            }
+        }
+        if (entry !== undefined)
+            s.entries.set(runId, entry);
+        if (exclude.length > 0)
+            s.excludes.set(runId, exclude);
+        await writeMerged(cwd, s);
+    });
+    return async () => {
+        await locked(s, async () => {
+            s.entries.delete(runId);
+            s.excludes.delete(runId);
+            if (s.entries.size > 0 || s.excludes.size > 0) {
+                await writeMerged(cwd, s);
+                return;
+            }
+            if (s.original !== undefined)
+                await writeFile(settingsPath(cwd), s.original, "utf8");
+            else {
+                await rm(settingsPath(cwd), { force: true });
+                if (s.dirCreated)
+                    await rmdir(join(cwd, ".gemini")).catch(() => undefined);
+            }
+            if (cwdStates.get(cwd) === s)
+                cwdStates.delete(cwd);
+        });
+    };
+}
+/** Boot-time repair: strip entries a crashed server left behind in <project>/.gemini/settings.json. */
+export async function cleanupGeminiSettings(projectPath) {
+    const file = settingsPath(projectPath);
+    let text;
+    try {
+        text = await readFile(file, "utf8");
+    }
+    catch {
+        return;
+    }
+    const settings = parse(text);
+    let changed = false;
+    const servers = settings.mcpServers;
+    if (servers && typeof servers === "object") {
+        for (const k of Object.keys(servers)) {
+            if (k.startsWith(ENTRY_PREFIX) || k === "agenticview") {
+                delete servers[k];
+                changed = true;
+            }
+        }
+    }
+    const marker = settings[MARKER_KEY];
+    if (marker?.managedExcludes) {
+        delete settings.excludeTools;
+        const tools = settings.tools;
+        if (tools) {
+            delete tools.exclude;
+            if (Object.keys(tools).length === 0)
+                delete settings.tools;
+        }
+        delete settings[MARKER_KEY];
+        changed = true;
+    }
+    if (!changed)
+        return;
+    const onlyEmptyServers = Object.keys(settings).every((k) => k === "mcpServers" && Object.keys(settings.mcpServers ?? {}).length === 0);
+    if (Object.keys(settings).length === 0 || onlyEmptyServers) {
+        await rm(file, { force: true });
+        await rmdir(join(projectPath, ".gemini")).catch(() => undefined);
+        return;
+    }
+    await writeFile(file, JSON.stringify(settings, null, 2), "utf8");
+}
 export class GeminiRuntime {
     opts;
     provider = "gemini";
@@ -100,59 +244,23 @@ export class GeminiRuntime {
             return { provider: "gemini", ok: false, reason: GEMINI_MISSING_REASON };
         return { provider: "gemini", ok: true, version: bin };
     }
-    /** Temporarily merge the bridge MCP server into <cwd>/.gemini/settings.json; returns a restore function. */
-    async installBridgeSettings(req) {
-        const dir = join(req.cwd, ".gemini");
-        const file = join(dir, "settings.json");
-        let original;
-        let dirExisted = true;
-        try {
-            original = await readFile(file, "utf8");
-        }
-        catch {
-            original = undefined;
-        }
-        try {
-            await mkdir(dir, { recursive: false });
-            dirExisted = false;
-        }
-        catch {
-            dirExisted = true;
-        }
-        let settings = {};
-        if (original) {
-            try {
-                settings = JSON.parse(original);
-            }
-            catch {
-                settings = {};
-            }
-        }
-        const servers = { ...(settings.mcpServers ?? {}) };
-        servers.agenticview = {
-            command: process.execPath,
-            args: [this.opts.bridgeEntry],
-            env: { AGENTICVIEW_BRIDGE_URL: this.opts.bridgeUrl(), AGENTICVIEW_RUN_ID: req.runId, AGENTICVIEW_BRIDGE_TOKEN: req.bridgeToken ?? "" },
-            trust: true,
-        };
-        await writeFile(file, JSON.stringify({ ...settings, mcpServers: servers }, null, 2), "utf8");
-        return async () => {
-            if (original !== undefined)
-                await writeFile(file, original, "utf8");
-            else {
-                await rm(file, { force: true });
-                if (!dirExisted)
-                    await rmdir(dir).catch(() => undefined);
-            }
-        };
-    }
     async run(req, sink, signal) {
         let text = "";
         let sessionId = req.sessionId;
         if (signal.aborted)
             return { text, stopReason: "aborted" };
         const useBridge = req.bridgeTools.length > 0;
-        const restore = useBridge ? await this.installBridgeSettings(req) : async () => undefined;
+        const exclude = excludedToolsFor(req.tools);
+        const serverName = `${ENTRY_PREFIX}${req.runId}`;
+        const entry = useBridge
+            ? {
+                command: process.execPath,
+                args: [this.opts.bridgeEntry],
+                env: { AGENTICVIEW_BRIDGE_URL: this.opts.bridgeUrl(), AGENTICVIEW_RUN_ID: req.runId, AGENTICVIEW_BRIDGE_TOKEN: req.bridgeToken ?? "" },
+                trust: true,
+            }
+            : undefined;
+        const restore = useBridge || exclude.length > 0 ? await installSettings(req.cwd, req.runId, entry, exclude) : async () => undefined;
         let child;
         const onAbort = () => child?.kill();
         try {
@@ -166,7 +274,7 @@ export class GeminiRuntime {
             if (req.sessionId)
                 args.push("--resume", req.sessionId);
             if (useBridge)
-                args.push("--allowed-mcp-server-names", "agenticview");
+                args.push("--allowed-mcp-server-names", serverName);
             const env = {};
             for (const [k, v] of Object.entries(process.env))
                 if (typeof v === "string")

@@ -9,7 +9,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -59,7 +59,20 @@ export function openBrowser(url) {
 function launchUrl(inst) {
     return `${inst.url}/#token=${inst.token}`;
 }
+async function assertProjectDir(projectPath) {
+    try {
+        if (!(await stat(projectPath)).isDirectory())
+            throw new Error(`${projectPath} is not a directory`);
+    }
+    catch (e) {
+        if (e.code === "ENOENT")
+            throw new Error(`${projectPath} does not exist`);
+        throw e;
+    }
+}
 async function startWorld(projectPath, opts) {
+    if (projectPath)
+        await assertProjectDir(projectPath);
     const existing = await liveInstance(projectPath);
     if (existing) {
         console.log(`AgenticView: ${launchUrl(existing)}`);
@@ -78,9 +91,10 @@ async function startWorld(projectPath, opts) {
         openProject: (path) => openProjectDetached(path),
     });
     const file = instanceFile(projectPath);
-    await mkdir(dirname(file), { recursive: true });
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
     const inst = { pid: process.pid, url: server.url, token, projectPath, startedAt: new Date().toISOString() };
-    await writeFile(file, JSON.stringify(inst, null, 2), "utf8");
+    // The instance file carries the launch token: owner-only on POSIX (mode is ignored on Windows).
+    await writeFile(file, JSON.stringify(inst, null, 2), { encoding: "utf8", mode: 0o600 });
     console.log(`AgenticView: ${launchUrl(inst)}`);
     if (opts.browser)
         openBrowser(launchUrl(inst));

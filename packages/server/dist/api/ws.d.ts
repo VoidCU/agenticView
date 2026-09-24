@@ -1,5 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import type { World } from "../world.js";
+export declare function assertDirectory(path: string): Promise<void>;
 export interface WsOptions {
     token: string;
     world: World;

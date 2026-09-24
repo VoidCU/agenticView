@@ -27,6 +27,9 @@ export interface CreateTaskInput {
 
 export type TaskPatch = Partial<Pick<Task, "result" | "error" | "session">>;
 
+/** `state`: status/result/session changed (worth broadcasting). `log`: only the log grew. */
+export type TaskChangeKind = "state" | "log";
+
 /** Persists tasks, enforces the transition table, and serialises writes per task id. */
 export class TaskService {
   private readonly store: JsonStore<Task>;
@@ -34,7 +37,7 @@ export class TaskService {
 
   constructor(
     dir: string,
-    private readonly onChange: (t: Task) => void,
+    private readonly onChange: (t: Task, kind: TaskChangeKind) => void,
   ) {
     this.store = new JsonStore(dir, TaskSchema);
   }
@@ -65,7 +68,7 @@ export class TaskService {
     };
     if (input.parentId) task.parentId = input.parentId;
     await this.store.write(task.id, task);
-    this.onChange(task);
+    this.onChange(task, "state");
     return task;
   }
 
@@ -91,7 +94,7 @@ export class TaskService {
       if (to === "running" && !cur.startedAt) next.startedAt = now;
       if (isTerminal(to)) next.finishedAt = now;
       await this.store.write(id, next);
-      this.onChange(next);
+      this.onChange(next, "state");
       return next;
     });
   }
@@ -102,7 +105,7 @@ export class TaskService {
       if (!cur) return;
       const next: Task = { ...cur, log: [...cur.log, { ts: new Date().toISOString(), type, text }].slice(-TASK_LOG_CAP) };
       await this.store.write(id, next);
-      this.onChange(next);
+      this.onChange(next, "log");
     });
   }
 
@@ -113,7 +116,7 @@ export class TaskService {
       if (!cur || cur.log.length === 0) return;
       const next: Task = { ...cur, log: [...cur.log.slice(0, -1), entry] };
       await this.store.write(id, next);
-      this.onChange(next);
+      this.onChange(next, "log");
     });
   }
 

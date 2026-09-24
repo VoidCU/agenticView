@@ -146,6 +146,15 @@ describe("CodexRuntime edge cases", () => {
     expect(res.text).toBe("I'll do it.\n\nDone.");
   });
 
+  it("forces a read-only sandbox when the agent may neither edit nor run commands", async () => {
+    const cap: Capture = {};
+    const manager = { ...agent, tools: { edit: false, shell: false, web: false, screenshot: false } };
+    await new CodexRuntime({ sdk: fakeSdk(cap), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "codex" }).run(req({ agent: manager, tools: manager.tools, permissionMode: "auto" }), () => {}, new AbortController().signal);
+    expect(cap.threadOpts!.sandboxMode).toBe("read-only");
+    expect(sandboxFor("auto", "linux", { edit: false, shell: false, web: false, screenshot: false })).toBe("read-only");
+    expect(sandboxFor("auto", "linux", { edit: false, shell: true, web: false, screenshot: false })).toBe("danger-full-access");
+  });
+
   it("maps auto-edit per platform and never uses the sandbox for auto", () => {
     expect(sandboxFor("auto", "win32")).toBe("danger-full-access");
     expect(sandboxFor("auto", "linux")).toBe("danger-full-access");

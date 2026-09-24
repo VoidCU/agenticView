@@ -59,7 +59,7 @@ describe("paths", () => {
     await ensureProjectGitignore(dir);
     await ensureProjectGitignore(dir);
     const gi = await readFile(join(dir, ".agenticview", ".gitignore"), "utf8");
-    expect(gi).toBe("events.log\nsessions/\nuploads/\n");
+    expect(gi).toBe("events.log\nsessions/\nuploads/\ntasks/\n");
   });
 });
 

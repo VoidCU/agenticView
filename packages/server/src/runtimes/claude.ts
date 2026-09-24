@@ -27,13 +27,16 @@ export const CLAUDE_MISSING_KEY_REASON =
   "Set ANTHROPIC_API_KEY (or a cloud provider env). The Agent SDK does not use the Claude Code login.";
 
 const READ_TOOLS = ["Read", "Glob", "Grep"];
-const EDIT_TOOLS = ["Edit", "Write", "MultiEdit"];
+const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 const WEB_TOOLS = ["WebSearch", "WebFetch"];
 const MEDIA: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
 
 export type ClaudePermissionMode = "default" | "acceptEdits" | "bypassPermissions";
 
 export interface ClaudeOptionSubset {
+  /** Which built-in tools exist for this run (availability). */
+  tools: string[];
+  /** Tools that never prompt: read-only tools and our own bridge tools. Edit/Bash are deliberately absent so `canUseTool` sees them. */
   allowedTools: string[];
   disallowedTools: string[];
   permissionMode: ClaudePermissionMode;
@@ -41,18 +44,22 @@ export interface ClaudeOptionSubset {
 }
 
 export function claudeOptionsFor(req: RunRequest): ClaudeOptionSubset {
+  const tools: string[] = [...READ_TOOLS];
   const allowed: string[] = [...READ_TOOLS];
   const disallowed: string[] = [];
-  if (req.tools.edit) allowed.push(...EDIT_TOOLS);
+  if (req.tools.edit) tools.push(...EDIT_TOOLS);
   else disallowed.push(...EDIT_TOOLS);
-  if (req.tools.shell) allowed.push("Bash");
+  if (req.tools.shell) tools.push("Bash");
   else disallowed.push("Bash");
-  if (req.tools.web) allowed.push(...WEB_TOOLS);
+  if (req.tools.web) tools.push(...WEB_TOOLS);
   else disallowed.push(...WEB_TOOLS);
-  for (const t of req.bridgeTools) allowed.push(`mcp__agenticview__${t.name}`);
+  for (const t of req.bridgeTools) {
+    tools.push(`mcp__agenticview__${t.name}`);
+    allowed.push(`mcp__agenticview__${t.name}`);
+  }
   const modes: Record<PermissionMode, ClaudePermissionMode> = { auto: "bypassPermissions", "auto-edit": "acceptEdits", ask: "default" };
   const permissionMode = modes[req.permissionMode];
-  const out: ClaudeOptionSubset = { allowedTools: allowed, disallowedTools: disallowed, permissionMode };
+  const out: ClaudeOptionSubset = { tools, allowedTools: allowed, disallowedTools: disallowed, permissionMode };
   if (permissionMode === "bypassPermissions") out.allowDangerouslySkipPermissions = true;
   return out;
 }
@@ -157,8 +164,6 @@ export class ClaudeRuntime implements Runtime {
 
   async run(req: RunRequest, sink: EventSink, signal: AbortSignal): Promise<RunResult> {
     let text = "";
-    const injectKey = Boolean(this.apiKey) && !process.env.ANTHROPIC_API_KEY;
-    if (injectKey) process.env.ANTHROPIC_API_KEY = this.apiKey;
     try {
       if (signal.aborted) return { text, stopReason: "aborted" };
       const sdk = await this.loadSdk();
@@ -177,6 +182,8 @@ export class ClaudeRuntime implements Runtime {
       };
       if (req.sessionId) options.resume = req.sessionId;
       if (req.model) options.model = req.model;
+      // The configured key goes to the SDK subprocess only, never into this process's env (other providers' CLIs inherit that).
+      if (this.apiKey && !process.env.ANTHROPIC_API_KEY) options.env = { ...process.env, ANTHROPIC_API_KEY: this.apiKey };
       if (req.bridgeTools.length > 0) {
         const tools = req.bridgeTools.map((t) =>
           sdk.tool(t.name, t.description, t.schema, async (args: unknown) => {
@@ -189,7 +196,8 @@ export class ClaudeRuntime implements Runtime {
         );
         options.mcpServers = { agenticview: sdk.createSdkMcpServer({ name: "agenticview", version: "0.1.0", tools: tools as never }) };
       }
-      if (subset.permissionMode === "default") {
+      if (subset.permissionMode !== "bypassPermissions") {
+        // `default` prompts for edits and shell; `acceptEdits` still prompts for shell. Both need a handler or the SDK denies.
         const onPermission = req.onPermission;
         options.canUseTool = async (toolName: string, input: Record<string, unknown>) => {
           if (!onPermission) return { behavior: "deny", message: "No permission handler attached in AgenticView" };
@@ -226,8 +234,6 @@ export class ClaudeRuntime implements Runtime {
     } catch (e) {
       if (signal.aborted) return { text, stopReason: "aborted" };
       return { text, stopReason: "error", error: (e as Error).message };
-    } finally {
-      if (injectKey) delete process.env.ANTHROPIC_API_KEY;
     }
   }
 }

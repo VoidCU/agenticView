@@ -62,10 +62,10 @@ describe("GeminiRuntime", () => {
     const during = JSON.parse(duringRun!);
     expect(during.theme).toBe("x");
     expect(during.mcpServers.other).toEqual({ command: "keep" });
-    expect(during.mcpServers.agenticview).toMatchObject({ command: process.execPath, args: ["C:/bridge/stdioBridge.js"], env: { AGENTICVIEW_BRIDGE_URL: "http://127.0.0.1:4242", AGENTICVIEW_RUN_ID: "r_9" }, trust: true });
-    expect(during.mcpServers.agenticview.env.AGENTICVIEW_BRIDGE_TOKEN).toBe("t0k");
+    expect(during.mcpServers["agenticview-r_9"]).toMatchObject({ command: process.execPath, args: ["C:/bridge/stdioBridge.js"], env: { AGENTICVIEW_BRIDGE_URL: "http://127.0.0.1:4242", AGENTICVIEW_RUN_ID: "r_9" }, trust: true });
+    expect(during.mcpServers["agenticview-r_9"].env.AGENTICVIEW_BRIDGE_TOKEN).toBe("t0k");
     expect(await readFile(join(cwd, ".gemini", "settings.json"), "utf8")).toBe(before);
-    expect(seenArgv).toEqual(expect.arrayContaining(["--allowed-mcp-server-names", "agenticview", "--approval-mode", "auto_edit"]));
+    expect(seenArgv).toEqual(expect.arrayContaining(["--allowed-mcp-server-names", "agenticview-r_9", "--approval-mode", "default"]));
   });
 
   it("removes a settings file it created when none existed", async () => {
@@ -163,5 +163,90 @@ describe("GeminiRuntime on Windows-style installs", () => {
     expect(seen!.stdinLength).toBeGreaterThanOrEqual(40_000);
     const p = seen!.argv[seen!.argv.indexOf("-p") + 1]!;
     expect(p.length).toBeLessThan(200);
+  });
+});
+
+describe("GeminiRuntime tool allowance and concurrency", () => {
+  const readSettings = () => require("node:fs").readFileSync(join(cwd, ".gemini", "settings.json"), "utf8");
+  it("excludes tools the agent may not use via settings, even without bridge tools", async () => {
+    let during: string | undefined;
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      during = readSettings();
+      return nodeSpawn(process.execPath, [fixture, ...args], opts as never);
+    }) as never;
+    const runtime = new GeminiRuntime({ bridgeEntry: "x", bridgeUrl: () => "u", spawn, which: async () => "gemini" });
+    const manager = { ...agent, tools: { edit: false, shell: false, web: false, screenshot: false } };
+    await runtime.run(req({ agent: manager, tools: manager.tools, permissionMode: "auto" }), () => {}, new AbortController().signal);
+    const s = JSON.parse(during!);
+    expect(s.tools.exclude).toEqual(expect.arrayContaining(["write_file", "replace", "run_shell_command", "google_web_search", "web_fetch"]));
+    expect(s.excludeTools).toEqual(s.tools.exclude);
+    await expect(access(join(cwd, ".gemini", "settings.json"))).rejects.toThrow();
+  });
+
+  it("maps ask to the CLI's default approval mode", async () => {
+    let seen: { argv: string[] } | undefined;
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      seen = { argv: args };
+      return nodeSpawn(process.execPath, [fixture, ...args], opts as never);
+    }) as never;
+    await new GeminiRuntime({ bridgeEntry: "x", bridgeUrl: () => "u", spawn, which: async () => "gemini" }).run(req({ permissionMode: "ask" }), () => {}, new AbortController().signal);
+    expect(seen!.argv[seen!.argv.indexOf("--approval-mode") + 1]).toBe("default");
+  });
+
+  it("two concurrent runs in one project each get their own entry and the file is restored once both finish", async () => {
+    await mkdir(join(cwd, ".gemini"), { recursive: true });
+    const before = JSON.stringify({ theme: "x" }, null, 2);
+    await writeFile(join(cwd, ".gemini", "settings.json"), before);
+    const snapshots: string[] = [];
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      snapshots.push(readSettings());
+      return nodeSpawn(process.execPath, [fixture, ...args], { ...opts, env: { ...(opts.env as Record<string, string>), FAKE_GEMINI_MODE: "hang" } } as never);
+    }) as never;
+    const runtime = new GeminiRuntime({ bridgeEntry: "x", bridgeUrl: () => "u", spawn, which: async () => "gemini" });
+    const tools = [{ name: "add", description: "", schema: {}, handler: async () => "1" }];
+    const acA = new AbortController();
+    const acB = new AbortController();
+    const a = runtime.run(req({ runId: "r_A", bridgeTools: tools, bridgeToken: "tA" }), () => {}, acA.signal);
+    await new Promise((r) => setTimeout(r, 150));
+    const b = runtime.run(req({ runId: "r_B", bridgeTools: tools, bridgeToken: "tB" }), () => {}, acB.signal);
+    await new Promise((r) => setTimeout(r, 150));
+    const duringBoth = JSON.parse(readSettings());
+    expect(Object.keys(duringBoth.mcpServers).sort()).toEqual(["agenticview-r_A", "agenticview-r_B"]);
+    expect(duringBoth.mcpServers["agenticview-r_B"].env.AGENTICVIEW_BRIDGE_TOKEN).toBe("tB");
+    const argvB = snapshots.length;
+    expect(argvB).toBe(2);
+    acA.abort();
+    await a;
+    const afterA = JSON.parse(readSettings());
+    expect(Object.keys(afterA.mcpServers)).toEqual(["agenticview-r_B"]);
+    expect(afterA.theme).toBe("x");
+    acB.abort();
+    await b;
+    expect(readSettings()).toBe(before);
+  });
+
+  it("names the allowed MCP server after the run", async () => {
+    let seen: { argv: string[] } | undefined;
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      seen = { argv: args };
+      return nodeSpawn(process.execPath, [fixture, ...args], opts as never);
+    }) as never;
+    await new GeminiRuntime({ bridgeEntry: "x", bridgeUrl: () => "u", spawn, which: async () => "gemini" }).run(req({ runId: "r_Z", bridgeTools: [{ name: "add", description: "", schema: {}, handler: async () => "1" }] }), () => {}, new AbortController().signal);
+    expect(seen!.argv[seen!.argv.indexOf("--allowed-mcp-server-names") + 1]).toBe("agenticview-r_Z");
+  });
+});
+
+describe("cleanupGeminiSettings", () => {
+  it("strips stale agenticview entries on boot and deletes a file that only held them", async () => {
+    const { cleanupGeminiSettings } = await import("../../src/runtimes/gemini.js");
+    await mkdir(join(cwd, ".gemini"), { recursive: true });
+    const file = join(cwd, ".gemini", "settings.json");
+    await writeFile(file, JSON.stringify({ theme: "x", mcpServers: { keep: { command: "k" }, "agenticview-r_old": { command: "dead" } } }));
+    await cleanupGeminiSettings(cwd);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ theme: "x", mcpServers: { keep: { command: "k" } } });
+    await writeFile(file, JSON.stringify({ mcpServers: { "agenticview-r_old": { command: "dead" } }, tools: { exclude: ["write_file"] }, excludeTools: ["write_file"], agenticview: { managedExcludes: true } }));
+    await cleanupGeminiSettings(cwd);
+    await expect(access(file)).rejects.toThrow();
+    await expect(cleanupGeminiSettings(join(cwd, "nowhere"))).resolves.toBeUndefined();
   });
 });

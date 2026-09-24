@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { PALETTE, type Agent, type ClientMessage, type PermissionMode, type Provider, type Scope, type ToolAllowance } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { Modal, providerLabel } from "./ui";
+import { modeHint } from "./modeHint";
 
 const TOOL_LABELS: { key: keyof ToolAllowance; label: string; hint: string }[] = [
   { key: "edit", label: "Edit files", hint: "Read and write files in the project" },
@@ -46,6 +47,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
   const idsAtSubmit = useRef<Set<string>>(new Set());
 
   const defaultProvider = settings?.defaultProvider ?? "claude";
+  const effectiveProvider: Provider = provider || defaultProvider;
   const error = submittedAt ? errors.find((e) => e.ref === (edit ? "agent.update" : "agent.create") && e.ts >= submittedAt) : undefined;
 
   useEffect(() => {
@@ -135,6 +137,9 @@ export function CreateAgentModal({ onClose, edit }: Props) {
               </label>
             ))}
           </div>
+          <p className="field-hint" data-testid="mode-hint">
+            On {providerLabel(effectiveProvider)}: {modeHint(effectiveProvider, mode)}
+          </p>
         </fieldset>
 
         {!edit && (

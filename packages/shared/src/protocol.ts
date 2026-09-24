@@ -58,12 +58,30 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
+export interface PendingPermissionInfo {
+  id: string;
+  agentId: string;
+  taskId: string;
+  tool: string;
+  input: unknown;
+}
+
+export interface PendingQuestionInfo {
+  id: string;
+  agentId: string;
+  taskId: string;
+  question: string;
+}
+
 export interface Snapshot {
   world: WorldInfo;
   agents: Agent[];
+  /** Tasks on the wire carry an empty `log`; the persisted task keeps the full log. */
   tasks: Task[];
   providers: ProviderStatus[];
   settings: ProjectSettings;
+  permissions: PendingPermissionInfo[];
+  questions: PendingQuestionInfo[];
 }
 
 export type MirrorEvent = { kind: string; text: string; ts: string };

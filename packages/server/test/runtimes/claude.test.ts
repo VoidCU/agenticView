@@ -65,17 +65,25 @@ afterEach(() => {
 });
 
 describe("claudeOptionsFor", () => {
-  it("maps tool allowance and permission mode", () => {
+  it("restricts availability with `tools`, never auto-allows Edit or Bash, and only silences read tools and bridge tools", () => {
     const o = claudeOptionsFor(req());
-    expect(o.allowedTools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "Edit", "Write", "MultiEdit", "Bash", "mcp__agenticview__add"]));
+    expect(o.tools).toEqual(["Read", "Glob", "Grep", "Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "mcp__agenticview__add"]);
+    expect(o.allowedTools).toEqual(["Read", "Glob", "Grep", "mcp__agenticview__add"]);
+    expect(o.allowedTools).not.toContain("Edit");
+    expect(o.allowedTools).not.toContain("Bash");
     expect(o.disallowedTools).toEqual(["WebSearch", "WebFetch"]);
     expect(o.permissionMode).toBe("acceptEdits");
-    expect(claudeOptionsFor(req({ permissionMode: "auto" })).permissionMode).toBe("bypassPermissions");
+  });
+  it("maps permission modes", () => {
+    expect(claudeOptionsFor(req({ permissionMode: "auto" }))).toMatchObject({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
     expect(claudeOptionsFor(req({ permissionMode: "ask" })).permissionMode).toBe("default");
-    const ro = claudeOptionsFor(req({ tools: { edit: false, shell: false, web: true, screenshot: false } }));
-    expect(ro.disallowedTools).toEqual(["Edit", "Write", "MultiEdit", "Bash"]);
-    expect(ro.allowedTools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]));
-    expect(ro.allowedTools).not.toContain("Edit");
+    expect(claudeOptionsFor(req({ permissionMode: "ask" })).allowDangerouslySkipPermissions).toBeUndefined();
+  });
+  it("removes edit and shell tools entirely when the allowance is off", () => {
+    const ro = claudeOptionsFor(req({ tools: { edit: false, shell: false, web: true, screenshot: false }, bridgeTools: [] }));
+    expect(ro.tools).toEqual(["Read", "Glob", "Grep", "WebSearch", "WebFetch"]);
+    expect(ro.disallowedTools).toEqual(["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash"]);
+    expect(ro.allowedTools).toEqual(["Read", "Glob", "Grep"]);
   });
 });
 
@@ -110,22 +118,28 @@ describe("ClaudeRuntime.run", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("asks the user in ask mode and denies when nobody answers", async () => {
-    const cap: Capture = {};
-    const rt = new ClaudeRuntime({ sdk: fakeSdk(cap), apiKey: "k" });
-    const asked: string[] = [];
-    await rt.run({ ...req({ permissionMode: "ask" }), onPermission: async (p) => { asked.push(p.tool); return false; } }, () => {}, new AbortController().signal);
-    const canUse = cap.options!.canUseTool as (n: string, i: unknown, o: unknown) => Promise<{ behavior: string }>;
-    expect((await canUse("Bash", { command: "rm" }, { signal: new AbortController().signal })).behavior).toBe("deny");
-    expect(asked).toEqual(["Bash"]);
+  it("installs the permission handler for ask AND auto-edit, forwards to onPermission, and denies when nobody answers", async () => {
+    for (const mode of ["ask", "auto-edit"] as const) {
+      const cap: Capture = {};
+      const rt = new ClaudeRuntime({ sdk: fakeSdk(cap), apiKey: "k" });
+      const asked: string[] = [];
+      const seenPermissionEvents: string[] = [];
+      await rt.run({ ...req({ permissionMode: mode }), onPermission: async (p) => { asked.push(p.tool); return false; } }, (e) => { if (e.type === "permission") seenPermissionEvents.push(e.tool); }, new AbortController().signal);
+      const canUse = cap.options!.canUseTool as (n: string, i: unknown, o: unknown) => Promise<{ behavior: string }>;
+      expect(typeof canUse).toBe("function");
+      expect((await canUse("Bash", { command: "rm" }, { signal: new AbortController().signal })).behavior).toBe("deny");
+      expect(asked).toEqual(["Bash"]);
+      expect(seenPermissionEvents).toEqual(["Bash"]);
+    }
     const cap2: Capture = {};
     await new ClaudeRuntime({ sdk: fakeSdk(cap2), apiKey: "k" }).run(req({ permissionMode: "ask" }), () => {}, new AbortController().signal);
-    const canUse2 = cap2.options!.canUseTool as typeof canUse;
-    expect((await canUse2("Bash", {}, {})).behavior).toBe("deny");
+    expect((await (cap2.options!.canUseTool as (n: string, i: unknown, o: unknown) => Promise<{ behavior: string }>)("Bash", {}, {})).behavior).toBe("deny");
     const cap3: Capture = {};
     await new ClaudeRuntime({ sdk: fakeSdk(cap3), apiKey: "k" }).run({ ...req({ permissionMode: "ask" }), onPermission: async () => true }, () => {}, new AbortController().signal);
-    const canUse3 = cap3.options!.canUseTool as (n: string, i: unknown, o: unknown) => Promise<{ behavior: string; updatedInput?: unknown }>;
-    expect(await canUse3("Bash", { command: "ls" }, {})).toEqual({ behavior: "allow", updatedInput: { command: "ls" } });
+    expect(await (cap3.options!.canUseTool as (n: string, i: unknown, o: unknown) => Promise<unknown>)("Bash", { command: "ls" }, {})).toEqual({ behavior: "allow", updatedInput: { command: "ls" } });
+    const cap4: Capture = {};
+    await new ClaudeRuntime({ sdk: fakeSdk(cap4), apiKey: "k" }).run(req({ permissionMode: "auto" }), () => {}, new AbortController().signal);
+    expect(cap4.options!.canUseTool).toBeUndefined();
   });
 
   it("maps error subtypes and max turns", async () => {
@@ -160,13 +174,20 @@ describe("ClaudeRuntime.run", () => {
     expect((await new ClaudeRuntime({ sdk: fakeSdk({}) }).check()).ok).toBe(true);
   });
 
-  it("exports the configured api key only for the duration of a run", async () => {
+  it("passes the configured api key through the SDK env option and never touches process.env", async () => {
     for (const k of ENV_KEYS) delete process.env[k];
-    let seen: string | undefined;
-    const sdk: ClaudeSdk = { ...fakeSdk({}), query: (() => { seen = process.env.ANTHROPIC_API_KEY; return (async function* () { yield script[3]; })(); }) as never };
+    let seenDuringQuery: string | undefined;
+    const cap: Capture = {};
+    const sdk: ClaudeSdk = { ...fakeSdk(cap), query: ((p: { options: Record<string, unknown> }) => { cap.options = p.options; seenDuringQuery = process.env.ANTHROPIC_API_KEY; return (async function* () { yield script[3]; })(); }) as never };
     await new ClaudeRuntime({ sdk, apiKey: "secret" }).run(req(), () => {}, new AbortController().signal);
-    expect(seen).toBe("secret");
+    expect(seenDuringQuery).toBeUndefined();
     expect(process.env.ANTHROPIC_API_KEY).toBeUndefined();
+    const env = cap.options!.env as Record<string, string>;
+    expect(env.ANTHROPIC_API_KEY).toBe("secret");
+    expect(env.PATH ?? env.Path).toBeDefined();
+    const cap2: Capture = {};
+    await new ClaudeRuntime({ sdk: fakeSdk(cap2) }).run(req(), () => {}, new AbortController().signal);
+    expect(cap2.options!.env).toBeUndefined();
   });
 });
 

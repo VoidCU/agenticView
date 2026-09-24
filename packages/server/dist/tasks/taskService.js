@@ -33,7 +33,7 @@ export class TaskService {
         if (input.parentId)
             task.parentId = input.parentId;
         await this.store.write(task.id, task);
-        this.onChange(task);
+        this.onChange(task, "state");
         return task;
     }
     get(id) {
@@ -58,7 +58,7 @@ export class TaskService {
             if (isTerminal(to))
                 next.finishedAt = now;
             await this.store.write(id, next);
-            this.onChange(next);
+            this.onChange(next, "state");
             return next;
         });
     }
@@ -69,7 +69,7 @@ export class TaskService {
                 return;
             const next = { ...cur, log: [...cur.log, { ts: new Date().toISOString(), type, text }].slice(-TASK_LOG_CAP) };
             await this.store.write(id, next);
-            this.onChange(next);
+            this.onChange(next, "log");
         });
     }
     /** Replace the most recent log entry (used to coalesce streamed text). No-op when the log is empty. */
@@ -80,7 +80,7 @@ export class TaskService {
                 return;
             const next = { ...cur, log: [...cur.log.slice(0, -1), entry] };
             await this.store.write(id, next);
-            this.onChange(next);
+            this.onChange(next, "log");
         });
     }
     /** Called on boot: anything still running or waiting was interrupted by a server restart. */

@@ -1093,6 +1093,13 @@ h3 {
   transition: opacity 250ms linear;
 }
 
+.field-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted, #8b93ad);
+}
+
 .pad-btn {
   pointer-events: auto;
   display: inline-flex;

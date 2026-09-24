@@ -14,6 +14,9 @@ export declare const CLAUDE_CREDENTIAL_ENV: readonly ["ANTHROPIC_API_KEY", "CLAU
 export declare const CLAUDE_MISSING_KEY_REASON = "Set ANTHROPIC_API_KEY (or a cloud provider env). The Agent SDK does not use the Claude Code login.";
 export type ClaudePermissionMode = "default" | "acceptEdits" | "bypassPermissions";
 export interface ClaudeOptionSubset {
+    /** Which built-in tools exist for this run (availability). */
+    tools: string[];
+    /** Tools that never prompt: read-only tools and our own bridge tools. Edit/Bash are deliberately absent so `canUseTool` sees them. */
     allowedTools: string[];
     disallowedTools: string[];
     permissionMode: ClaudePermissionMode;

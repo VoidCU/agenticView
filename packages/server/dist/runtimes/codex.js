@@ -4,7 +4,9 @@ export const CODEX_MISSING_REASON = "Install the Codex CLI (npm i -g @openai/cod
  * Permission mode → Codex sandbox. `ask` cannot prompt through the SDK, so it is read-only (the most
  * restrictive setting). Codex's Windows sandbox cannot write files, so `auto-edit` needs full access there.
  */
-export function sandboxFor(mode, platform = process.platform) {
+export function sandboxFor(mode, platform = process.platform, tools) {
+    if (tools && !tools.edit && !tools.shell)
+        return "read-only";
     if (mode === "ask")
         return "read-only";
     if (mode === "auto")
@@ -124,7 +126,7 @@ export class CodexRuntime {
                 };
             }
             const codex = new sdk.Codex({ env, config: config });
-            const threadOpts = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: sandboxFor(req.permissionMode), ...(req.model ? { model: req.model } : {}) };
+            const threadOpts = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: sandboxFor(req.permissionMode, process.platform, req.tools), ...(req.model ? { model: req.model } : {}) };
             const thread = req.sessionId ? codex.resumeThread(req.sessionId, threadOpts) : codex.startThread(threadOpts);
             const input = [];
             const textParts = req.prompt.filter((p) => p.type === "text").map((p) => (p.type === "text" ? p.text : ""));
