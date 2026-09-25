@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import type { PermissionMode, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 import { which as defaultWhich, type Which } from "./which.js";
+import { extractCliError } from "./errors.js";
 
 export interface GeminiRuntimeOptions {
   bin?: string;
@@ -328,12 +329,15 @@ export class GeminiRuntime implements Runtime {
       const code = await exit;
       if (signal.aborted) return { text, stopReason: "aborted", sessionId };
       if (code === 53) return { text, stopReason: "max_turns", error: "turn limit exceeded", sessionId };
-      if (code !== 0) return { text, stopReason: "error", error: `gemini exited with ${code}: ${stderr.slice(-20).join("\n")}`, sessionId };
-      if (final && !final.ok) return { text, stopReason: "error", error: final.error, sessionId };
+      if (code !== 0) {
+        const raw = stderr.length ? stderr.slice(-20).join("\n") : `gemini exited with ${code}`;
+        return { text, stopReason: "error", error: extractCliError(raw), sessionId };
+      }
+      if (final && !final.ok) return { text, stopReason: "error", error: extractCliError(final.error ?? "gemini reported an error"), sessionId };
       return { text, stopReason: "done", sessionId };
     } catch (e) {
       if (signal.aborted) return { text, stopReason: "aborted", sessionId };
-      return { text, stopReason: "error", error: (e as Error).message, sessionId };
+      return { text, stopReason: "error", error: extractCliError((e as Error).message), sessionId };
     } finally {
       signal.removeEventListener("abort", onAbort);
       await restore();

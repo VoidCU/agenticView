@@ -54,20 +54,29 @@ describe("TaskService", () => {
     await expect(s.log("t_missing", "text", "x")).resolves.toBeUndefined();
   });
 
-  it("recovers interrupted tasks on boot", async () => {
+  it("recovers interrupted tasks on boot: running/waiting -> failed, assigned -> requeued, queued untouched", async () => {
     const s = new TaskService(join(dir, "tasks"), onChange);
     const a = await mk(s);
     const b = await mk(s);
     const c = await mk(s);
+    const d = await mk(s);
     await s.transition(a.id, "assigned");
     await s.transition(a.id, "running");
     await s.transition(b.id, "assigned");
     await s.transition(b.id, "running");
     await s.transition(b.id, "waiting");
+    // d is assigned but not yet running — should be re-queued.
+    await s.transition(d.id, "assigned");
     const s2 = new TaskService(join(dir, "tasks"), onChange);
     const fixed = await s2.recoverInterrupted();
-    expect(fixed.map((t) => t.status)).toEqual(["failed", "failed"]);
-    expect(fixed.every((t) => t.error === "interrupted")).toBe(true);
+    // running and waiting -> failed; assigned -> queued
+    const failed = fixed.filter((t) => t.status === "failed");
+    const requeued = fixed.filter((t) => t.status === "queued");
+    expect(failed.map((t) => t.id).sort()).toEqual([a.id, b.id].sort());
+    expect(failed.every((t) => t.error === "interrupted")).toBe(true);
+    expect(requeued.map((t) => t.id)).toEqual([d.id]);
+    expect(requeued[0]!.error).toBeUndefined();
+    // c was queued and should remain queued, untouched by recovery.
     expect((await s2.get(c.id))!.status).toBe("queued");
   });
 

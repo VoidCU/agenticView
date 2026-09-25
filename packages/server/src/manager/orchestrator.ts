@@ -33,6 +33,8 @@ export interface ResolvedSettings extends ProjectSettings {
   providerModels: Partial<Record<Provider, string | undefined>>;
 }
 
+import type { UsageTracker } from "./usageTracker.js";
+
 export interface WorldDeps {
   world: WorldRef;
   root: string;
@@ -49,6 +51,8 @@ export interface WorldDeps {
   workerTools?: (agent: Agent, task: Task) => BridgeTool[];
   spaceNames?: () => Record<string, string>;
   renameSpace?: (id: string, name: string) => Promise<void>;
+  usageTracker?: UsageTracker;
+  emitProviders?: () => Promise<void>;
 }
 
 export interface UserMessageInput {
@@ -422,6 +426,8 @@ export class Orchestrator {
     const runId = newId("r");
     let final: Task | undefined;
     let releaseConvo = () => {};
+    let runAgent: Agent | undefined;
+    let runProvider: Provider | undefined;
     try {
       const savedAgent = await registry.get(task.assigneeId);
       const agent = savedAgent && task.readOnly ? { ...savedAgent, tools: { edit: false, shell: false, web: false, screenshot: false } } : savedAgent;
@@ -429,12 +435,14 @@ export class Orchestrator {
         final = await this.finish(task, "failed", { error: `unknown agent ${task.assigneeId}` });
         return;
       }
+      runAgent = agent;
       const problem = await this.providerProblem(agent);
       if (problem) {
         final = await this.finish(task, "failed", { error: problem });
         return;
       }
       const { provider, model } = await this.resolveProviderLive(agent);
+      runProvider = provider;
       const runtime = this.deps.runtimes.get(provider)!;
       await tasks.transition(task.id, "running");
       const key = this.sessionKey(task, agent);
@@ -490,11 +498,47 @@ export class Orchestrator {
       }
       if (result.stopReason === "done") {
         final = await this.finish(task, "done", { result: result.text, session });
+        this.deps.usageTracker?.recordSuccess(agent, provider, req.model ?? agent.model ?? "default");
+        const liveAgent = await registry.get(agent.id);
+        if (liveAgent?.limit?.limited) {
+          const cleared = await registry.update(agent.id, { limit: undefined });
+          this.emitAgent(cleared);
+        }
       } else {
-        final = await this.finish(task, "failed", { error: result.error ?? result.stopReason, result: result.text || undefined, session });
+        const errorText = result.error ?? result.stopReason;
+        final = await this.finish(task, "failed", { error: errorText, result: result.text || undefined, session });
+        if (this.deps.usageTracker) {
+          const lim = this.deps.usageTracker.recordFailure(agent, provider, req.model ?? agent.model ?? "default", errorText);
+          const updatedAgent = await registry.update(agent.id, { limit: lim });
+          this.emitAgent(updatedAgent);
+          await this.deps.emitProviders?.();
+        }
+      }
+      if (result.usage && this.deps.usageTracker) {
+        await this.deps.usageTracker.recordRun({
+          runId,
+          taskId: task.id,
+          agentId: agent.id,
+          provider,
+          model: req.model ?? agent.model ?? "default",
+          inputTokens: result.usage.inputTokens,
+          outputTokens: result.usage.outputTokens,
+          totalTokens: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0),
+          timestamp: new Date().toISOString(),
+        });
+      }
+      if (result.rateLimits && this.deps.usageTracker) {
+        this.deps.usageTracker.recordRateLimits(provider, req.model ?? agent.model ?? "default", result.rateLimits);
       }
     } catch (e) {
-      final = await this.finish(task, "failed", { error: (e as Error).message });
+      const errorText = (e as Error).message;
+      final = await this.finish(task, "failed", { error: errorText });
+      if (this.deps.usageTracker && runAgent && runProvider) {
+        const lim = this.deps.usageTracker.recordFailure(runAgent, runProvider, runAgent.model ?? "default", errorText);
+        const updatedAgent = await registry.update(runAgent.id, { limit: lim });
+        this.emitAgent(updatedAgent);
+        await this.deps.emitProviders?.();
+      }
     } finally {
       releaseConvo();
       this.aborts.delete(task.id);

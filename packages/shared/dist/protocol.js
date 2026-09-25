@@ -3,11 +3,13 @@ import { AgentSchema, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema,
 import { EffortSchema } from "./models.js";
 import { ProjectSettingsSchema, KnownProjectSchema } from "./settings.js";
 import { AgentSessionSchema, MAX_SESSION_CAPACITY } from "./session.js";
+import { LimitInfoSchema } from "./limits.js";
 export const ProviderStatusSchema = z.object({
     provider: ProviderSchema,
     ok: z.boolean(),
     version: z.string().optional(),
     reason: z.string().optional(),
+    limit: LimitInfoSchema.optional(),
 });
 export const WorldInfoSchema = z.object({
     kind: z.enum(["project", "hub"]),
@@ -30,7 +32,7 @@ export const CreateAgentPayloadSchema = z.object({
     appearance: AgentSchema.shape.appearance.optional(),
 });
 // Explicit optional overrides: partial() would still apply the defaults and wipe fields a patch omits.
-export const AgentPatchSchema = AgentSchema.partial().omit({ id: true, role: true, scope: true, stats: true, createdAt: true, updatedAt: true, originId: true }).extend({
+export const AgentPatchSchema = AgentSchema.partial().omit({ id: true, role: true, scope: true, stats: true, createdAt: true, updatedAt: true, originId: true, limit: true }).extend({
     description: z.string().max(2000).optional(),
     systemPrompt: z.string().max(20000).optional(),
 });
@@ -45,9 +47,23 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     }),
     z.object({ type: z.literal("agent.create"), agent: CreateAgentPayloadSchema }),
     z.object({ type: z.literal("agent.update"), id: z.string(), patch: AgentPatchSchema }),
+    z.object({
+        type: z.literal("agent.switch"),
+        id: z.string(),
+        provider: ProviderSchema.nullable().optional(),
+        model: z.string().nullable().optional(),
+        effort: EffortSchema.nullable().optional(),
+    }),
+    z.object({
+        type: z.literal("provider.switchAll"),
+        fromProvider: ProviderSchema,
+        toProvider: ProviderSchema,
+        toModel: z.string().nullable().optional(),
+    }),
     z.object({ type: z.literal("agent.copyToProject"), id: z.string() }),
     z.object({ type: z.literal("agent.delete"), id: z.string() }),
     z.object({ type: z.literal("task.cancel"), id: z.string() }),
+    z.object({ type: z.literal("task.retry"), id: z.string() }),
     z.object({ type: z.literal("permission.respond"), id: z.string(), allow: z.boolean() }),
     z.object({ type: z.literal("question.respond"), id: z.string(), answer: z.string() }),
     z.object({ type: z.literal("settings.update"), settings: ProjectSettingsSchema.partial() }),

@@ -65,34 +65,111 @@ function useFloorMaterials(p: Palette) {
   }, [p]);
 }
 
-function SpaceLabel({ space, count, lead }: { space: Space; count: number; lead?: string }) {
+const decalCache = new Map<string, THREE.CanvasTexture>();
+
+function getDecalTexture(name: string, isDark: boolean): THREE.CanvasTexture {
+  const key = `${name}::${isDark ? "dark" : "light"}`;
+  let tex = decalCache.get(key);
+  if (tex) return tex;
+
+  const canvas =
+    typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(1024, 256)
+      : typeof document !== "undefined"
+        ? document.createElement("canvas")
+        : null;
+
+  if (!canvas) {
+    tex = new THREE.CanvasTexture(new Image());
+    decalCache.set(key, tex);
+    return tex;
+  }
+
+  canvas.width = 1024;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+
+  if (ctx) {
+    ctx.clearRect(0, 0, 1024, 256);
+
+    // Painted straight onto the floor like a stencil: big uppercase letters, no background plate,
+    // a thin contrasting outline so the paint reads on carpet and wood alike.
+    const label = name.toUpperCase();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    let fontSize = 150;
+    const setFont = () => (ctx.font = `800 ${fontSize}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`);
+    setFont();
+    while (ctx.measureText(label).width > 980 && fontSize > 48) {
+      fontSize -= 6;
+      setFont();
+    }
+    if ("letterSpacing" in ctx) (ctx as unknown as { letterSpacing: string }).letterSpacing = "6px";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = isDark ? "rgba(0, 0, 0, 0.35)" : "rgba(255, 255, 255, 0.55)";
+    ctx.strokeText(label, 512, 132);
+    ctx.fillStyle = isDark ? "rgba(226, 236, 255, 0.78)" : "rgba(28, 38, 58, 0.72)";
+    ctx.fillText(label, 512, 132);
+  }
+
+  tex = new THREE.CanvasTexture(canvas as any);
+  tex.anisotropy = 4;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  decalCache.set(key, tex);
+  return tex;
+}
+
+const decalGeometry = new THREE.PlaneGeometry(4.6, 1.15);
+
+function FloorDecal({
+  space,
+  isDark,
+  isHovered,
+  isFocused,
+}: {
+  space: Space;
+  isDark: boolean;
+  isHovered: boolean;
+  isFocused: boolean;
+}) {
   const setFocus = useFocus((s) => s.setFocus);
-  const focused = useFocus((s) => s.focus === space.id);
-  const hovered = useFocus((s) => s.hoverSpace === space.id);
-  const a = 60 * DEG;
+  const setHover = useFocus((s) => s.setHover);
+  const texture = useMemo(() => getDecalTexture(space.name, isDark), [space.name, isDark]);
+
+  const a = 45 * DEG;
+  // In the open floor between the room's furniture and its front wall, toward the camera.
+  const dist = space.kind === "office" ? 2.9 : space.kind === "meeting" ? 3.0 : 2.7;
+  const x = space.x + dist * Math.cos(a);
+  const z = space.z + dist * Math.sin(a);
+
   return (
-    <Html center position={[space.x + 4.9 * Math.cos(a), 1.55, space.z + 4.9 * Math.sin(a)]} distanceFactor={22} zIndexRange={[8, 0]}>
-      <button
-        type="button"
-        className={`space-plate space-${space.kind} ${focused ? "is-focused" : ""} ${hovered ? "is-hover" : ""}`}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation();
-          setFocus(focused ? undefined : space.id);
-        }}
-        title={focused ? "Back to the whole floor" : `Focus on ${space.name}`}
-      >
-        <span className="space-dot" aria-hidden />
-        <span className="space-name">{space.name}</span>
-        {space.seats > 0 ? (
-          <span className="space-count">
-            {count}/{space.seats}
-          </span>
-        ) : (
-          lead && <span className="space-count">{lead}</span>
-        )}
-      </button>
-    </Html>
+    <mesh
+      geometry={decalGeometry}
+      position={[x, 0.006, z]}
+      rotation={[-Math.PI / 2, 0, Math.PI / 4]}
+      onClick={(e: ThreeEvent<MouseEvent>) => {
+        if (e.delta > 4) return;
+        e.stopPropagation();
+        useStore.getState().select(undefined);
+        setFocus(isFocused ? undefined : space.id);
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        setHover(space.id);
+      }}
+      onPointerOut={() => useFocus.getState().hoverSpace === space.id && setHover(undefined)}
+    >
+      <meshBasicMaterial
+        map={texture}
+        transparent
+        depthWrite={false}
+        opacity={isFocused ? 1.0 : isHovered ? 0.95 : 0.82}
+        toneMapped={false}
+      />
+    </mesh>
   );
 }
 
@@ -104,14 +181,7 @@ function Floors({ spaces, palette, layout, managerName }: { spaces: Space[]; pal
   const setHover = useFocus((s) => s.setHover);
   const setFocus = useFocus((s) => s.setFocus);
   const dropSpace = useDrag((s) => (s.active ? s.overSpace : undefined));
-  const counts = useMemo(() => {
-    const c = new Map<string, number>();
-    for (const k of layout.occupied.keys()) {
-      const id = k.split("#")[0]!;
-      c.set(id, (c.get(id) ?? 0) + 1);
-    }
-    return c;
-  }, [layout]);
+  const isDark = palette.bg === PALETTES.dark.bg;
 
   return (
     <group>
@@ -143,7 +213,7 @@ function Floors({ spaces, palette, layout, managerName }: { spaces: Space[]; pal
                 <meshBasicMaterial color={color} transparent opacity={dropSpace ? 0.9 : hover === s.id ? 0.75 : 0.4} toneMapped={false} />
               </mesh>
             )}
-            <SpaceLabel space={s} count={counts.get(s.id) ?? 0} lead={s.kind === "office" ? managerName : undefined} />
+            <FloorDecal space={s} isDark={isDark} isHovered={hover === s.id} isFocused={focus === s.id} />
           </group>
         );
       })}

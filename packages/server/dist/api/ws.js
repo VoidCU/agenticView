@@ -50,8 +50,17 @@ async function handle(msg, world, opts, send) {
             await registry.remove(msg.id);
             bus.emit({ type: "agent.removed", id: msg.id });
             return;
+        case "agent.switch":
+            await world.switchAgent(msg.id, { provider: msg.provider, model: msg.model, effort: msg.effort });
+            return;
+        case "provider.switchAll":
+            await world.switchProvider(msg.fromProvider, { toProvider: msg.toProvider, toModel: msg.toModel });
+            return;
         case "task.cancel":
             await orchestrator.cancel(msg.id);
+            return;
+        case "task.retry":
+            await world.retryTask(msg.id);
             return;
         case "permission.respond":
             orchestrator.respondPermission(msg.id, msg.allow);

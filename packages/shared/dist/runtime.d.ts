@@ -24,6 +24,16 @@ export type RunEvent = {
     text: string;
 };
 export type StopReason = "done" | "error" | "aborted" | "max_turns";
+export interface RawRateLimitWindow {
+    used_percent?: number;
+    window_minutes?: number;
+    reset_at?: number | string;
+    resets_at?: number | string;
+}
+export interface RawRateLimits {
+    primary?: RawRateLimitWindow;
+    secondary?: RawRateLimitWindow;
+}
 export interface RunResult {
     sessionId?: string;
     text: string;
@@ -34,6 +44,7 @@ export interface RunResult {
         outputTokens: number;
     };
     error?: string;
+    rateLimits?: RawRateLimits;
 }
 export type PromptPart = {
     type: "text";

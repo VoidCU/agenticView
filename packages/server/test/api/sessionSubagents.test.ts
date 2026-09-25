@@ -59,7 +59,7 @@ describe("claude-session agents as subagents of one session", () => {
   it("git-ignores .agenticview and the generated subagents when the office opens", async () => {
     await writeFile(join(proj, ".gitignore"), "node_modules\r\n");
     await boot();
-    expect(await readFile(join(proj, ".gitignore"), "utf8")).toBe("node_modules\r\n\r\n# AgenticView\r\n.agenticview/\r\n.claude/agents/agenticview-*.md\r\n");
+    expect(await readFile(join(proj, ".gitignore"), "utf8")).toBe("node_modules\r\n\r\n# AgenticView\r\n.agenticview/\r\n.claude/agents/agenticview-*.md\r\n.agents/plugins/agenticview-*\r\n");
   });
 
   it("writes subagent files on start and on create/update, and removes them on provider change and delete", async () => {

@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { which as defaultWhich } from "./which.js";
+import { extractCliError } from "./errors.js";
 export const ANTIGRAVITY_MISSING_REASON = "Install the Antigravity CLI (agy) and sign in by running `agy` once.";
 const PLUGIN_PREFIX = "agenticview-";
 const SERVER_NAME = "agenticview";
@@ -495,17 +496,22 @@ export class AntigravityRuntime {
             if (!text && final?.response)
                 text = final.response;
             if (final && !final.ok)
-                return { text, stopReason: "error", error: final.error, sessionId, usage: final.usage };
-            if (code !== 0)
-                return { text, stopReason: "error", error: `agy exited with ${code}: ${stderr.slice(-20).join("\n")}`, sessionId, usage: final?.usage };
-            if (!final)
-                return { text, stopReason: "error", error: `agy ended without a result${stderr.length ? `: ${stderr.slice(-20).join("\n")}` : ""}`, sessionId };
+                return { text, stopReason: "error", error: extractCliError(final.error ?? "agy reported an error"), sessionId, usage: final.usage };
+            if (code !== 0) {
+                const exitMsg = `agy exited with code ${code}`;
+                const raw = stderr.length ? `${exitMsg}\n${stderr.slice(-20).join("\n")}` : exitMsg;
+                return { text, stopReason: "error", error: extractCliError(raw), sessionId, usage: final?.usage };
+            }
+            if (!final) {
+                const raw = stderr.length ? stderr.slice(-20).join("\n") : "agy ended without a result";
+                return { text, stopReason: "error", error: extractCliError(raw), sessionId };
+            }
             return { text, stopReason: "done", sessionId, usage: final.usage };
         }
         catch (e) {
             if (signal.aborted)
                 return { text, stopReason: "aborted", sessionId };
-            return { text, stopReason: "error", error: e.message, sessionId };
+            return { text, stopReason: "error", error: extractCliError(e.message), sessionId };
         }
         finally {
             signal.removeEventListener("abort", onAbort);

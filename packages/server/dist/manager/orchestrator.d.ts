@@ -9,6 +9,7 @@ export interface ResolvedSettings extends ProjectSettings {
     globalDefaultModel: string | null;
     providerModels: Partial<Record<Provider, string | undefined>>;
 }
+import type { UsageTracker } from "./usageTracker.js";
 export interface WorldDeps {
     world: WorldRef;
     root: string;
@@ -29,6 +30,8 @@ export interface WorldDeps {
     workerTools?: (agent: Agent, task: Task) => BridgeTool[];
     spaceNames?: () => Record<string, string>;
     renameSpace?: (id: string, name: string) => Promise<void>;
+    usageTracker?: UsageTracker;
+    emitProviders?: () => Promise<void>;
 }
 export interface UserMessageInput {
     agentId: string;

@@ -31,7 +31,8 @@ export declare class TaskService {
     setWorker(id: string, worker: TaskWorker): Promise<Task | undefined>;
     /** Replace the most recent log entry (used to coalesce streamed text). No-op when the log is empty. */
     replaceLastLog(id: string, entry: TaskLogEntry): Promise<void>;
-    /** Called on boot: anything still running or waiting was interrupted by a server restart. */
+    /** Called on boot: tasks that were running or waiting are failed; tasks that were assigned but
+     *  not yet started are re-queued so they get picked up again. */
     recoverInterrupted(): Promise<Task[]>;
     /** Award XP and bump counters on the assignee for a terminal task. */
     awardXp(registry: AgentRegistry, task: Task): Promise<void>;

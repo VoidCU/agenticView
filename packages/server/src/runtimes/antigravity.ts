@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { Effort, PermissionMode, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 import { which as defaultWhich, type Which } from "./which.js";
+import { extractCliError } from "./errors.js";
 
 /**
  * Google Antigravity CLI (`agy`) runtime.
@@ -555,13 +556,20 @@ export class AntigravityRuntime implements Runtime {
       const code = await exit;
       if (signal.aborted) return { text, stopReason: "aborted", sessionId };
       if (!text && final?.response) text = final.response;
-      if (final && !final.ok) return { text, stopReason: "error", error: final.error, sessionId, usage: final.usage };
-      if (code !== 0) return { text, stopReason: "error", error: `agy exited with ${code}: ${stderr.slice(-20).join("\n")}`, sessionId, usage: final?.usage };
-      if (!final) return { text, stopReason: "error", error: `agy ended without a result${stderr.length ? `: ${stderr.slice(-20).join("\n")}` : ""}`, sessionId };
+      if (final && !final.ok) return { text, stopReason: "error", error: extractCliError(final.error ?? "agy reported an error"), sessionId, usage: final.usage };
+      if (code !== 0) {
+        const exitMsg = `agy exited with code ${code}`;
+        const raw = stderr.length ? `${exitMsg}\n${stderr.slice(-20).join("\n")}` : exitMsg;
+        return { text, stopReason: "error", error: extractCliError(raw), sessionId, usage: final?.usage };
+      }
+      if (!final) {
+        const raw = stderr.length ? stderr.slice(-20).join("\n") : "agy ended without a result";
+        return { text, stopReason: "error", error: extractCliError(raw), sessionId };
+      }
       return { text, stopReason: "done", sessionId, usage: final.usage };
     } catch (e) {
       if (signal.aborted) return { text, stopReason: "aborted", sessionId };
-      return { text, stopReason: "error", error: (e as Error).message, sessionId };
+      return { text, stopReason: "error", error: extractCliError((e as Error).message), sessionId };
     } finally {
       signal.removeEventListener("abort", onAbort);
       await restore();

@@ -1,4 +1,5 @@
-import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo } from "@agenticview/shared";
+import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type Effort, type LimitsReport, type UsageReport } from "@agenticview/shared";
+import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { type SyncResult } from "./agents/subagents.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
@@ -36,6 +37,23 @@ export interface World {
     sessionRuntime?: SessionRuntime;
     /** Push fresh provider availability (and the Automatic choice) to every client. */
     emitProviders: () => Promise<void>;
+    /** Tracker for token usage, rate limits, and provider limit states. */
+    usageTracker: UsageTracker;
+    switchAgent: (id: string, patch: {
+        provider?: Provider | null;
+        model?: string | null;
+        effort?: Effort | null;
+    }) => Promise<Agent>;
+    switchProvider: (fromProvider: Provider, opts: {
+        toProvider: Provider;
+        toModel?: string | null;
+    }) => Promise<{
+        count: number;
+        agents: Agent[];
+    }>;
+    retryTask: (taskId: string) => Promise<Task>;
+    getLimits: () => Promise<LimitsReport>;
+    getUsage: () => Promise<UsageReport>;
 }
 export declare function globalConfigPath(): string;
 export declare function readGlobalConfig(): Promise<GlobalConfig>;

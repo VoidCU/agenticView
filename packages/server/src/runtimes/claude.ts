@@ -3,6 +3,7 @@ import { extname } from "node:path";
 import type { PermissionMode, ProviderStatus, RunEvent, RunResult } from "@agenticview/shared";
 import type { query as sdkQuery, tool as sdkTool, createSdkMcpServer as sdkCreateServer } from "@anthropic-ai/claude-agent-sdk";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
+import { extractCliError } from "./errors.js";
 
 export interface ClaudeSdk {
   query: typeof sdkQuery;
@@ -130,7 +131,8 @@ function resultOf(msg: Record<string, unknown>, text: string): RunResult {
   if (subtype === "success") return base;
   if (subtype === "error_max_turns") return { ...base, stopReason: "max_turns", error: "error_max_turns" };
   const errors = Array.isArray(msg.errors) ? (msg.errors as unknown[]).map(String).join("; ") : "";
-  return { ...base, stopReason: "error", error: errors ? `${subtype}: ${errors}` : subtype };
+  const rawErr = errors ? `${subtype}: ${errors}` : subtype;
+  return { ...base, stopReason: "error", error: extractCliError(rawErr) };
 }
 
 async function imageBlock(path: string): Promise<Block> {
@@ -233,7 +235,7 @@ export class ClaudeRuntime implements Runtime {
       }
     } catch (e) {
       if (signal.aborted) return { text, stopReason: "aborted" };
-      return { text, stopReason: "error", error: (e as Error).message };
+      return { text, stopReason: "error", error: extractCliError((e as Error).message) };
     }
   }
 }

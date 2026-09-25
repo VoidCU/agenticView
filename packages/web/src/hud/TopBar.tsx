@@ -19,15 +19,24 @@ interface Props {
   onSettings: () => void;
   onCreate: () => void;
   onSessions?: () => void;
+  onInbox?: () => void;
 }
 
-export function TopBar({ onSettings, onCreate, onSessions }: Props) {
+export function TopBar({ onSettings, onCreate, onSessions, onInbox }: Props) {
   const sessions = useStore((s) => s.sessions);
   const online = sessions.filter((s) => s.online).length;
   const world = useStore((s) => s.world);
   const providers = useStore((s) => s.providers);
   const connected = useStore((s) => s.connected);
+  const questions = useStore((s) => s.questions);
+  const permissions = useStore((s) => s.permissions);
+  const pendingCount = questions.length + permissions.length;
   const hub = world?.kind === "hub";
+
+  const handleInbox = () => {
+    onInbox?.();
+    window.dispatchEvent(new CustomEvent("agenticview:open-inbox"));
+  };
 
   return (
     <header className="topbar">
@@ -54,6 +63,19 @@ export function TopBar({ onSettings, onCreate, onSessions }: Props) {
             Hub
           </span>
         </span>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm inbox-button"
+          onClick={handleInbox}
+          title="Inbox"
+          aria-label={`Inbox (${pendingCount})`}
+          data-testid="inbox-button"
+        >
+          Inbox
+          <span className={`inbox-badge ${pendingCount === 0 ? "inbox-badge-empty" : ""}`}>
+            {pendingCount}
+          </span>
+        </button>
         {onSessions && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={onSessions} title="Claude Code sessions serving this office" data-testid="sessions-button">
             Sessions{sessions.length ? ` ${online}/${sessions.length}` : ""}

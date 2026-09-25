@@ -31,11 +31,11 @@ describe("TaskSchema", () => {
   it("has the exact transition table", () => {
     expect(TRANSITIONS).toEqual({
       queued: ["assigned", "cancelled"],
-      assigned: ["running", "cancelled"],
+      assigned: ["running", "queued", "cancelled"],
       running: ["waiting", "done", "failed", "cancelled"],
       waiting: ["running", "failed", "cancelled"],
       done: [],
-      failed: [],
+      failed: ["queued"],
       cancelled: [],
     });
   });
