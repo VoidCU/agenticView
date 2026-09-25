@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
+  MAX_SESSION_CAPACITY,
   WORK_COMMAND,
   modelFamily,
   newSessionUri,
@@ -8,6 +9,7 @@ import {
   sessionModelMatches,
   type Agent,
   type Provider,
+  type SessionRunInfo,
   type WorkerSessionInfo,
 } from "@agenticview/shared";
 import { useStore } from "../state/store";
@@ -31,8 +33,38 @@ export function boundSession(agent: Agent, sessions: WorkerSessionInfo[]): Worke
 /** "Session X is on Sonnet 5; run /model opus in that session to switch", or undefined when they match. */
 export function modelMismatchHint(requested: string | null | undefined, session: Pick<WorkerSessionInfo, "name" | "model"> | undefined): string | undefined {
   if (!requested || !session?.model || sessionModelMatches(requested, session.model)) return undefined;
+  // A Claude alias is written into the agent's subagent file, which runs on it whatever the session's model.
+  if (modelFamily(requested)) return undefined;
   const alias = modelFamily(requested) ?? requested;
   return `Session "${session.name}" is on ${session.model}; run /model ${alias} in that session to switch.`;
+}
+
+/** The run serving an agent right now, with its session (a session may run several agents at once). */
+export function servingRun(agentId: string, sessions: WorkerSessionInfo[]): { session: WorkerSessionInfo; run: SessionRunInfo } | undefined {
+  for (const session of sessions) {
+    const run = (session.runs ?? []).find((r) => r.agentId === agentId);
+    if (run) return { session, run };
+  }
+  return undefined;
+}
+
+/** Chat header chip: the session and subagent serving the agent right now ("Main tab › agenticview-nova"). */
+export function ServingChip({ agent }: { agent: Agent }) {
+  const sessions = useStore((s) => s.sessions);
+  const hit = servingRun(agent.id, sessions);
+  if (!hit) return null;
+  const { session, run } = hit;
+  const who = run.subagent ?? "main thread";
+  const idPart = run.subagentId ? ` (id ${run.subagentId})` : "";
+  return (
+    <span className="chip chip-ok chip-serving" data-testid="serving-chip" title={`Running in Claude Code session "${session.name}" as ${who}${idPart}, run ${run.runId}`}>
+      <span className="chip-dot" aria-hidden="true" />
+      <span className="chip-text">
+        {session.name} › {who}
+        {run.subagentId ? ` #${run.subagentId.slice(0, 8)}` : ""}
+      </span>
+    </span>
+  );
 }
 
 /** Command a user types in a fresh terminal session when the VS Code link cannot open. */
@@ -173,7 +205,7 @@ export function SessionNotice({ agent }: { agent: Agent }) {
   const s = boundSession(agent, sessions);
   const mismatch = modelMismatchHint(agent.model, s);
   const busy = Object.values(tasks).some((t) => t.assigneeId === agent.id && (t.status === "running" || t.status === "assigned" || t.status === "queued"));
-  const waiting = busy && s && !s.online && !sessions.some((x) => x.currentTaskId && tasks[x.currentTaskId]?.assigneeId === agent.id);
+  const waiting = busy && s && !s.online && !servingRun(agent.id, sessions);
   if (!waiting && !mismatch) return null;
   if (provider !== "claude-session") return null;
   const name = s?.name ?? agent.session?.name ?? agent.session?.id.slice(0, 8) ?? "";
@@ -224,7 +256,8 @@ function SessionRow({ s }: { s: WorkerSessionInfo }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(s.name);
   const bound = s.agentIds.map((id) => agents[id]?.name).filter(Boolean);
-  const task = s.currentTaskId ? tasks[s.currentTaskId] : undefined;
+  const runs = s.runs ?? [];
+  const capacity = s.capacity ?? 4;
   return (
     <li className="session-row" data-session={s.id}>
       <div className="session-main">
@@ -253,10 +286,45 @@ function SessionRow({ s }: { s: WorkerSessionInfo }) {
       <div className="session-meta">
         <span>{s.online ? "online" : `last seen ${timeAgo(s.lastSeen)}`}</span>
         <span>{bound.length ? `serves ${bound.join(", ")}` : "no agents bound"}</span>
-        {task && <span>working on “{task.title}”</span>}
+        <span>
+          {runs.length} of {capacity} running
+        </span>
         {s.cwd && <span title={s.cwd}>{s.cwd}</span>}
       </div>
+      {runs.length > 0 && (
+        <ul className="session-runs" aria-label={`Running in ${s.name}`}>
+          {runs.map((r) => {
+            const task = r.taskId ? tasks[r.taskId] : undefined;
+            return (
+              <li key={r.runId} className="session-run" data-run={r.runId}>
+                <strong>{agents[r.agentId]?.name ?? r.agentId}</strong>
+                <span className="session-run-task">{task ? `“${task.title}”` : r.runId}</span>
+                <code title={r.subagentId ? `subagent id ${r.subagentId}` : "Claude Code subagent"}>
+                  {r.subagent ?? "main thread"}
+                  {r.subagentId ? ` #${r.subagentId.slice(0, 8)}` : ""}
+                </code>
+                <span className="session-run-time">{timeAgo(r.startedAt)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <div className="session-actions">
+        <label className="session-capacity" title="How many tasks this session runs at once, each in its own background subagent">
+          <span>Tasks at once</span>
+          <select
+            aria-label={`Tasks at once in ${s.name}`}
+            className="select-xs"
+            value={capacity}
+            onChange={(e) => send({ type: "session.capacity", id: s.id, capacity: Number(e.target.value) })}
+          >
+            {Array.from({ length: MAX_SESSION_CAPACITY }, (_, i) => i + 1).map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
         <ResumeSessionLink session={s} className="btn btn-ghost btn-xs" />
         <button type="button" className="btn btn-ghost btn-xs" onClick={() => setEditing((v) => !v)}>
           Rename
@@ -284,7 +352,8 @@ export function SessionsModal({ onClose }: { onClose: () => void }) {
     <Modal title="Claude Code sessions" onClose={onClose} wide>
       <p className="hint">
         Agents on the <strong>Claude Code session</strong> provider are served by your own Claude Code sessions running <code>{WORK_COMMAND}</code>. Each agent sticks to the
-        session that served it (or the one named in the command) and its tasks wait for that session, even across restarts.
+        session that served it (or the one named in the command) and its tasks wait for that session, even across restarts. A session runs several agents at once, each in its
+        own background subagent (<code>.claude/agents/agenticview-&lt;name&gt;.md</code>), up to its <em>Tasks at once</em>.
       </p>
       {sessions.length === 0 ? (
         <p className="empty">No session has connected yet.</p>
@@ -311,7 +380,7 @@ export function SessionsModal({ onClose }: { onClose: () => void }) {
           </label>
           <NewSessionLink agentName={forAgent || undefined} label="New session" className="btn btn-primary btn-sm" />
         </div>
-        <p className="field-hint">{ENTER_HINT} A session keeps the model it was started with: switch it there with /model.</p>
+        <p className="field-hint">{ENTER_HINT} Each agent runs on the model set for it (its subagent); agents without one use the session's model, which you switch there with /model.</p>
       </fieldset>
     </Modal>
   );

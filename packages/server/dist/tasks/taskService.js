@@ -72,6 +72,19 @@ export class TaskService {
             this.onChange(next, "log");
         });
     }
+    /** Merge who worked on a task (claude-session attribution) without changing its status. */
+    setWorker(id, worker) {
+        return this.locked(id, async () => {
+            const cur = await this.store.read(id);
+            if (!cur)
+                return undefined;
+            const merged = cur.worker?.runId === worker.runId ? { ...cur.worker, ...worker } : worker;
+            const next = { ...cur, worker: merged };
+            await this.store.write(id, next);
+            this.onChange(next, "state");
+            return next;
+        });
+    }
     /** Replace the most recent log entry (used to coalesce streamed text). No-op when the log is empty. */
     replaceLastLog(id, entry) {
         return this.locked(id, async () => {

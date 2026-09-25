@@ -1,8 +1,12 @@
 import { z } from "zod";
+/** Default number of tasks one Claude Code session runs at once (one subagent each). */
+export const DEFAULT_SESSION_CAPACITY = 4;
+export const MAX_SESSION_CAPACITY = 8;
 /**
  * A Claude Code session that has connected to the office with /agenticview-work (the
  * `claude-session` provider). Identified by Claude Code's own session id (`${CLAUDE_SESSION_ID}`),
- * so it is recognised again when the user reopens or resumes that session.
+ * so it is recognised again when the user reopens or resumes that session. The session is a
+ * coordinator: it runs each claimed task in a background subagent, several at once.
  */
 export const WorkerSessionSchema = z.object({
     id: z.string().min(1).max(64),
@@ -14,6 +18,8 @@ export const WorkerSessionSchema = z.object({
     lastSeen: z.string(),
     /** True once the user renamed it in the office (auto names never overwrite it). */
     named: z.boolean().default(false),
+    /** How many office tasks this session runs at once (each in its own background subagent). */
+    capacity: z.number().int().min(1).max(MAX_SESSION_CAPACITY).default(DEFAULT_SESSION_CAPACITY),
 });
 export const WorkerSessionFileSchema = z.object({ sessions: z.array(WorkerSessionSchema).default([]) });
 /** The binding stored on a claude-session agent. */

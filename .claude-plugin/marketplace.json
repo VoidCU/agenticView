@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "agenticview",
-      "description": "Gamified 3D office for your coding agents (Claude, Codex, Gemini) with a delegating Manager.",
-      "version": "0.2.3",
+      "description": "Gamified 3D office for your coding agents (Claude, Codex, Antigravity, Gemini) with a delegating Manager.",
+      "version": "0.2.4",
       "source": "./",
       "tags": ["agents", "3d", "visualization"]
     }

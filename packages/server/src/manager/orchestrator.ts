@@ -114,7 +114,7 @@ export class Orchestrator {
   /** Returns a human-readable problem when the agent's provider cannot run, else undefined. */
   async providerProblem(agent: Agent): Promise<string | undefined> {
     if (this.isAutomatic(agent) && !(await this.autoProvider())) {
-      return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex or gemini CLI";
+      return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex, agy (Antigravity) or gemini CLI";
     }
     const { provider } = await this.resolveProviderLive(agent);
     const runtime = this.deps.runtimes.get(provider);
@@ -175,18 +175,27 @@ export class Orchestrator {
     if (this.pumping) return;
     this.pumping = true;
     try {
-      while (this.queue.length > 0) {
-        const id = this.queue[0]!;
+      let i = 0;
+      while (i < this.queue.length) {
+        const id = this.queue[i]!;
         const task = await this.deps.tasks.get(id);
         if (!task || task.status !== "assigned") {
-          this.queue.shift();
+          this.queue.splice(i, 1);
           continue;
         }
         const agent = await this.deps.registry.get(task.assigneeId);
         const isManager = agent?.role === "manager";
-        if (!isManager && this.active.size >= this.deps.settings().maxConcurrentRuns) break;
-        this.queue.shift();
-        if (!isManager) this.active.add(id);
+        // Claude Code session runs happen in the user's own sessions, which enforce their own per-session
+        // capacity, so they neither wait for nor take up the office-wide worker slots.
+        const inSession = !!agent && (await this.resolveProviderLive(agent)).provider === "claude-session";
+        const limited = !isManager && !inSession;
+        if (limited && this.active.size >= this.deps.settings().maxConcurrentRuns) {
+          // Keep FIFO among limited tasks, but let managers and session tasks behind it start.
+          i++;
+          continue;
+        }
+        this.queue.splice(i, 1);
+        if (limited) this.active.add(id);
         void this.execute(task).finally(() => {
           this.active.delete(id);
           void this.pump();
@@ -328,9 +337,10 @@ export class Orchestrator {
   }
 
   /**
-   * claude-session deadlock guard for a Manager run `runId`: the target agent's task could only be
-   * picked up by the very session that is running the Manager (bound to it), which is busy until the
-   * Manager finishes.
+   * claude-session deadlock guard for a Manager run `runId`. A session runs several tasks at once (one
+   * subagent each), so a worker bound to the Manager's own session is fine as long as that session has
+   * a slot the waiting Manager does not occupy. It is a deadlock only when the target's task could be
+   * picked up by nothing but that session and every slot of it is held by a waiting Manager.
    */
   async sessionConflict(runId: string, target: Agent): Promise<string | undefined> {
     const rt = this.deps.runtimes.get("claude-session");
@@ -340,8 +350,10 @@ export class Orchestrator {
     const fresh = (await this.deps.registry.get(target.id)) ?? target;
     if ((await this.resolveProviderLive(fresh)).provider !== "claude-session") return undefined;
     if (fresh.session?.id !== mine) return undefined;
+    if (rt.spareSlotsBeside(mine, [runId]) > 0) return undefined;
     const name = rt.session(mine)?.name ?? fresh.session.name ?? mine;
-    return `${fresh.name} is bound to Claude Code session "${name}", the same session that is running you (the Manager), so its task could never start while you wait. Ask the user to open another Claude Code session for ${fresh.name} (Sessions panel > New session, or run ${WORK_COMMAND} ${fresh.name} in a new session), or to switch ${fresh.name} to "Any free session" or another session in the office, then assign again.`;
+    const cap = rt.capacityOf(mine);
+    return `${fresh.name} is bound to Claude Code session "${name}", the same session that is running you (the Manager), and that session runs only ${cap} task${cap === 1 ? "" : "s"} at once, all taken by you, so ${fresh.name}'s task could never start while you wait. Ask the user to raise that session's capacity in the office (Sessions panel), to open another Claude Code session for ${fresh.name} (Sessions panel > New session, or run ${WORK_COMMAND} ${fresh.name} in a new session), or to switch ${fresh.name} to "Any free session" or another session, then assign again.`;
   }
 
   private bridgeToolsFor(task: Task, agent: Agent, runId: string): BridgeTool[] {

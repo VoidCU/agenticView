@@ -1972,3 +1972,165 @@ h3 {
   white-space: nowrap;
   min-width: 0;
 }
+
+/* Sessions: capacity and the runs a session holds (one subagent each). */
+.session-capacity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.session-runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.session-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(61, 220, 151, 0.08);
+  border-left: 2px solid var(--green);
+  min-width: 0;
+}
+
+.session-run-task {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-run code {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.session-run-time {
+  color: var(--faint);
+}
+
+.chip-serving {
+  max-width: 100%;
+}
+
+/* Work log in the agent chat. */
+.worklog {
+  margin: 0 var(--gutter) 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input);
+  font-size: 13px;
+}
+
+.worklog > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.worklog-count {
+  margin-left: 6px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.worklog ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 8px;
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.worklog-item summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.worklog-item summary:hover,
+.worklog-item summary:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.worklog-status {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.worklog-done {
+  color: var(--green);
+}
+
+.worklog-failed,
+.worklog-cancelled {
+  color: var(--red);
+}
+
+.worklog-running,
+.worklog-waiting {
+  color: var(--blue);
+}
+
+.worklog-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worklog-when {
+  flex: none;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.worklog-body {
+  padding: 4px 8px 8px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.worklog-body p {
+  margin: 0;
+}
+
+.worklog-result {
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.worklog-by,
+.worklog-files,
+.worklog-id {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.worklog-files code {
+  margin-right: 6px;
+}

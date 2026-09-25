@@ -9,6 +9,7 @@ export declare const ProviderStatusSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        antigravity: "antigravity";
         gemini: "gemini";
     }>;
     ok: z.ZodBoolean;
@@ -38,6 +39,7 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
     model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -109,6 +111,7 @@ export declare const AgentPatchSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
     effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
@@ -150,6 +153,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            antigravity: "antigravity";
             gemini: "gemini";
         }>>>;
         model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -223,6 +227,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            antigravity: "antigravity";
             gemini: "gemini";
         }>>>;
         effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
@@ -269,6 +274,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            antigravity: "antigravity";
             gemini: "gemini";
         }>>>>;
         defaultModel: z.ZodOptional<z.ZodDefault<z.ZodNullable<z.ZodString>>>;
@@ -284,6 +290,10 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"session.forget">;
     id: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"session.capacity">;
+    id: z.ZodString;
+    capacity: z.ZodNumber;
 }, z.core.$strip>], "type">;
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export interface PendingPermissionInfo {

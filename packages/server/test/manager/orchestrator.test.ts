@@ -146,6 +146,32 @@ describe("Orchestrator", () => {
     expect((await ctx.tasks.list()).filter((x) => x.kind === "work")).toHaveLength(0);
   });
 
+  it("runs Claude Code session tasks outside maxConcurrentRuns, even behind a queued limited task", async () => {
+    const gate = deferred<void>();
+    const gated = new FakeRuntime(async function* () {
+      await gate.promise;
+      yield { type: "text", text: "api" };
+    });
+    const session = new FakeRuntime(async function* () {
+      yield { type: "text", text: "session" };
+    }, "claude-session");
+    const ctx = await setup(async function* () {}, {
+      runtimes: new Map<Provider, Runtime>([["claude", gated], ["claude-session", session]]),
+      settings: { maxConcurrentRuns: 1 },
+    });
+    const api = await ctx.reg.create({ name: "Api", specialty: "", provider: "claude" });
+    const sess = await ctx.reg.create({ name: "Sess", specialty: "", provider: "claude-session" });
+    const a1 = await ctx.orch.handleUserMessage({ agentId: api.id, text: "one" });
+    const a2 = await ctx.orch.handleUserMessage({ agentId: api.id, text: "two" });
+    const s1 = await ctx.orch.handleUserMessage({ agentId: sess.id, text: "three" });
+    // The API worker holds the only slot and its second task waits, yet the session task still runs to completion.
+    expect((await ctx.orch.awaitTask(s1.id)).status).toBe("done");
+    expect((await ctx.tasks.get(a2.id))!.status).toBe("assigned");
+    gate.resolve();
+    expect((await ctx.orch.awaitTask(a1.id)).status).toBe("done");
+    expect((await ctx.orch.awaitTask(a2.id)).status).toBe("done");
+  });
+
   it("respects maxConcurrentRuns and starts the queued task when a slot frees", async () => {
     const gate = deferred<void>();
     const ctx = await setup(

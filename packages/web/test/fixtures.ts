@@ -57,6 +57,7 @@ export function snapshot(agents: Agent[], tasks: Task[] = []): ServerMessage {
       { provider: "claude", ok: true, version: "1.0" },
       { provider: "claude-session", ok: false, reason: "Run /agenticview-work in a Claude Code session to connect it." },
       { provider: "codex", ok: false, reason: "codex CLI not installed" },
+      { provider: "antigravity", ok: false, reason: "agy not installed" },
       { provider: "gemini", ok: true },
     ],
     autoProvider: "claude",

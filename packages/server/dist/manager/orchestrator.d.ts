@@ -95,9 +95,10 @@ export declare class Orchestrator {
     private saveSession;
     private buildPrompt;
     /**
-     * claude-session deadlock guard for a Manager run `runId`: the target agent's task could only be
-     * picked up by the very session that is running the Manager (bound to it), which is busy until the
-     * Manager finishes.
+     * claude-session deadlock guard for a Manager run `runId`. A session runs several tasks at once (one
+     * subagent each), so a worker bound to the Manager's own session is fine as long as that session has
+     * a slot the waiting Manager does not occupy. It is a deadlock only when the target's task could be
+     * picked up by nothing but that session and every slot of it is held by a waiting Manager.
      */
     sessionConflict(runId: string, target: Agent): Promise<string | undefined>;
     private bridgeToolsFor;

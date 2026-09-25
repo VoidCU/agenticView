@@ -74,6 +74,12 @@ async function handle(msg, world, opts, send) {
             }
             return;
         }
+        case "session.capacity": {
+            const rt = world.sessionRuntime;
+            if (!rt || !(await rt.setCapacity(msg.id, msg.capacity)))
+                throw new Error(`Unknown session ${msg.id}`);
+            return;
+        }
         case "session.forget": {
             const rt = world.sessionRuntime;
             if (!rt)

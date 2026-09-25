@@ -77,6 +77,11 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
       }
       return;
     }
+    case "session.capacity": {
+      const rt = world.sessionRuntime;
+      if (!rt || !(await rt.setCapacity(msg.id, msg.capacity))) throw new Error(`Unknown session ${msg.id}`);
+      return;
+    }
     case "session.forget": {
       const rt = world.sessionRuntime;
       if (!rt) throw new Error("The Claude Code session provider is not configured");

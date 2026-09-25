@@ -3,6 +3,7 @@ export declare const ProviderSchema: z.ZodEnum<{
     claude: "claude";
     "claude-session": "claude-session";
     codex: "codex";
+    antigravity: "antigravity";
     gemini: "gemini";
 }>;
 export type Provider = z.infer<typeof ProviderSchema>;
@@ -68,6 +69,7 @@ export declare const AgentSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        antigravity: "antigravity";
         gemini: "gemini";
     }>>;
     model: z.ZodNullable<z.ZodString>;

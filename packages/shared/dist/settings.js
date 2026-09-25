@@ -13,7 +13,7 @@ export const GlobalConfigSchema = z.object({
     defaultModel: z.string().nullable().default(null),
     maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
     providers: z
-        .object({ claude: ProviderConfigSchema, codex: ProviderConfigSchema, gemini: ProviderConfigSchema })
+        .object({ claude: ProviderConfigSchema, codex: ProviderConfigSchema, antigravity: ProviderConfigSchema, gemini: ProviderConfigSchema })
         .prefault({}),
     knownProjects: z.array(KnownProjectSchema).default([]),
 });

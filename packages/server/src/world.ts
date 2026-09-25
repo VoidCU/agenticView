@@ -12,7 +12,8 @@ import {
   type WorkerSessionInfo,
   WorkerSessionFileSchema,
 } from "@agenticview/shared";
-import { SessionRuntime } from "./runtimes/session.js";
+import { SessionRuntime, type RecentWork } from "./runtimes/session.js";
+import { subagentNames, syncSubagents, writeSubagent, type SyncResult } from "./agents/subagents.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { Orchestrator, type ResolvedSettings, type WorldDeps } from "./manager/orchestrator.js";
@@ -21,8 +22,9 @@ import type { ToolRegistry } from "./bridge/toolRegistry.js";
 import type { EventBus } from "./events/bus.js";
 import { readJsonFile, writeJsonFile } from "./store/jsonStore.js";
 import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.js";
-import type { Agent, Task } from "@agenticview/shared";
+import { isTerminal, type Agent, type Task } from "@agenticview/shared";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
+import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
 
 export interface WorldOptions {
   runtimes: Map<Provider, Runtime>;
@@ -47,6 +49,8 @@ export interface World {
   providerStatuses: () => Promise<ProviderStatus[]>;
   /** Claude Code sessions known to this world, with live state and the agents bound to each. */
   sessions: () => Promise<WorkerSessionInfo[]>;
+  /** Rewrite the project's claude-session subagent files (project worlds; no-op in the hub). */
+  syncSubagents: () => Promise<SyncResult | undefined>;
   /** The claude-session runtime, when configured. */
   sessionRuntime?: SessionRuntime;
   /** Push fresh provider availability (and the Automatic choice) to every client. */
@@ -91,6 +95,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     providerModels: {
       claude: globalConfig.providers.claude.model,
       codex: globalConfig.providers.codex.model,
+      antigravity: globalConfig.providers.antigravity.model,
       gemini: globalConfig.providers.gemini.model,
     },
   });
@@ -102,7 +107,10 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   });
   await tasks.recoverInterrupted();
   await registry.ensureManager();
-  if (ref.kind === "project") await cleanupGeminiSettings(ref.projectPath);
+  if (ref.kind === "project") {
+    await cleanupGeminiSettings(ref.projectPath);
+    await cleanupAntigravityPlugins(ref.projectPath);
+  }
 
   const info = async (): Promise<WorldInfo> => {
     const cfg = await readGlobalConfig();
@@ -144,6 +152,54 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       agentIds: agents.filter((a) => a.session?.id === s.id).map((a) => a.id),
     }));
   };
+  // Subagent files (.claude/agents/agenticview-<slug>.md) for the claude-session agents: the session
+  // launches each task in its agent's subagent. Writes are chained so syncs never interleave.
+  const onSession = async (a: Agent) => (await orchestrator.resolveProviderLive(a)).provider === "claude-session";
+  const sessionAgents = async () => {
+    const out: Agent[] = [];
+    for (const a of await registry.list()) if (await onSession(a)) out.push(a);
+    return out;
+  };
+  let fileChain: Promise<unknown> = Promise.resolve();
+  const chained = <T>(fn: () => Promise<T>): Promise<T> => {
+    const next = fileChain.then(fn, fn);
+    fileChain = next.catch(() => undefined);
+    return next;
+  };
+  const syncProjectSubagents = (): Promise<SyncResult | undefined> =>
+    ref.kind !== "project"
+      ? Promise.resolve(undefined)
+      : chained(async () =>
+          syncSubagents(ref.projectPath, await sessionAgents(), async (id) => {
+            const a = await registry.get(id);
+            return Boolean(a && (await onSession(a)));
+          }),
+        ).catch((e) => {
+          console.error("[agenticview] syncing subagent files failed", e);
+          return undefined;
+        });
+
+  /** The agent's last finished tasks, newest first, for the "Your recent work" digest. */
+  const recentWork = async (agentId: string, exceptTaskId?: string): Promise<RecentWork[]> =>
+    (await tasks.list())
+      .filter((t) => t.assigneeId === agentId && t.id !== exceptTaskId && isTerminal(t.status))
+      .sort((a, b) => (b.finishedAt ?? b.createdAt).localeCompare(a.finishedAt ?? a.createdAt))
+      .slice(0, 5)
+      .map((t) => {
+        const files = t.worker?.files ?? [...new Set(t.log.filter((l) => l.type === "file_changed").map((l) => l.text.replace(/^\S+\s+/, "")))];
+        const summary = (t.status === "done" ? t.result : (t.error ?? t.result)) ?? "";
+        return {
+          taskId: t.id,
+          title: t.title,
+          status: t.status,
+          summary: summary.replace(/\s+/g, " ").trim().slice(0, 300),
+          files: files.slice(0, 12),
+          ...(t.finishedAt ? { finishedAt: t.finishedAt } : {}),
+          ...(t.worker?.subagentId ? { subagentId: t.worker.subagentId } : {}),
+          ...(t.worker?.sessionName ? { sessionName: t.worker.sessionName } : {}),
+        };
+      });
+
   if (sessionRuntime) {
     const saved = await readJsonFile(sessionsFile, WorkerSessionFileSchema, { sessions: [] }).catch(() => ({ sessions: [] }));
     sessionRuntime.attach(
@@ -160,6 +216,30 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
           return a ? { id: a.id, name: a.name } : undefined;
         },
         save: (list) => writeJsonFile(sessionsFile, { sessions: list }),
+        prepare: async (req) => {
+          const task = req.taskId ? await tasks.get(req.taskId) : undefined;
+          const target = task?.projectPath || (ref.kind === "project" ? ref.projectPath : "");
+          const work = await recentWork(req.agent.id, req.taskId);
+          // Hub runs without a target project: no folder to put a subagent in, the session does it itself.
+          if (!target) return { subagent: null, recentWork: work };
+          if (ref.kind === "project") await syncProjectSubagents();
+          const agent = (await registry.get(req.agent.id)) ?? req.agent;
+          const peers = ref.kind === "project" ? await sessionAgents() : [];
+          const names = subagentNames(peers.some((p) => p.id === agent.id) ? peers : [...peers, agent]);
+          const out = await chained(() => writeSubagent(target, agent, names.get(agent.id)!));
+          return { subagent: out.name, recentWork: work };
+        },
+        attribute: async (info) => {
+          if (!info.taskId) return;
+          await tasks.setWorker(info.taskId, {
+            runId: info.runId,
+            sessionId: info.sessionId,
+            sessionName: info.sessionName,
+            ...(info.subagent ? { subagent: info.subagent } : {}),
+            ...(info.subagentId ? { subagentId: info.subagentId } : {}),
+            ...(info.files ? { files: info.files } : {}),
+          });
+        },
       },
       saved.sessions,
     );
@@ -168,10 +248,14 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     opts.bus.on((m) => {
       if (m.type === "agent.updated" || m.type === "agent.removed") {
         sessionRuntime.kick();
+        // New, edited, re-providered or deleted agent: refresh its subagent file (or remove it).
+        void syncProjectSubagents();
         void sessions().then((list) => opts.bus.emit({ type: "sessions.updated", sessions: list }), () => undefined);
       }
     });
   }
+
+  if (sessionRuntime) await syncProjectSubagents();
 
   const providerStatuses = async (): Promise<ProviderStatus[]> => {
     const out: ProviderStatus[] = [];
@@ -195,6 +279,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     providerStatuses,
     sessions,
     sessionRuntime,
+    syncSubagents: syncProjectSubagents,
     emitProviders: async () => {
       opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
     },

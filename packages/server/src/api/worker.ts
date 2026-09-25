@@ -34,23 +34,28 @@ export function workerRoutes(session: SessionRuntime, toolRegistry: ToolRegistry
     const b = await body(c);
     const wait = Math.min(MAX_WAIT_MS, Math.max(0, Number(b.waitMs ?? MAX_WAIT_MS) || 0));
     const info = b.session && typeof b.session === "object" ? (b.session as Record<string, unknown>) : {};
-    const task = await session.claim(workerOf(c.req.header("x-agenticview-worker")), wait, c.req.raw.signal, {
-      model: str(info.model, 120),
-      cwd: str(info.cwd, 1000),
-      agent: str(info.agent, 40),
-    });
+    const claimInfo = { model: str(info.model, 120), cwd: str(info.cwd, 1000), agent: str(info.agent, 40) };
+    const worker = workerOf(c.req.header("x-agenticview-worker"));
+    // Multi-run workers send the runs they hold (and optionally a max); older workers get one task at a time.
+    if (Array.isArray(b.holding) || b.max !== undefined) {
+      const holding = Array.isArray(b.holding) ? b.holding.filter((x): x is string => typeof x === "string").slice(0, 64) : [];
+      const max = b.max === undefined ? undefined : Math.max(0, Math.min(64, Math.floor(Number(b.max)) || 0));
+      const res = await session.claimMany(worker, { max, waitMs: wait, signal: c.req.raw.signal, info: claimInfo, holding });
+      return c.json({ ...res, task: res.tasks[0] ?? null });
+    }
+    const task = await session.claim(worker, wait, c.req.raw.signal, claimInfo);
     return c.json({ task });
   });
 
   app.post("/api/worker/:runId/report", async (c) => {
     const b = await body(c);
     const events = Array.isArray(b.events) ? (b.events as WorkerReport[]) : [];
-    return c.json(session.report(c.req.param("runId"), events, workerOf(c.req.header("x-agenticview-worker"))));
+    return c.json(session.report(c.req.param("runId"), events, workerOf(c.req.header("x-agenticview-worker")), str(b.subagentId, 120)));
   });
 
   app.post("/api/worker/:runId/complete", async (c) => {
     const b = await body(c);
-    const outcome = { text: typeof b.text === "string" ? b.text : undefined, error: typeof b.error === "string" && b.error ? b.error : undefined };
+    const outcome = { text: typeof b.text === "string" ? b.text : undefined, error: typeof b.error === "string" && b.error ? b.error : undefined, subagentId: str(b.subagentId, 120) };
     return c.json(session.complete(c.req.param("runId"), outcome, workerOf(c.req.header("x-agenticview-worker"))));
   });
 

@@ -2,8 +2,10 @@
 import { z } from "zod";
 import { type Instance } from "./instances.js";
 import { type SessionTask } from "./runtimes/session.js";
-/** Test helper: forget the current task and identity. */
+/** Test helper: forget the held tasks and identity. */
 export declare function resetWorkerState(): void;
+/** Run ids this worker holds (tests and the next_task poll). */
+export declare function heldRuns(): string[];
 type ToolText = {
     content: {
         type: "text";
@@ -27,9 +29,13 @@ export declare function postJson<T>(url: string, headers: Record<string, string>
     status: number;
     json: T;
 }>;
+/** The full text of one task: what the coordinator passes, unchanged, to the agent's subagent. */
 export declare function formatTask(t: SessionTask): string;
+/** One claimed task as the coordinator sees it: how to launch it, then the text to hand over. */
+export declare function formatDispatch(t: SessionTask, i: number, n: number): string;
 export interface NextTaskArgs {
     wait_seconds?: number;
+    max_tasks?: number;
     project?: string;
     session_id?: string;
     agent?: string;
@@ -56,20 +62,22 @@ declare const EventSchema: z.ZodObject<{
         delete: "delete";
     }>>;
 }, z.core.$strip>;
-export declare function report(args: {
+interface RunArgs {
+    run_id?: string;
+    subagent_id?: string;
+    session_id?: string;
+}
+export declare function report(args: RunArgs & {
     text?: string;
     events?: z.infer<typeof EventSchema>[];
-    session_id?: string;
 }): Promise<ToolText>;
-export declare function complete(args: {
+export declare function complete(args: RunArgs & {
     result?: string;
     error?: string;
-    session_id?: string;
 }): Promise<ToolText>;
-export declare function bridge(args: {
+export declare function bridge(args: RunArgs & {
     tool: string;
     args?: Record<string, unknown>;
-    session_id?: string;
 }): Promise<ToolText>;
 export declare function main(): Promise<void>;
 export {};

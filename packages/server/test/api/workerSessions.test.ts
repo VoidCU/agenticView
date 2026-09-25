@@ -120,11 +120,16 @@ describe("Claude Code session registry and affinity (HTTP)", () => {
     const waited = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "await_tasks", args: { taskIds: [taskId] } });
     expect(JSON.parse(waited.result)).toMatchObject({ stillRunning: [{ id: taskId }], message: expect.stringContaining("await_tasks again") });
 
-    // Bound to the manager's own session: both tools refuse with a clear message.
+    // Bound to the manager's own session with a free slot beside the manager: fine (a subagent runs it).
     await s.world.registry.update(orion.id, { session: { id: "sess-M", name: "M" } });
+    const ok = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "await_tasks", args: { taskIds: [taskId] } });
+    expect(ok.result).not.toMatch(/deadlock/);
+    // Capacity 1: the manager holds the only slot, so both tools refuse with a clear message.
+    await s.world.sessionRuntime!.setCapacity("sess-M", 1);
     const again = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "await_tasks", args: { taskIds: [taskId] } });
     expect(again.result).toMatch(/deadlock/);
     expect(again.result).toContain("open another Claude Code session");
+    expect(again.result).toContain("raise that session's capacity");
     const assign2 = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "assign_task", args: { agentId: orion.id, title: "t2", description: "do" } });
     expect(assign2.result).toMatch(/^ERROR: Orion is bound to Claude Code session/);
     // Let the manager run end so nothing writes into the project while it is removed.
@@ -155,8 +160,11 @@ describe("worker MCP tools", () => {
     const out = await nextTask({ session_id: "3f2a-session", model: "claude-sonnet-5", agent: "Nova", wait_seconds: 5 });
     const text = out.content[0]!.text;
     expect(text).toContain("hello");
-    expect(text).toContain("MODEL MISMATCH");
-    expect(text).toContain("run /model opus");
+    // The agent's subagent runs on its own model, so no mismatch note; the task names the subagent.
+    expect(text).not.toContain("MODEL MISMATCH");
+    expect(text).toContain("agenticview-nova");
+    expect(text).toContain("subagent runs on opus");
+    expect(await readFile(join(proj, ".claude", "agents", "agenticview-nova.md"), "utf8")).toContain("model: opus");
     expect((await s.world.registry.get(nova.id))?.session?.id).toBe("3f2a-session");
     expect(s.world.sessionRuntime!.session("3f2a-session")).toMatchObject({ model: "claude-sonnet-5", cwd: proj });
     expect((await report({ text: "working" })).isError).toBeUndefined();

@@ -9,6 +9,7 @@ import {
   type TaskKind,
   type TaskLogEntry,
   type TaskStatus,
+  type TaskWorker,
 } from "@agenticview/shared";
 import { JsonStore } from "../store/jsonStore.js";
 import { assertTransition } from "./transitions.js";
@@ -106,6 +107,19 @@ export class TaskService {
       const next: Task = { ...cur, log: [...cur.log, { ts: new Date().toISOString(), type, text }].slice(-TASK_LOG_CAP) };
       await this.store.write(id, next);
       this.onChange(next, "log");
+    });
+  }
+
+  /** Merge who worked on a task (claude-session attribution) without changing its status. */
+  setWorker(id: string, worker: TaskWorker): Promise<Task | undefined> {
+    return this.locked(id, async () => {
+      const cur = await this.store.read(id);
+      if (!cur) return undefined;
+      const merged: TaskWorker = cur.worker?.runId === worker.runId ? { ...cur.worker, ...worker } : worker;
+      const next: Task = { ...cur, worker: merged };
+      await this.store.write(id, next);
+      this.onChange(next, "state");
+      return next;
     });
   }
 

@@ -24,6 +24,19 @@ export function isTerminal(status: TaskStatus): boolean {
 export const TaskLogEntrySchema = z.object({ ts: z.string(), type: z.string(), text: z.string() });
 export type TaskLogEntry = z.infer<typeof TaskLogEntrySchema>;
 
+export const TaskWorkerSchema = z.object({
+  runId: z.string(),
+  sessionId: z.string(),
+  sessionName: z.string().optional(),
+  /** Claude Code subagent type (`agenticview-<slug>`) the session was told to use. */
+  subagent: z.string().optional(),
+  /** Subagent instance id the session reported (SendMessage can continue it while it is alive). */
+  subagentId: z.string().optional(),
+  /** Files the run reported as changed. */
+  files: z.array(z.string()).optional(),
+});
+export type TaskWorker = z.infer<typeof TaskWorkerSchema>;
+
 export const TaskSchema = z.object({
   id: z.string(),
   kind: TaskKindSchema,
@@ -35,6 +48,8 @@ export const TaskSchema = z.object({
   parentId: z.string().optional(),
   projectPath: z.string(),
   session: z.object({ provider: ProviderSchema, sessionId: z.string() }).optional(),
+  /** claude-session tasks: which Claude Code session and subagent did the work (continuity and the work log). */
+  worker: TaskWorkerSchema.optional(),
   images: z.array(z.string()),
   result: z.string().optional(),
   error: z.string().optional(),
