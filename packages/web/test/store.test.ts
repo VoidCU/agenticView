@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { agentStatus, useStore } from "../src/state/store";
+import { agentStatus, spaceNameOf, useStore } from "../src/state/store";
+import { layoutFor } from "../src/scene/layout";
 import { manager, worker, worker2, task, snapshot } from "./fixtures";
 
 const fresh = () => useStore.getState();
@@ -151,3 +152,67 @@ describe("providers.updated", () => {
     expect(useStore.getState().autoProvider).toBe("claude-session");
   });
 });
+
+describe("spaceNames", () => {
+  it("initializes empty and accepts spaceNames in snapshot", () => {
+    expect(fresh().spaceNames).toEqual({});
+    const msg = { ...snapshot([manager, worker]), spaceNames: { "pod-a": "War Room", meeting: "Briefing Room" } } as Parameters<ReturnType<typeof fresh>["apply"]>[0];
+    fresh().apply(msg);
+    expect(fresh().spaceNames).toEqual({ "pod-a": "War Room", meeting: "Briefing Room" });
+  });
+
+  it("snapshot without spaceNames resets spaceNames to empty object", () => {
+    fresh().apply({ type: "spaceNames.updated", spaceNames: { "pod-a": "Frontend Team" } });
+    expect(fresh().spaceNames["pod-a"]).toBe("Frontend Team");
+    fresh().apply(snapshot([manager]));
+    expect(fresh().spaceNames).toEqual({});
+  });
+
+  it("updates spaceNames on spaceNames.updated message", () => {
+    fresh().apply(snapshot([manager]));
+    expect(fresh().spaceNames).toEqual({});
+    fresh().apply({
+      type: "spaceNames.updated",
+      spaceNames: { "pod-a": "Frontend Pod", office: "Command Deck" },
+    });
+    expect(fresh().spaceNames).toEqual({ "pod-a": "Frontend Pod", office: "Command Deck" });
+  });
+
+  it("spaceNameOf resolves custom name and falls back to default name or id", () => {
+    const custom = { "pod-a": "Rocket Ship", "pod-b": "  " };
+    expect(spaceNameOf(custom, { id: "pod-a", name: "Pod A", kind: "pod", q: 1, r: 0, ring: 1, x: 0, z: 0, seats: 4 })).toBe("Rocket Ship");
+    // Falls back when empty string/whitespace
+    expect(spaceNameOf(custom, { id: "pod-b", name: "Pod B", kind: "pod", q: 0, r: 1, ring: 1, x: 0, z: 0, seats: 4 })).toBe("Pod B");
+    // Falls back when not present
+    expect(spaceNameOf(custom, { id: "meeting", name: "Meeting Room", kind: "meeting", q: 0, r: -1, ring: 1, x: 0, z: 0, seats: 6 })).toBe("Meeting Room");
+    // Works with space id string
+    expect(spaceNameOf(custom, "pod-a")).toBe("Rocket Ship");
+    expect(spaceNameOf(custom, "pod-c")).toBe("pod-c");
+    expect(spaceNameOf(undefined, "pod-a")).toBe("pod-a");
+  });
+
+  it("layoutFor applies custom space names to layout spaces for name plates", () => {
+    const defaultLayout = layoutFor([manager, worker]);
+    const defaultPodA = defaultLayout.spaces.find((s) => s.id === "pod-a");
+    const defaultMeeting = defaultLayout.spaces.find((s) => s.id === "meeting");
+    expect(defaultPodA?.name).toBe("Pod A");
+    expect(defaultMeeting?.name).toBe("Meeting Room");
+
+    const customLayout = layoutFor([manager, worker], {
+      "pod-a": "Alpha Squad",
+      meeting: "Brainstorm Lab",
+      office: "Mission Control",
+    });
+    const customPodA = customLayout.spaces.find((s) => s.id === "pod-a");
+    const customMeeting = customLayout.spaces.find((s) => s.id === "meeting");
+    const customOffice = customLayout.spaces.find((s) => s.id === "office");
+    const customPodB = customLayout.spaces.find((s) => s.id === "pod-b");
+
+    expect(customPodA?.name).toBe("Alpha Squad");
+    expect(customMeeting?.name).toBe("Brainstorm Lab");
+    expect(customOffice?.name).toBe("Mission Control");
+    // Pod B without custom name remains default
+    expect(customPodB?.name).toBe("Pod B");
+  });
+});
+

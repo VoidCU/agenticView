@@ -18,9 +18,12 @@ export interface OfficeLayout {
 
 export const seatKey = (p: Placement) => `${p.space}#${p.seat}`;
 
-export function layoutFor(agents: Agent[]): OfficeLayout {
+export function layoutFor(agents: Agent[], spaceNames?: Record<string, string>): OfficeLayout {
   const { spaces, placements } = planOffice(agents);
-  const byId = new Map(spaces.map((s) => [s.id, s]));
+  const resolvedSpaces = spaceNames
+    ? spaces.map((s) => (spaceNames[s.id]?.trim() ? { ...s, name: spaceNames[s.id]!.trim() } : s))
+    : spaces;
+  const byId = new Map(resolvedSpaces.map((s) => [s.id, s]));
   const office = byId.get("office")!;
   const poses: Record<string, Pose> = {};
   const occupied = new Map<string, string>();
@@ -36,5 +39,5 @@ export function layoutFor(agents: Agent[]): OfficeLayout {
     poses[id] = { ...seatPose(s, p.seat), space: s.id, seat: p.seat };
     occupied.set(seatKey(p), id);
   }
-  return { spaces, poses, placements, occupied, next: nextPlacement(agents) };
+  return { spaces: resolvedSpaces, poses, placements, occupied, next: nextPlacement(agents) };
 }

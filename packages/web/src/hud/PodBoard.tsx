@@ -23,13 +23,15 @@ export function PodBoard({ space, onClose }: { space: Space; onClose: () => void
   const agents = useStore(s => s.agents);
   const tasks = useStore(s => s.tasks);
   const feed = useStore(s => s.feed);
+  const spaceNames = useStore(s => s.spaceNames);
   const [now, setNow] = useState(Date.now);
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(id); }, []);
   const pod = space.kind === "pod";
   const board = podBoard(space.id, Object.values(agents), Object.values(tasks));
   const manager = Object.values(agents).find(a => a.role === "manager");
   const requests = managerBoard(manager?.id, Object.values(tasks), feed[manager?.id ?? ""] ?? []);
-  return <Modal title={pod ? `Pod board · ${space.name}` : "Manager board"} onClose={onClose} wide>
+  const displayName = spaceNames[space.id]?.trim() || space.name;
+  return <Modal title={pod ? `Pod board · ${displayName}` : "Manager board"} onClose={onClose} wide>
     <div className="whiteboard-panel">
       {pod ? <><div className="board-roster">{board.workers.map(a => <Assignee key={a.id} agent={a} />)}</div>
         {!board.workers.length ? <p className="board-empty">No workers seated in this pod yet.</p> : <>
