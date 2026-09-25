@@ -3,6 +3,7 @@ import { z } from "zod";
  * Reasoning effort, the union of what the providers accept:
  * - Claude Agent SDK `Options.effort`: low | medium | high | xhigh | max
  * - Codex `ThreadOptions.modelReasoningEffort` / `model_reasoning_effort`: minimal | low | medium | high | xhigh | max | ultra
+ * - Antigravity CLI (`agy --effort`): low | medium | high | max
  * - Gemini CLI: no effort control (hidden in the UI, ignored by the runtime).
  */
 export const EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
@@ -20,6 +21,7 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 // "ultra" is in the SDK type and the local model cache, but the Codex server rejected it in a live run (codex-cli 0.156.0), so it is not offered.
 const CODEX_FULL = ["low", "medium", "high", "xhigh", "max"];
 const CODEX_MAX = ["low", "medium", "high", "xhigh", "max"];
+const AGY_EFFORTS = ["low", "medium", "high", "max"];
 /**
  * Per-provider model catalogue. Claude uses the Agent SDK aliases so picks stay current as
  * models roll forward. Codex ids and effort sets come from the codex CLI's model list
@@ -60,6 +62,28 @@ export const MODEL_CATALOGUE = {
             { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", efforts: CODEX_FULL },
             { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", efforts: CODEX_MAX },
             { id: "gpt-5.5", label: "GPT-5.5", efforts: ["low", "medium", "high", "xhigh"] },
+        ],
+    },
+    antigravity: {
+        // `agy --effort` takes low|medium|high|max. Ids ending in -high/-medium/-low already fix the effort,
+        // so those hide the effort picker.
+        defaultEfforts: AGY_EFFORTS,
+        allowCustom: true,
+        models: [
+            { id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)", efforts: [] },
+            { id: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash (Medium)", efforts: [] },
+            { id: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)", efforts: [] },
+            { id: "gemini-3.7-flash-high", label: "Gemini 3.7 Flash (High)", efforts: [] },
+            { id: "gemini-3.7-flash-medium", label: "Gemini 3.7 Flash (Medium)", efforts: [] },
+            { id: "gemini-3.7-flash-low", label: "Gemini 3.7 Flash (Low)", efforts: [] },
+            { id: "gemini-3.6-flash-high", label: "Gemini 3.6 Flash (High)", efforts: [] },
+            { id: "gemini-3.6-flash-medium", label: "Gemini 3.6 Flash (Medium)", efforts: [] },
+            { id: "gemini-3.6-flash-low", label: "Gemini 3.6 Flash (Low)", efforts: [] },
+            { id: "gemini-3.1-pro-high", label: "Gemini 3.1 Pro (High)", efforts: [] },
+            { id: "gemini-3.1-pro-low", label: "Gemini 3.1 Pro (Low)", efforts: [] },
+            { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Thinking)", efforts: AGY_EFFORTS },
+            { id: "claude-opus-4-6-thinking", label: "Claude Opus 4.6 (Thinking)", efforts: AGY_EFFORTS },
+            { id: "gpt-oss-120b-medium", label: "GPT-OSS 120B (Medium)", efforts: [] },
         ],
     },
     gemini: {

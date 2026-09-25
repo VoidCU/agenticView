@@ -16,7 +16,7 @@ describe("store.apply", () => {
     expect(Object.keys(s.agents)).toEqual([manager.id, worker.id]);
     expect(s.agents[worker.id]?.name).toBe("Pixel");
     expect(s.tasks["t_00000001"]?.status).toBe("queued");
-    expect(s.providers.map((p) => p.provider)).toEqual(["claude", "claude-session", "codex", "gemini"]);
+    expect(s.providers.map((p) => p.provider)).toEqual(["claude", "claude-session", "codex", "antigravity", "gemini"]);
     expect(s.settings?.maxConcurrentRuns).toBe(3);
   });
 

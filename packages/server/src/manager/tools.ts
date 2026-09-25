@@ -30,8 +30,8 @@ export function workerSystemPrompt(agent: Agent, projectPath: string): string {
     .join("\n\n");
 }
 
-const MODEL_HINT = "Model id or alias for the agent's provider, e.g. claude: opus | sonnet | haiku | fable; codex: gpt-6-sol; gemini: pro | flash. Omit for the provider default.";
-const EFFORT_HINT = "Reasoning effort: low | medium | high (claude also xhigh | max; codex also xhigh | max | ultra on supporting models; ignored for gemini). Omit for the default.";
+const MODEL_HINT = "Model id or alias for the agent's provider, e.g. claude: opus | sonnet | haiku | fable; codex: gpt-6-sol; antigravity: gemini-3.8-flash-high | gemini-3.1-pro-high | claude-sonnet-4-6 | claude-opus-4-6-thinking (run `agy models`); gemini: pro | flash. Omit for the provider default.";
+const EFFORT_HINT = "Reasoning effort: low | medium | high (claude also xhigh | max; codex also xhigh | max | ultra on supporting models; antigravity also max, ignored for its -high/-medium/-low model ids; ignored for gemini). Omit for the default.";
 
 export interface ManagerToolContext {
   world: WorldRef;
@@ -105,7 +105,7 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         name: z.string().min(1).max(40),
         specialty: z.string().max(120),
         description: z.string().max(2000).optional(),
-        provider: ProviderSchema.optional().describe("claude (API key), claude-session (a Claude Code session running /agenticview-work), codex or gemini; omit to use the world default"),
+        provider: ProviderSchema.optional().describe("claude (API key), claude-session (a Claude Code session running /agenticview-work), codex, antigravity (the Antigravity CLI, agy) or gemini; omit to use the world default"),
         model: z.string().optional().describe(MODEL_HINT),
         effort: EffortSchema.optional().describe(EFFORT_HINT),
         systemPrompt: z.string().max(20000).optional(),
@@ -129,7 +129,7 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
       description: "Change a worker's model, reasoning effort, provider, specialty or instructions. Pass null for model/effort to go back to the provider default.",
       schema: {
         agentId: z.string(),
-        provider: ProviderSchema.nullable().optional(),
+        provider: ProviderSchema.nullable().optional().describe("claude, claude-session, codex, antigravity or gemini; null for the world default"),
         model: z.string().nullable().optional().describe(MODEL_HINT),
         effort: EffortSchema.nullable().optional().describe(EFFORT_HINT),
         specialty: z.string().max(120).optional(),

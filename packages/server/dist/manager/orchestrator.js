@@ -57,7 +57,7 @@ export class Orchestrator {
     /** Returns a human-readable problem when the agent's provider cannot run, else undefined. */
     async providerProblem(agent) {
         if (this.isAutomatic(agent) && !(await this.autoProvider())) {
-            return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex or gemini CLI";
+            return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex, agy (Antigravity) or gemini CLI";
         }
         const { provider } = await this.resolveProviderLive(agent);
         const runtime = this.deps.runtimes.get(provider);
@@ -126,19 +126,27 @@ export class Orchestrator {
             return;
         this.pumping = true;
         try {
-            while (this.queue.length > 0) {
-                const id = this.queue[0];
+            let i = 0;
+            while (i < this.queue.length) {
+                const id = this.queue[i];
                 const task = await this.deps.tasks.get(id);
                 if (!task || task.status !== "assigned") {
-                    this.queue.shift();
+                    this.queue.splice(i, 1);
                     continue;
                 }
                 const agent = await this.deps.registry.get(task.assigneeId);
                 const isManager = agent?.role === "manager";
-                if (!isManager && this.active.size >= this.deps.settings().maxConcurrentRuns)
-                    break;
-                this.queue.shift();
-                if (!isManager)
+                // Claude Code session runs happen in the user's own sessions, which enforce their own per-session
+                // capacity, so they neither wait for nor take up the office-wide worker slots.
+                const inSession = !!agent && (await this.resolveProviderLive(agent)).provider === "claude-session";
+                const limited = !isManager && !inSession;
+                if (limited && this.active.size >= this.deps.settings().maxConcurrentRuns) {
+                    // Keep FIFO among limited tasks, but let managers and session tasks behind it start.
+                    i++;
+                    continue;
+                }
+                this.queue.splice(i, 1);
+                if (limited)
                     this.active.add(id);
                 void this.execute(task).finally(() => {
                     this.active.delete(id);

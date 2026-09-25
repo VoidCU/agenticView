@@ -66,7 +66,7 @@ describe("server", () => {
     const snap = await res.json();
     expect(snap.world.projectPath).toBe(proj);
     expect(snap.agents.some((a: any) => a.role === "manager")).toBe(true);
-    expect(snap.providers.map((p: any) => p.provider)).toEqual(["claude", "claude-session", "codex", "gemini"]);
+    expect(snap.providers.map((p: any) => p.provider)).toEqual(["claude", "claude-session", "codex", "antigravity", "gemini"]);
     expect((await fetch(`${s.url}/api/snapshot?token=tok`)).status).toBe(200);
   });
 

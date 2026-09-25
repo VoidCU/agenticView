@@ -60,6 +60,7 @@ export declare const TaskSchema: z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            antigravity: "antigravity";
             gemini: "gemini";
         }>;
         sessionId: z.ZodString;

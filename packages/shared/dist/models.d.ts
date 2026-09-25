@@ -4,6 +4,7 @@ import type { Provider } from "./agent.js";
  * Reasoning effort, the union of what the providers accept:
  * - Claude Agent SDK `Options.effort`: low | medium | high | xhigh | max
  * - Codex `ThreadOptions.modelReasoningEffort` / `model_reasoning_effort`: minimal | low | medium | high | xhigh | max | ultra
+ * - Antigravity CLI (`agy --effort`): low | medium | high | max
  * - Gemini CLI: no effort control (hidden in the UI, ignored by the runtime).
  */
 export declare const EFFORT_LEVELS: readonly ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];

@@ -118,10 +118,11 @@ async function demoRuntimes() {
     }
     yield { type: "text" as const, text: `${req.agent.name} (demo mode): received "${user.slice(0, 120)}". Set ANTHROPIC_API_KEY and start without AGENTICVIEW_FAKE to run real agents.` };
   };
-  return new Map<"claude" | "claude-session" | "codex" | "gemini", InstanceType<typeof FakeRuntime>>([
+  return new Map<"claude" | "claude-session" | "codex" | "antigravity" | "gemini", InstanceType<typeof FakeRuntime>>([
     ["claude", new FakeRuntime(script as never, "claude")],
     ["claude-session", new FakeRuntime(script as never, "claude-session")],
     ["codex", new FakeRuntime(script as never, "codex")],
+    ["antigravity", new FakeRuntime(script as never, "antigravity")],
     ["gemini", new FakeRuntime(script as never, "gemini")],
   ]);
 }
