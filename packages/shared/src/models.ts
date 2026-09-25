@@ -30,7 +30,8 @@ export interface ModelOption {
 }
 
 const CLAUDE_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
-const CODEX_FULL: readonly Effort[] = ["low", "medium", "high", "xhigh", "max", "ultra"];
+// "ultra" is in the SDK type and the local model cache, but the Codex server rejected it in a live run (codex-cli 0.156.0), so it is not offered.
+const CODEX_FULL: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const CODEX_MAX: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 
 export interface ProviderModelCatalogue {

@@ -20,7 +20,8 @@ describe("model catalogue", () => {
   });
 
   it("Codex efforts follow the model; custom ids fall back to the provider default set", () => {
-    expect(effortsFor("codex", "gpt-6-sol")).toContain("ultra");
+    expect(effortsFor("codex", "gpt-6-sol")).toContain("max");
+    expect(effortsFor("codex", "gpt-6-sol")).not.toContain("ultra");
     expect(effortsFor("codex", "gpt-5.5")).not.toContain("max");
     expect(effortsFor("codex", "my-custom")).toEqual(["low", "medium", "high"]);
   });

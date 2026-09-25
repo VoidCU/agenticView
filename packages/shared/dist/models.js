@@ -17,7 +17,8 @@ export const EFFORT_LABELS = {
     ultra: "Ultra",
 };
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-const CODEX_FULL = ["low", "medium", "high", "xhigh", "max", "ultra"];
+// "ultra" is in the SDK type and the local model cache, but the Codex server rejected it in a live run (codex-cli 0.156.0), so it is not offered.
+const CODEX_FULL = ["low", "medium", "high", "xhigh", "max"];
 const CODEX_MAX = ["low", "medium", "high", "xhigh", "max"];
 /**
  * Per-provider model catalogue. Claude uses the Agent SDK aliases so picks stay current as
