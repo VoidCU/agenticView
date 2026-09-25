@@ -21,8 +21,8 @@ afterEach(async () => {
   await server?.close();
   server = undefined;
   process.env.AGENTICVIEW_HOME = savedHome;
-  await rm(home, { recursive: true, force: true });
-  await rm(proj, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await rm(proj, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("worker MCP", () => {

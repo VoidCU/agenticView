@@ -21,8 +21,8 @@ describe.skipIf(!live)("live: claude worker", () => {
       expect((await readFile(join(proj, "hello.txt"), "utf8")).trim()).toBe("hi");
     } finally {
       await server.close();
-      await rm(home, { recursive: true, force: true });
-      await rm(proj, { recursive: true, force: true });
+      await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      await rm(proj, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }, 300_000);
 });

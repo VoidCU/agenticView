@@ -16,7 +16,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   process.env.AGENTICVIEW_HOME = savedHome;
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 const mk = (s: TaskService, extra: Record<string, unknown> = {}) =>
   s.create({ kind: "work", title: "t", description: "d", createdBy: "user", assigneeId: "w_1", projectPath: dir, ...extra });

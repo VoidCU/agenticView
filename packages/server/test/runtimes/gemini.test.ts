@@ -15,7 +15,7 @@ beforeEach(async () => {
   cwd = await mkdtemp(join(tmpdir(), "av-gem-"));
 });
 afterEach(async () => {
-  await rm(cwd, { recursive: true, force: true });
+  await rm(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 function rt(mode = "ok", extraEnv: Record<string, string> = {}) {

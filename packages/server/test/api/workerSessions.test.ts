@@ -28,7 +28,7 @@ afterEach(async () => {
   else process.env.AGENTICVIEW_PROJECT = saved.project;
   if (saved.chunk === undefined) delete process.env.AGENTICVIEW_AWAIT_CHUNK_SECONDS;
   else process.env.AGENTICVIEW_AWAIT_CHUNK_SECONDS = saved.chunk;
-  await rm(home, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   await rm(proj, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
