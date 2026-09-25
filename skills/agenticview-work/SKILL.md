@@ -11,6 +11,7 @@ The worker tools come from the plugin's `agenticview-worker` MCP server: `agenti
 
 1. Call `agenticview_next_task`. It waits (up to 10 minutes by default) for a task.
    - If it says no office is running, tell the user to open it with `/agenticview` and stop.
+   - If the tools are missing or the `agenticview-worker` server failed to connect, or a tool says it is still installing, tell the user to run `/mcp`, pick `agenticview-worker`, choose Reconnect (after a restart of Claude Code if it is not listed), then run `/agenticview-work` again, and stop.
    - If it says no task arrived yet, call it again right away. Do not ask the user between polls.
 2. When a task arrives, work on it:
    - Adopt the agent persona: follow the **Agent system prompt** in the task as your instructions for this task, and answer as that agent.
