@@ -92,7 +92,7 @@ describe("Orchestrator", () => {
     expect(workerReq.systemPrompt).toContain("Nova");
     const managerReq = ctx.fake.runs.find((r) => r.agent.role === "manager")!;
     expect(managerReq.prompt.map((p) => (p.type === "text" ? p.text : ""))[0]).toContain("## Roster");
-    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["ask_user", "assign_task", "await_tasks", "create_agent", "list_agents", "list_tasks"]);
+    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["arrange_workers", "ask_user", "assign_task", "await_tasks", "create_agent", "list_agents", "list_spaces", "list_tasks", "move_worker"]);
     expect(ctx.orch.running()).toBe(0);
     const log = (await ctx.tasks.get(child.id))!.log;
     expect(log.some((l) => l.type === "file_changed")).toBe(true);

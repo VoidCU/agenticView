@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isTerminal, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema } from "@agenticview/shared";
+import { officeTools } from "./officeTools.js";
 export const MANAGER_SYSTEM_PROMPT = `You are the Manager of an AgenticView office: a team of AI coding agents ("workers") that edit a real software project.
 
 Rules:
@@ -9,6 +10,7 @@ Rules:
 - Split work into self-contained assignments. Each assign_task description must stand alone: what to change, where (files or folders), how to verify. Never assign the same file to two workers at once.
 - assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.
 - Use ask_user only when a decision truly needs the user.
+- The office is a honeycomb of rooms. list_spaces shows who sits where; move_worker / arrange_workers reseat workers (group a team in one pod, call people to the meeting room) when the user asks or when it clearly helps.
 - You never edit files yourself.
 - End with a short report for the user: what was done, by whom, and anything left open.`;
 export function workerSystemPrompt(agent, projectPath) {
@@ -146,6 +148,7 @@ export function managerTools(ctx) {
             schema: { question: z.string().min(1) },
             handler: async (args) => ctx.askUser(ctx.requestTask.id, ctx.managerId, String(args.question)),
         },
+        ...officeTools({ registry: ctx.registry, emitAgent: ctx.emitAgent }),
     ];
 }
 //# sourceMappingURL=tools.js.map

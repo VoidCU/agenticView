@@ -1,0 +1,107 @@
+import { z } from "zod";
+import { assignableSpaces, findSpace, planOffice } from "@agenticview/shared";
+function findWorker(agents, ref) {
+    const k = ref.trim().toLowerCase();
+    return agents.find((a) => a.role === "worker" && (a.id === ref || a.name.toLowerCase() === k));
+}
+/** Seat map of the office: every space with its free desks and who sits where. */
+export async function describeSpaces(ctx) {
+    const agents = await ctx.registry.list();
+    const plan = planOffice(agents);
+    const who = new Map();
+    for (const a of agents) {
+        const p = plan.placements[a.id];
+        if (p)
+            who.set(`${p.space}#${p.seat}`, a);
+    }
+    const rows = assignableSpaces(agents).map((s) => ({
+        id: s.id,
+        name: s.name,
+        kind: s.kind,
+        seats: Array.from({ length: s.seats }, (_, seat) => {
+            const a = who.get(`${s.id}#${seat}`);
+            return a ? { seat, agentId: a.id, name: a.name } : { seat, free: true };
+        }),
+    }));
+    return JSON.stringify(rows, null, 2);
+}
+/**
+ * Move one worker to a space (and seat). If the seat is taken the two workers swap desks.
+ * Persists both placements and broadcasts them so the office animates the walk.
+ */
+export async function moveWorker(ctx, agentRef, spaceRef, seat) {
+    const agents = await ctx.registry.list();
+    const worker = findWorker(agents, agentRef);
+    if (!worker)
+        return `ERROR: unknown worker ${agentRef} (use list_agents)`;
+    const spaces = assignableSpaces(agents);
+    const space = findSpace(spaces, spaceRef);
+    if (!space)
+        return `ERROR: unknown space ${spaceRef}; pick one of: ${spaces.map((s) => s.id).join(", ")}`;
+    const plan = planOffice(agents);
+    const occupant = (n) => agents.find((a) => a.id !== worker.id && plan.placements[a.id]?.space === space.id && plan.placements[a.id]?.seat === n);
+    let target;
+    if (seat === undefined) {
+        const free = Array.from({ length: space.seats }, (_, n) => n).find((n) => !occupant(n));
+        if (free === undefined)
+            return `ERROR: ${space.name} is full; pass a seat number to swap with whoever sits there`;
+        target = free;
+    }
+    else {
+        if (seat < 0 || seat >= space.seats)
+            return `ERROR: ${space.name} has seats 0-${space.seats - 1}`;
+        target = seat;
+    }
+    const from = plan.placements[worker.id];
+    const dest = { space: space.id, seat: target };
+    // Auto-seated workers would shift once this one moves; persist where they sit now.
+    for (const pinned of (await ctx.registry.pinPlacements?.()) ?? [])
+        ctx.emitAgent(pinned);
+    const other = occupant(target);
+    const moved = await ctx.registry.update(worker.id, { placement: dest });
+    ctx.emitAgent(moved);
+    if (other) {
+        const back = from ? { ...from } : undefined;
+        const swapped = await ctx.registry.update(other.id, { placement: back });
+        ctx.emitAgent(swapped);
+        return `Moved ${worker.name} to ${space.name} seat ${target}; ${other.name} swapped to ${from ? `${from.space} seat ${from.seat}` : "the next free desk"}`;
+    }
+    return `Moved ${worker.name} to ${space.name} seat ${target}`;
+}
+export function officeTools(ctx) {
+    return [
+        {
+            name: "list_spaces",
+            description: "Show the office floor plan: every space (pods, meeting room, lounge) with its seats and who sits in each.",
+            schema: {},
+            handler: async () => describeSpaces(ctx),
+        },
+        {
+            name: "move_worker",
+            description: "Move a worker to another space in the office (e.g. to group a team in one pod or pull people into the meeting room). If the seat is taken the two workers swap.",
+            schema: {
+                agent: z.string().min(1).describe("Worker id or name"),
+                space: z.string().min(1).describe("Space id or name from list_spaces, e.g. pod-b or 'Meeting Room'"),
+                seat: z.number().int().min(0).optional().describe("Seat number; omit for the first free seat"),
+            },
+            handler: async (args) => moveWorker(ctx, String(args.agent), String(args.space), args.seat),
+        },
+        {
+            name: "arrange_workers",
+            description: "Rearrange several workers at once. Moves are applied in order; each behaves like move_worker.",
+            schema: {
+                moves: z
+                    .array(z.object({ agent: z.string().min(1), space: z.string().min(1), seat: z.number().int().min(0).optional() }))
+                    .min(1)
+                    .max(40),
+            },
+            handler: async (args) => {
+                const out = [];
+                for (const m of args.moves)
+                    out.push(await moveWorker(ctx, m.agent, m.space, m.seat));
+                return out.join("\n");
+            },
+        },
+    ];
+}
+//# sourceMappingURL=officeTools.js.map

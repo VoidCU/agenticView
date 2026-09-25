@@ -45,6 +45,11 @@ export declare const AppearanceSchema: z.ZodObject<{
     }>;
 }, z.core.$strip>;
 export type Appearance = z.infer<typeof AppearanceSchema>;
+export declare const PlacementSchema: z.ZodObject<{
+    space: z.ZodString;
+    seat: z.ZodNumber;
+}, z.core.$strip>;
+export type Placement = z.infer<typeof PlacementSchema>;
 export declare const AgentSchema: z.ZodObject<{
     id: z.ZodString;
     name: z.ZodString;
@@ -92,6 +97,10 @@ export declare const AgentSchema: z.ZodObject<{
         tasksFailed: z.ZodNumber;
     }, z.core.$strip>;
     originId: z.ZodOptional<z.ZodString>;
+    placement: z.ZodOptional<z.ZodObject<{
+        space: z.ZodString;
+        seat: z.ZodNumber;
+    }, z.core.$strip>>;
     createdAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
