@@ -146,6 +146,35 @@ describe("Orchestrator", () => {
     expect((await ctx.tasks.list()).filter((x) => x.kind === "work")).toHaveLength(0);
   });
 
+  it("runs a second Manager request at once, in a fresh conversation, while the first is still waiting", async () => {
+    const gate = deferred<void>();
+    const seen: (string | undefined)[] = [];
+    let n = 0;
+    const ctx = await setup(async function* (req) {
+      seen.push(req.sessionId);
+      const me = ++n;
+      if (me === 2) await gate.promise;
+      yield { type: "text", text: `run ${me}` };
+    });
+    // Give the Manager a saved conversation first (the fake names a new conversation fake-<runId>).
+    const m = await ctx.reg.ensureManager();
+    expect((await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "warm up" })).id)).status).toBe("done");
+    const main = `fake-${ctx.fake.runs[0]!.runId}`;
+    const slow = await ctx.orch.handleUserMessage({ agentId: m.id, text: "slow one" });
+    await waitFor(async () => (await ctx.tasks.get(slow.id))!.status === "running");
+    const quick = await ctx.orch.handleUserMessage({ agentId: m.id, text: "quick one" });
+    // The second request finishes while the first is still blocked.
+    expect((await ctx.orch.awaitTask(quick.id)).status).toBe("done");
+    expect((await ctx.tasks.get(slow.id))!.status).toBe("running");
+    gate.resolve();
+    expect((await ctx.orch.awaitTask(slow.id)).status).toBe("done");
+    // First run resumed the saved conversation; the concurrent one started fresh.
+    expect(seen).toEqual([undefined, main, undefined]);
+    // The next request resumes the main conversation, not the side one.
+    await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "after" })).id);
+    expect(seen.at(-1)).toBe(main);
+  });
+
   it("runs Claude Code session tasks outside maxConcurrentRuns, even behind a queued limited task", async () => {
     const gate = deferred<void>();
     const gated = new FakeRuntime(async function* () {

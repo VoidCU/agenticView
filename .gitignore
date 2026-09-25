@@ -6,3 +6,6 @@ test-results/
 playwright-report/
 *.tsbuildinfo
 .claude/
+
+# AgenticView
+.claude/agents/agenticview-*.md

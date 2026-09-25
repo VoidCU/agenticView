@@ -74,6 +74,21 @@ describe("SessionRuntime: several runs per session", () => {
     expect(rt.capacityOf("sess-A")).toBe(3);
   });
 
+  it("lets a Manager take a new request while its earlier one is still running (waiting on workers)", async () => {
+    const { rt } = setup();
+    const atlas = mk("Atlas", "manager");
+    const nova = mk("Nova");
+    void rt.run(req("m1", atlas), () => undefined, new AbortController().signal);
+    const first = await rt.claimMany("sess-A", { waitMs: 0, holding: [] });
+    expect(first.tasks.map((t) => t.runId)).toEqual(["m1"]);
+    void rt.run(req("m2", atlas), () => undefined, new AbortController().signal);
+    void rt.run(req("w1", nova), () => undefined, new AbortController().signal);
+    void rt.run(req("w2", nova), () => undefined, new AbortController().signal);
+    const second = await rt.claimMany("sess-A", { waitMs: 0, holding: ["m1"] });
+    // The second request runs beside the first; a worker still gets only one task at a time.
+    expect(second.tasks.map((t) => t.runId)).toEqual(["m2", "w1"]);
+  });
+
   it("runs one task per agent at a time in a session", async () => {
     const { rt } = setup();
     const nova = mk("Nova");
