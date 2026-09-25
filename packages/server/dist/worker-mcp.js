@@ -26,6 +26,29 @@ export function resetWorkerState() {
     state.model = undefined;
     state.agent = undefined;
 }
+/** Test helper: inject a held run pointing at a specific office (for restart tests). */
+export function _testInjectRun(runId, office, agent) {
+    state.runs.set(runId, { office, agent, subagent: null });
+    state.office = office;
+}
+/** True when a and b describe the same running office process. */
+function isSameInstance(a, b) {
+    return a.startedAt === b.startedAt && a.pid === b.pid;
+}
+/**
+ * Drop all held runs whose cached office differs from `newOffice` (the new instance). Returns the
+ * dropped run ids. Call this whenever a newly discovered office may be a fresh restart.
+ */
+export function dropRunsForOldOffice(newOffice) {
+    const dropped = [];
+    for (const [id, run] of state.runs) {
+        if (!isSameInstance(run.office, newOffice)) {
+            dropped.push(id);
+            state.runs.delete(id);
+        }
+    }
+    return dropped;
+}
 /** Run ids this worker holds (tests and the next_task poll). */
 export function heldRuns() {
     return [...state.runs.keys()];
@@ -185,9 +208,12 @@ function cancelledText(ids) {
 }
 export async function nextTask(args) {
     identify(args);
-    state.office = await discoverOffice(startDir(args.project));
-    if (!state.office)
+    const discovered = await discoverOffice(startDir(args.project));
+    if (!discovered)
         return reply(NO_OFFICE, true);
+    if (state.office && !isSameInstance(state.office, discovered))
+        dropRunsForOldOffice(discovered);
+    state.office = discovered;
     const deadline = Date.now() + Math.min(3600, Math.max(1, args.wait_seconds ?? 600)) * 1000;
     const session = { model: state.model, cwd: startDir(args.project), agent: state.agent };
     const max = typeof args.max_tasks === "number" ? Math.max(0, Math.floor(args.max_tasks)) : undefined;
@@ -216,11 +242,14 @@ export async function nextTask(args) {
                 return reply(`No cancellations. ${status}`);
         }
         catch {
-            // Office restarted or went away: rediscover, and give up if it is gone.
+            // Office restarted or went away: rediscover, drop stale runs, and give up if it is gone.
             await new Promise((r) => setTimeout(r, 2000));
-            state.office = await discoverOffice(startDir(args.project));
-            if (!state.office)
+            const fresh = await discoverOffice(startDir(args.project));
+            if (!fresh)
                 return reply(NO_OFFICE, true);
+            if (!state.office || !isSameInstance(state.office, fresh))
+                dropRunsForOldOffice(fresh);
+            state.office = fresh;
         }
         if (Date.now() >= deadline)
             break;
@@ -269,6 +298,22 @@ const EventSchema = z.object({
     path: z.string().optional(),
     kind: z.enum(["create", "modify", "delete"]).optional(),
 });
+/**
+ * After a network error on a run call, check whether the office restarted. If so, drop stale runs
+ * and return a helpful error text. Returns undefined when the error is not due to a restart.
+ */
+async function checkOfficeRestart(runId) {
+    const fresh = await discoverOffice(startDir());
+    if (!fresh)
+        return undefined; // office is gone entirely; caller reports the original error
+    if (state.office && isSameInstance(state.office, fresh))
+        return undefined; // same instance; not a restart
+    // A different office is now running: drop all stale runs and inform the agent.
+    const dropped = dropRunsForOldOffice(fresh);
+    state.office = fresh;
+    const affected = dropped.includes(runId);
+    return reply(`Office restarted: run ${runId} is no longer active on the new instance.${dropped.length > 1 ? ` ${dropped.length - 1} other stale run(s) also dropped.` : ""} Call agenticview_next_task to pick up new work from the restarted office.`, !affected);
+}
 export async function report(args) {
     identify(args);
     const cur = await resolveRun(args.run_id);
@@ -279,7 +324,7 @@ export async function report(args) {
         return ackText(await post(cur.office, `/api/worker/${cur.runId}/report`, { events, subagentId: args.subagent_id }), "Reported.", cur.runId);
     }
     catch (e) {
-        return reply(`ERROR: ${e.message}`, true);
+        return (await checkOfficeRestart(cur.runId)) ?? reply(`ERROR: ${e.message}`, true);
     }
 }
 export async function complete(args) {
@@ -293,7 +338,7 @@ export async function complete(args) {
         return ackText(ack, `Task ${cur.runId} completed.${state.runs.size ? ` ${state.runs.size} still running in this session.` : ""}`, cur.runId);
     }
     catch (e) {
-        return reply(`ERROR: ${e.message}`, true);
+        return (await checkOfficeRestart(cur.runId)) ?? reply(`ERROR: ${e.message}`, true);
     }
 }
 export async function bridge(args) {
@@ -305,7 +350,7 @@ export async function bridge(args) {
         return ackText(await post(cur.office, `/api/worker/${cur.runId}/bridge`, { name: args.tool, args: args.args ?? {} }), "", cur.runId);
     }
     catch (e) {
-        return reply(`ERROR: ${e.message}`, true);
+        return (await checkOfficeRestart(cur.runId)) ?? reply(`ERROR: ${e.message}`, true);
     }
 }
 const SESSION_ID_HINT = "This Claude Code session's id: pass ${CLAUDE_SESSION_ID} exactly as the skill says, so the office recognises the session again after it is reopened (subagents may omit it)";

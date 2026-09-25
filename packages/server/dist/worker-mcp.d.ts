@@ -4,6 +4,13 @@ import { type Instance } from "./instances.js";
 import { type SessionTask } from "./runtimes/session.js";
 /** Test helper: forget the held tasks and identity. */
 export declare function resetWorkerState(): void;
+/** Test helper: inject a held run pointing at a specific office (for restart tests). */
+export declare function _testInjectRun(runId: string, office: Instance, agent: string): void;
+/**
+ * Drop all held runs whose cached office differs from `newOffice` (the new instance). Returns the
+ * dropped run ids. Call this whenever a newly discovered office may be a fresh restart.
+ */
+export declare function dropRunsForOldOffice(newOffice: Instance): string[];
 /** Run ids this worker holds (tests and the next_task poll). */
 export declare function heldRuns(): string[];
 type ToolText = {
@@ -45,10 +52,10 @@ export declare function nextTask(args: NextTaskArgs): Promise<ToolText>;
 declare const EventSchema: z.ZodObject<{
     type: z.ZodEnum<{
         text: "text";
+        status: "status";
         tool_start: "tool_start";
         tool_end: "tool_end";
         file_changed: "file_changed";
-        status: "status";
     }>;
     text: z.ZodOptional<z.ZodString>;
     name: z.ZodOptional<z.ZodString>;
