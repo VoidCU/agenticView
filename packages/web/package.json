@@ -1,6 +1,6 @@
 {
   "name": "@agenticview/web",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@agenticview/shared": "0.1.0",
+    "@agenticview/shared": "*",
     "@react-three/drei": "^10.0.0",
     "@react-three/fiber": "^9.0.0",
     "react": "^19.0.0",
