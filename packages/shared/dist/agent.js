@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { newId } from "./ids.js";
-export const ProviderSchema = z.enum(["claude", "codex", "gemini"]);
+import { EffortSchema } from "./models.js";
+export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "gemini"]);
 export const RoleSchema = z.enum(["manager", "worker"]);
 export const ScopeSchema = z.enum(["project", "global"]);
 export const PermissionModeSchema = z.enum(["ask", "auto-edit", "auto"]);
@@ -21,6 +22,11 @@ export const AppearanceSchema = z.object({
     accent: z.string(),
     eyes: z.enum(["round", "visor", "dots"]),
 });
+export const PlacementSchema = z.object({
+    /** Space id from the office honeycomb, e.g. "pod-a", "meeting". */
+    space: z.string().min(1).max(40),
+    seat: z.number().int().min(0).max(31),
+});
 export const AgentSchema = z.object({
     id: z.string(),
     name: z.string().min(1).max(40),
@@ -30,12 +36,15 @@ export const AgentSchema = z.object({
     description: z.string().max(2000).default(""),
     provider: ProviderSchema.nullable(),
     model: z.string().nullable(),
+    effort: EffortSchema.nullable().optional(),
     systemPrompt: z.string().max(20000).default(""),
     tools: ToolAllowanceSchema,
     permissionMode: PermissionModeSchema,
     appearance: AppearanceSchema,
     stats: AgentStatsSchema,
     originId: z.string().optional(),
+    /** Which space and desk a worker sits at in the office. */
+    placement: PlacementSchema.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
 });
@@ -55,6 +64,7 @@ export function defaultAgent(init) {
         description: init.description ?? "",
         provider: init.provider ?? null,
         model: init.model ?? null,
+        effort: init.effort ?? null,
         systemPrompt: init.systemPrompt ?? "",
         tools: init.tools ?? (isManager ? { ...MANAGER_TOOLS } : { ...WORKER_TOOLS }),
         permissionMode: init.permissionMode ?? (isManager ? "auto" : "auto-edit"),
@@ -67,4 +77,12 @@ export function defaultAgent(init) {
         agent.originId = init.originId;
     return agent;
 }
+/** Automatic provider resolution order: the first provider whose check() is ok wins. */
+export const PROVIDER_ORDER = ["claude", "claude-session", "codex", "gemini"];
+export const PROVIDER_LABELS = {
+    claude: "Claude",
+    "claude-session": "Claude Code session",
+    codex: "Codex",
+    gemini: "Gemini",
+};
 //# sourceMappingURL=agent.js.map

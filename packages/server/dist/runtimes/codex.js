@@ -122,11 +122,14 @@ export class CodexRuntime {
                         command: process.execPath,
                         args: [this.opts.bridgeEntry],
                         env: { AGENTICVIEW_BRIDGE_URL: this.opts.bridgeUrl(), AGENTICVIEW_RUN_ID: req.runId, AGENTICVIEW_BRIDGE_TOKEN: req.bridgeToken ?? "" },
+                        // Newer Codex asks before every MCP tool call, separately from approval_policy; nobody can answer that
+                        // prompt in a headless run, so the bridge tools (delegate, report, ...) are pre-approved.
+                        default_tools_approval_mode: "approve",
                     },
                 };
             }
             const codex = new sdk.Codex({ env, config: config });
-            const threadOpts = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: sandboxFor(req.permissionMode, process.platform, req.tools), ...(req.model ? { model: req.model } : {}) };
+            const threadOpts = codexThreadOptions(req, process.platform);
             const thread = req.sessionId ? codex.resumeThread(req.sessionId, threadOpts) : codex.startThread(threadOpts);
             const input = [];
             const textParts = req.prompt.filter((p) => p.type === "text").map((p) => (p.type === "text" ? p.text : ""));
@@ -166,5 +169,14 @@ export class CodexRuntime {
             return { text, stopReason: "error", error: e.message, sessionId };
         }
     }
+}
+/** ThreadOptions for a run: sandbox, plus model and `modelReasoningEffort` when the agent sets them. */
+export function codexThreadOptions(req, platform) {
+    const opts = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: sandboxFor(req.permissionMode, platform, req.tools) };
+    if (req.model)
+        opts.model = req.model;
+    if (req.effort)
+        opts.modelReasoningEffort = req.effort;
+    return opts;
 }
 //# sourceMappingURL=codex.js.map

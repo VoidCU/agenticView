@@ -1,18 +1,20 @@
 import { z } from "zod";
-import { isTerminal, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, type Agent, type Task } from "@agenticview/shared";
+import { EffortSchema, isTerminal, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, type Agent, type Task } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
+import { officeTools } from "./officeTools.js";
 
 export const MANAGER_SYSTEM_PROMPT = `You are the Manager of an AgenticView office: a team of AI coding agents ("workers") that edit a real software project.
 
 Rules:
 - The "Roster" and "Open tasks" preamble at the top of each message is authoritative and freshly generated. Trust it over memory. Call list_agents or list_tasks if you need to re-check.
 - Understand the request first. Read the project (you have read-only file tools) when a decision depends on the code.
-- Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits.
+- Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits. Leave model and effort at their defaults unless the user asks; use update_agent to change them.
 - Split work into self-contained assignments. Each assign_task description must stand alone: what to change, where (files or folders), how to verify. Never assign the same file to two workers at once.
 - assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.
 - Use ask_user only when a decision truly needs the user.
+- The office is a honeycomb of rooms. list_spaces shows who sits where; move_worker / arrange_workers reseat workers (group a team in one pod, call people to the meeting room) when the user asks or when it clearly helps.
 - You never edit files yourself.
 - End with a short report for the user: what was done, by whom, and anything left open.`;
 
@@ -27,6 +29,9 @@ export function workerSystemPrompt(agent: Agent, projectPath: string): string {
     .filter(Boolean)
     .join("\n\n");
 }
+
+const MODEL_HINT = "Model id or alias for the agent's provider, e.g. claude: opus | sonnet | haiku | fable; codex: gpt-6-sol; gemini: pro | flash. Omit for the provider default.";
+const EFFORT_HINT = "Reasoning effort: low | medium | high (claude also xhigh | max; codex also xhigh | max | ultra on supporting models; ignored for gemini). Omit for the default.";
 
 export interface ManagerToolContext {
   world: WorldRef;
@@ -45,7 +50,7 @@ export interface ManagerToolContext {
 
 function agentLine(a: Agent, tasks: Task[]): Record<string, unknown> {
   const active = tasks.find((t) => t.assigneeId === a.id && (t.status === "running" || t.status === "waiting"));
-  return { id: a.id, name: a.name, scope: a.scope, specialty: a.specialty, provider: a.provider ?? "default", level: a.stats.level, tasksDone: a.stats.tasksDone, state: active ? `running ${active.id}` : "idle" };
+  return { id: a.id, name: a.name, scope: a.scope, specialty: a.specialty, provider: a.provider ?? "default", model: a.model ?? "default", effort: a.effort ?? "default", level: a.stats.level, tasksDone: a.stats.tasksDone, state: active ? `running ${active.id}` : "idle" };
 }
 
 /** Resolve the target project for an assignment, or return an error string. */
@@ -93,14 +98,15 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         name: z.string().min(1).max(40),
         specialty: z.string().max(120),
         description: z.string().max(2000).optional(),
-        provider: ProviderSchema.optional().describe("claude, codex or gemini; omit to use the world default"),
-        model: z.string().optional(),
+        provider: ProviderSchema.optional().describe("claude (API key), claude-session (a Claude Code session running /agenticview-work), codex or gemini; omit to use the world default"),
+        model: z.string().optional().describe(MODEL_HINT),
+        effort: EffortSchema.optional().describe(EFFORT_HINT),
         systemPrompt: z.string().max(20000).optional(),
         tools: ToolAllowanceSchema.optional(),
         permissionMode: PermissionModeSchema.optional(),
       },
       handler: async (args) => {
-        const draft = { name: String(args.name), specialty: String(args.specialty ?? ""), description: args.description as string | undefined, provider: (args.provider as Agent["provider"]) ?? null, model: (args.model as string | undefined) ?? null, systemPrompt: args.systemPrompt as string | undefined, tools: args.tools as Agent["tools"] | undefined, permissionMode: args.permissionMode as Agent["permissionMode"] | undefined };
+        const draft = { name: String(args.name), specialty: String(args.specialty ?? ""), description: args.description as string | undefined, provider: (args.provider as Agent["provider"]) ?? null, model: (args.model as string | undefined) ?? null, effort: (args.effort as Agent["effort"]) ?? null, systemPrompt: args.systemPrompt as string | undefined, tools: args.tools as Agent["tools"] | undefined, permissionMode: args.permissionMode as Agent["permissionMode"] | undefined };
         const agent = await ctx.registry.create(draft);
         const problem = await ctx.checkProvider(agent);
         if (problem) {
@@ -109,6 +115,36 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         }
         ctx.emitAgent(agent);
         return `Created agent ${agent.id} "${agent.name}" (${agent.scope}, ${agent.specialty || "generalist"})`;
+      },
+    },
+    {
+      name: "update_agent",
+      description: "Change a worker's model, reasoning effort, provider, specialty or instructions. Pass null for model/effort to go back to the provider default.",
+      schema: {
+        agentId: z.string(),
+        provider: ProviderSchema.nullable().optional(),
+        model: z.string().nullable().optional().describe(MODEL_HINT),
+        effort: EffortSchema.nullable().optional().describe(EFFORT_HINT),
+        specialty: z.string().max(120).optional(),
+        description: z.string().max(2000).optional(),
+        systemPrompt: z.string().max(20000).optional(),
+      },
+      handler: async (args) => {
+        const cur = await ctx.registry.get(String(args.agentId));
+        if (!cur) return `ERROR: unknown agent ${String(args.agentId)}`;
+        if (cur.role !== "worker") return "ERROR: only workers can be updated";
+        const patch: Partial<Agent> = {};
+        for (const k of ["provider", "model", "effort", "specialty", "description", "systemPrompt"] as const) {
+          if (args[k] !== undefined) (patch as Record<string, unknown>)[k] = args[k];
+        }
+        const next = await ctx.registry.update(cur.id, patch);
+        const problem = await ctx.checkProvider(next);
+        if (problem) {
+          await ctx.registry.update(cur.id, cur);
+          return `ERROR: ${problem}`;
+        }
+        ctx.emitAgent(next);
+        return `Updated agent ${next.id} "${next.name}" (provider ${next.provider ?? "default"}, model ${next.model ?? "default"}, effort ${next.effort ?? "default"})`;
       },
     },
     {
@@ -162,5 +198,6 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
       schema: { question: z.string().min(1) },
       handler: async (args) => ctx.askUser(ctx.requestTask.id, ctx.managerId, String(args.question)),
     },
+    ...officeTools({ registry: ctx.registry, emitAgent: ctx.emitAgent }),
   ];
 }

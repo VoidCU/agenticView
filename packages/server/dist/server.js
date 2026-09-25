@@ -8,6 +8,8 @@ import { requireToken } from "./api/auth.js";
 import { apiRoutes, staticRoutes } from "./api/http.js";
 import { attachWs } from "./api/ws.js";
 import { workerTools } from "./manager/workerTools.js";
+import { SessionRuntime } from "./runtimes/session.js";
+import { workerRoutes } from "./api/worker.js";
 const HOST = "127.0.0.1";
 /** Boot one world (project or hub) behind a localhost, token-guarded HTTP + WebSocket server. */
 export async function createServer(opts) {
@@ -23,6 +25,11 @@ export async function createServer(opts) {
     app.route("/", bridgeRoutes(toolRegistry));
     app.use("/api/*", requireToken(opts.token));
     app.use("/hooks", requireToken(opts.token));
+    const session = runtimes.get("claude-session");
+    if (session instanceof SessionRuntime) {
+        session.onWorkersChanged = () => void world.emitProviders().catch(() => undefined);
+        app.route("/", workerRoutes(session, toolRegistry));
+    }
     app.route("/", apiRoutes(world));
     if (opts.staticDir)
         app.route("/", staticRoutes(opts.staticDir));

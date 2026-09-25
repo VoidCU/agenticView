@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { Agent, PermissionMode, PromptPart, Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
+import type { Agent, Effort, PermissionMode, PromptPart, Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
 /** A custom tool exposed to an agent for one run (Manager tools, screenshot, ...). */
 export interface BridgeTool {
     name: string;
@@ -25,6 +25,8 @@ export interface RunRequest {
     bridgeToken?: string;
     permissionMode: PermissionMode;
     model?: string;
+    /** Reasoning effort, already filtered to what the resolved provider/model supports. */
+    effort?: Effort;
     maxTurns?: number;
     /** Called by runtimes that support interactive permission prompts. Resolves true to allow. */
     onPermission?: (req: PermissionRequest) => Promise<boolean>;

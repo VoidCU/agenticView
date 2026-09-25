@@ -1,6 +1,7 @@
 import { basename, join } from "node:path";
 import {
   GlobalConfigSchema,
+  PROVIDER_ORDER,
   ProjectSettingsSchema,
   type GlobalConfig,
   type ProjectSettings,
@@ -41,6 +42,8 @@ export interface World {
   info: () => Promise<WorldInfo>;
   snapshot: () => Promise<Snapshot>;
   providerStatuses: () => Promise<ProviderStatus[]>;
+  /** Push fresh provider availability (and the Automatic choice) to every client. */
+  emitProviders: () => Promise<void>;
 }
 
 export function globalConfigPath(): string {
@@ -123,7 +126,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
 
   const providerStatuses = async (): Promise<ProviderStatus[]> => {
     const out: ProviderStatus[] = [];
-    for (const p of ["claude", "codex", "gemini"] as const) {
+    for (const p of PROVIDER_ORDER) {
       const rt = opts.runtimes.get(p);
       out.push(rt ? await rt.check() : { provider: p, ok: false, reason: "not configured" });
     }
@@ -141,13 +144,16 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     settings,
     info,
     providerStatuses,
+    emitProviders: async () => {
+      opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
+    },
     updateSettings: async (patch) => {
       projectSettings = ProjectSettingsSchema.parse({ ...projectSettings, ...patch });
       if (ref.kind === "project") await writeJsonFile(settingsFile, projectSettings);
       else {
         const cfg = await readGlobalConfig();
         if (patch.maxConcurrentRuns) cfg.maxConcurrentRuns = patch.maxConcurrentRuns;
-        if (patch.defaultProvider) cfg.defaultProvider = patch.defaultProvider;
+        if (patch.defaultProvider !== undefined) cfg.defaultProvider = patch.defaultProvider;
         if (patch.defaultModel !== undefined) cfg.defaultModel = patch.defaultModel;
         await writeJsonFile(globalConfigPath(), cfg);
         globalConfig = cfg;
@@ -159,6 +165,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       agents: await registry.list(),
       tasks: (await tasks.list()).map(toWire),
       providers: await providerStatuses(),
+      autoProvider: await orchestrator.autoProvider(),
       settings: projectSettings,
       ...orchestrator.pending(),
     }),

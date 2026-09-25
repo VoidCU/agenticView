@@ -5,4 +5,6 @@ export * from "./settings.js";
 export * from "./runtime.js";
 export * from "./xp.js";
 export * from "./protocol.js";
+export * from "./models.js";
+export * from "./office.js";
 //# sourceMappingURL=index.js.map

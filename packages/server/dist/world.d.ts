@@ -26,6 +26,8 @@ export interface World {
     info: () => Promise<WorldInfo>;
     snapshot: () => Promise<Snapshot>;
     providerStatuses: () => Promise<ProviderStatus[]>;
+    /** Push fresh provider availability (and the Automatic choice) to every client. */
+    emitProviders: () => Promise<void>;
 }
 export declare function globalConfigPath(): string;
 export declare function readGlobalConfig(): Promise<GlobalConfig>;

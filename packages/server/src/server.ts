@@ -14,6 +14,8 @@ import { attachWs } from "./api/ws.js";
 import type { Agent, Task } from "@agenticview/shared";
 import type { Orchestrator } from "./manager/orchestrator.js";
 import { workerTools } from "./manager/workerTools.js";
+import { SessionRuntime } from "./runtimes/session.js";
+import { workerRoutes } from "./api/worker.js";
 
 export interface ServerOptions {
   world: WorldRef;
@@ -53,6 +55,11 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
   app.route("/", bridgeRoutes(toolRegistry));
   app.use("/api/*", requireToken(opts.token));
   app.use("/hooks", requireToken(opts.token));
+  const session = runtimes.get("claude-session");
+  if (session instanceof SessionRuntime) {
+    session.onWorkersChanged = () => void world.emitProviders().catch(() => undefined);
+    app.route("/", workerRoutes(session, toolRegistry));
+  }
   app.route("/", apiRoutes(world));
   if (opts.staticDir) app.route("/", staticRoutes(opts.staticDir));
 

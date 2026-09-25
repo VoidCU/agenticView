@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from "react";
 import type { Provider } from "@agenticview/shared";
 import { useStore } from "../state/store";
-import { Modal, ProviderChip, providerLabel } from "./ui";
+import { Modal, ProviderChip, automaticLabel, providerLabel } from "./ui";
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const settings = useStore((s) => s.settings);
   const providers = useStore((s) => s.providers);
+  const autoProvider = useStore((s) => s.autoProvider);
   const send = useStore((s) => s.send);
   const world = useStore((s) => s.world);
   const [provider, setProvider] = useState<Provider | "">(settings?.defaultProvider ?? "");
@@ -29,11 +30,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <label className="field">
             <span>Default provider</span>
             <select value={provider} onChange={(e) => setProvider(e.target.value as Provider | "")}>
-              <option value="">Automatic (Claude)</option>
+              <option value="">{automaticLabel(autoProvider)}</option>
               {providers.map((p) => (
-                <option key={p.provider} value={p.provider} disabled={!p.ok} title={p.ok ? undefined : p.reason}>
+                <option key={p.provider} value={p.provider} disabled={!p.ok && p.provider !== "claude-session"} title={p.ok ? undefined : p.reason}>
                   {providerLabel(p.provider)}
-                  {p.ok ? "" : " (unavailable)"}
+                  {p.ok ? "" : p.provider === "claude-session" ? " (no worker yet)" : " (unavailable)"}
                 </option>
               ))}
             </select>
@@ -60,14 +61,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </ul>
           {claude && !claude.ok && (
             <p className="hint">
-              Claude agents need an API key. Set <code>ANTHROPIC_API_KEY</code> in the environment that starts AgenticView, then reopen the office.
+              The <strong>Claude</strong> provider uses the API: set <code>ANTHROPIC_API_KEY</code> in the environment that starts AgenticView, then reopen the office.
             </p>
           )}
           {claude?.ok && (
             <p className="hint">
-              Claude agents use <code>ANTHROPIC_API_KEY</code> from the environment that started AgenticView.
+              The <strong>Claude</strong> provider uses <code>ANTHROPIC_API_KEY</code> from the environment that started AgenticView.
             </p>
           )}
+          <p className="hint">
+            On a Claude Max or Pro plan? Use the <strong>Claude Code session</strong> provider: run <code>/agenticview-work</code> in a Claude Code session for this
+            project and it picks up queued tasks with its own tools. Open more sessions for more parallel workers.
+          </p>
         </fieldset>
 
         <div className="form-actions">

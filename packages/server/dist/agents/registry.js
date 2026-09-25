@@ -1,4 +1,4 @@
-import { AgentSchema, defaultAgent, MANAGER_TOOLS, } from "@agenticview/shared";
+import { AgentSchema, defaultAgent, MANAGER_TOOLS, planOffice, } from "@agenticview/shared";
 import { join } from "node:path";
 import { JsonStore } from "../store/jsonStore.js";
 import { globalRoot, projectRoot } from "../store/paths.js";
@@ -47,6 +47,12 @@ export class AgentRegistry {
             provider: input.provider ?? null,
             model: input.model ?? null,
         });
+        if (agent.role === "worker") {
+            // Take the next free desk now so the seat is stable even as the roster changes around it.
+            const seat = planOffice([...(await this.list()), agent]).placements[agent.id];
+            if (seat)
+                agent.placement = seat;
+        }
         await store.write(agent.id, agent);
         return agent;
     }
@@ -75,10 +81,25 @@ export class AgentRegistry {
             throw new Error(`Unknown agent ${id}`);
         if (src.scope !== "global")
             throw new ScopeError("Only global agents can be copied into a project");
-        const { id: _id, stats: _stats, createdAt: _c, updatedAt: _u, originId: _o, ...rest } = src;
+        const { id: _id, stats: _stats, createdAt: _c, updatedAt: _u, originId: _o, placement: _p, ...rest } = src;
         const copy = defaultAgent({ ...rest, scope: "project", originId: src.id });
         await this.project.write(copy.id, copy);
         return copy;
+    }
+    /**
+     * Persist the resolved desk of every worker that has none yet (their auto-seat depends on who else
+     * is seated, so it would shift when someone moves). Returns the agents that changed.
+     */
+    async pinPlacements() {
+        const all = await this.list();
+        const { placements } = planOffice(all);
+        const changed = [];
+        for (const a of all) {
+            const p = placements[a.id];
+            if (a.role === "worker" && !a.placement && p)
+                changed.push(await this.update(a.id, { placement: p }));
+        }
+        return changed;
     }
     async remove(id) {
         const cur = await this.get(id);

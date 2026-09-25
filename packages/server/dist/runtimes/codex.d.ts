@@ -30,3 +30,5 @@ export declare class CodexRuntime implements Runtime {
     private loadSdk;
     run(req: RunRequest, sink: EventSink, signal: AbortSignal): Promise<RunResult>;
 }
+/** ThreadOptions for a run: sandbox, plus model and `modelReasoningEffort` when the agent sets them. */
+export declare function codexThreadOptions(req: RunRequest, platform: NodeJS.Platform): Record<string, unknown>;

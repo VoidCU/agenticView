@@ -7,7 +7,7 @@ export const CLAUDE_CREDENTIAL_ENV = [
     "CLAUDE_CODE_USE_FOUNDRY",
     "CLAUDE_CODE_USE_ANTHROPIC_AWS",
 ];
-export const CLAUDE_MISSING_KEY_REASON = "Set ANTHROPIC_API_KEY (or a cloud provider env). The Agent SDK does not use the Claude Code login.";
+export const CLAUDE_MISSING_KEY_REASON = "Claude (API) needs ANTHROPIC_API_KEY (or a cloud provider env); it does not use the Claude Code login. Max/Pro subscribers: use the \"Claude Code session\" provider by running /agenticview-work in Claude Code.";
 const READ_TOOLS = ["Read", "Glob", "Grep"];
 const EDIT_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 const WEB_TOOLS = ["WebSearch", "WebFetch"];
@@ -156,8 +156,7 @@ export class ClaudeRuntime {
             };
             if (req.sessionId)
                 options.resume = req.sessionId;
-            if (req.model)
-                options.model = req.model;
+            Object.assign(options, claudeModelOptions(req));
             // The configured key goes to the SDK subprocess only, never into this process's env (other providers' CLIs inherit that).
             if (this.apiKey && !process.env.ANTHROPIC_API_KEY)
                 options.env = { ...process.env, ANTHROPIC_API_KEY: this.apiKey };
@@ -218,5 +217,14 @@ export class ClaudeRuntime {
             return { text, stopReason: "error", error: e.message };
         }
     }
+}
+/** Model (alias or full id) and `effort` for the Agent SDK. Claude has no "ultra"/"minimal"; those are dropped upstream by effectiveEffort(). */
+export function claudeModelOptions(req) {
+    const out = {};
+    if (req.model)
+        out.model = req.model;
+    if (req.effort)
+        out.effort = req.effort;
+    return out;
 }
 //# sourceMappingURL=claude.js.map

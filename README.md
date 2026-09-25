@@ -2,9 +2,10 @@
 
 A gamified 3D office for your coding agents, packaged as a Claude Code plugin.
 
-Run one command inside any project and a browser tab opens onto an isometric office. Spherical robots are your agents. **Atlas**, the Manager, stands on the podium in the middle. Workers sit at desks around it. You talk to Atlas, Atlas splits the work and hands it to the right worker, and the workers edit your real project files. Flip back to VS Code whenever you like to review the code.
+Run one command inside any project and a browser tab opens onto an isometric office: a honeycomb of hexagonal rooms. Spherical robots are your agents. **Atlas**, the Manager, works from the office in the centre; workers sit at desks in the pods around it, next to a meeting room and a lounge. You talk to Atlas, Atlas splits the work, walks over to the right worker and hands it off, and the workers edit your real project files. Flip back to VS Code whenever you like to review the code.
 
-- **Any provider.** Claude is the default. Any agent can instead run on OpenAI **Codex** or Google **Gemini**.
+- **Any provider.** Agents run on Claude (API key), on your own **Claude Code session** (Max/Pro plans, via `/agenticview-work`), on OpenAI **Codex**, or on Google **Gemini**. *Automatic* picks the first one that is available.
+- **Model and effort per agent.** Pick each agent's model from its provider's list (or type a custom id) and a reasoning effort from low to max where the model supports it.
 - **Two scopes.** *Project* agents live inside a project and only work there. *Global* agents live in your home folder, show up in every office, can be copied into a project, or can be sent to work on any project you have opened before.
 - **A Manager with an accurate map.** Every Manager turn starts with a freshly generated roster and open-task list, so it always knows who exists, who is busy, and what is in flight.
 - **Agents that can see.** Workers can take screenshots of a URL, and you can paste screenshots into any chat.
@@ -38,7 +39,8 @@ Close and reopen Claude Code (or start a new session with `claude`). On start, t
 
 Pick one:
 
-- **Claude (default):** set `ANTHROPIC_API_KEY` in your shell environment (get one at platform.claude.com). The Agent SDK does **not** reuse your Claude Code login. Alternatively put the key in `~/.agenticview/config.json`:
+- **Claude Max or Pro plan (no API key):** use the **Claude Code session** provider. Open the office, then in a Claude Code session for the same project run `/agenticview-work`. That session becomes a worker: it pulls queued tasks from the office and does them with its own tools. AgenticView never launches `claude` itself for this provider, so your subscription is only used by Claude Code. One session handles one task at a time; open more sessions for more parallel workers.
+- **Claude via API key (provider `claude`):** set `ANTHROPIC_API_KEY` in your shell environment (get one at platform.claude.com). The Agent SDK does **not** reuse your Claude Code login. Alternatively put the key in `~/.agenticview/config.json`:
 
   ```json
   { "providers": { "claude": { "apiKey": "sk-ant-..." } } }
@@ -54,6 +56,7 @@ You can install the plugin first and add credentials later; the office shows eac
 | Command | What it opens |
 |---|---|
 | `/agenticview` | The office for the current project |
+| `/agenticview-work` | Not a page: turns this Claude Code session into a worker for the *Claude Code session* provider, pulling queued office tasks until you interrupt it |
 | `/agenticview-hub` | The Hub: global agents plus your list of known projects |
 
 Run `/agenticview` inside a project (Claude Code must be started in the project folder). Claude runs the launcher, and the first time it installs the plugin's own dependencies (about a minute; later launches take a second). It then prints a line like:
@@ -99,16 +102,19 @@ node bin/agenticview.mjs hub
 | `/agenticview` says `plugin-root` is missing | The SessionStart hook has not run yet. Restart Claude Code once, then retry. |
 | `AgenticView needs its launch link` page | You opened the address without its `#token=` part. Use the exact link the command printed, or run `/agenticview` again (it reuses the running server and prints the link). |
 | Provider shows *unavailable* in the office | Hover the chip or open Settings to read the reason: usually a missing key or CLI. Fix it, restart the office (`/agenticview` again after stopping the old one), and reload the page. Provider checks are cached for a minute. |
-| Claude agent fails immediately | `ANTHROPIC_API_KEY` is not visible to the shell Claude Code runs in. Set it in `~/.agenticview/config.json` instead. |
+| Claude agent fails immediately | `ANTHROPIC_API_KEY` is not visible to the shell Claude Code runs in. Set it in `~/.agenticview/config.json` instead, or switch the agent to *Claude Code session* if you are on a Max/Pro plan. |
+| Claude Code session task sits "waiting for a worker" | No session is polling. Run `/agenticview-work` in a Claude Code session opened in the project folder (restart Claude Code once after installing or updating the plugin so its `agenticview-worker` MCP server loads). |
 | Codex worker cannot edit files on Windows | Codex's Windows sandbox cannot write. Use *auto-edit* or *auto* (both run unsandboxed there) or run under WSL. |
 | Gemini reports a `GOOGLE_CLOUD_PROJECT` error | Your Google account type needs that variable set; see the link in the error. |
 | Port or stale office | Each project has one server. If a stale one lingers, delete its file in `~/.agenticview/instances/` and rerun. |
 
 Inside the office:
 
-- Type into the command bar at the bottom to give Atlas a task. Watch the beam fire from the podium to the worker that gets it.
-- Click any robot to open its chat panel. Paste an image to attach it.
-- Click the empty desk with the `+` pad to create a worker. Pick a name, a specialty, a provider, which tools it may use, and how much it should ask before acting.
+- Type into the command bar at the bottom to give Atlas a task. Atlas walks through the doorways to the worker that gets it, and back again when the task is done.
+- Click any robot to open its chat panel. Paste an image to attach it. The ⋯ menu in the chat header edits, copies or deletes the agent.
+- Click the empty desk with the `+` pad to create a worker. Pick a name, a specialty, a provider, a model and effort level, which tools it may use, and how much it should ask before acting.
+- Click a room (or its name plate) to zoom to it; Esc or *Whole floor* zooms back out. More pods open in new rings as you add workers.
+- Drag a worker onto another room or desk to reseat it (dropping on an occupied desk swaps the two). Atlas can do the same: ask it to rearrange the team and it uses its `list_spaces`, `move_worker` and `arrange_workers` tools.
 - Workers earn XP for finished tasks. Levels only unlock cosmetic accents.
 - When a Claude worker in `ask` mode wants to run something risky, a bubble appears over its head with Allow and Deny.
 
@@ -116,11 +122,16 @@ Inside the office:
 
 | Provider | How agents run | What you need |
 |---|---|---|
-| **claude** (default) | Claude Agent SDK (Claude Code as a library) | `ANTHROPIC_API_KEY` in your environment, or a cloud provider env such as `CLAUDE_CODE_USE_BEDROCK`. The Agent SDK does not reuse the Claude Code login. You can also put the key in `~/.agenticview/config.json` under `providers.claude.apiKey`. |
+| **claude** | Claude Agent SDK (Claude Code as a library) | `ANTHROPIC_API_KEY` in your environment, or a cloud provider env such as `CLAUDE_CODE_USE_BEDROCK`. The Agent SDK does not reuse the Claude Code login. You can also put the key in `~/.agenticview/config.json` under `providers.claude.apiKey`. |
+| **claude-session** ("Claude Code session") | Your own Claude Code session running `/agenticview-work` pulls tasks from the office queue over the plugin's `agenticview-worker` MCP server and does them with its own tools. AgenticView never spawns `claude` for it. | A Claude Code login (Max/Pro works). Run `/agenticview-work` in a session for the project; it shows as available while at least one session is polling. Tasks wait in the queue until a session picks them up. |
 | **codex** | `@openai/codex-sdk` driving the installed `codex` CLI | `npm i -g @openai/codex`, then sign in (`codex login`) or set `CODEX_API_KEY`. |
 | **gemini** | The installed `gemini` CLI in headless streaming mode | `npm i -g @google/gemini-cli`, then sign in or set `GEMINI_API_KEY`. |
 
-The settings panel in the office shows each provider's status and the reason when one is unavailable. Creating an agent on an unavailable provider is refused with that reason.
+The settings panel in the office shows each provider's status and the reason when one is unavailable. Creating an agent on an unavailable provider is refused with that reason, except for *Claude Code session*, whose tasks simply wait until a worker session connects.
+
+With the default provider on **Automatic**, agents without their own provider run on the first available provider in the order claude, claude-session, codex, gemini. The settings panel shows the current choice, e.g. *Automatic (Codex)*.
+
+Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; Gemini offers its model aliases and has no effort control. A *Claude Code session* worker keeps its own model and treats the effort as a hint for how thorough to be. *Custom…* accepts any model id.
 
 Only Claude supports interactive permission prompts. For Codex and Gemini, the `ask` mode maps to the most restrictive non-interactive setting each CLI offers, and the office says so:
 

@@ -1,7 +1,18 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import type { ProviderStatus } from "@agenticview/shared";
+import { createPortal } from "react-dom";
+import { PROVIDER_LABELS, type Provider, type ProviderStatus } from "@agenticview/shared";
 
-export const PROVIDER_LABEL: Record<string, string> = { claude: "Claude", codex: "Codex", gemini: "Gemini" };
+export const PROVIDER_LABEL: Record<string, string> = PROVIDER_LABELS;
+
+/** The provider an agent without its own provider runs on: the explicit default, else what Automatic resolved to. */
+export function defaultProviderOf(explicit: Provider | null | undefined, auto: Provider | null | undefined): Provider {
+  return explicit ?? auto ?? "claude";
+}
+
+/** "Automatic (Codex)", or "Automatic (none available)". */
+export function automaticLabel(auto: Provider | null | undefined): string {
+  return `Automatic (${auto ? providerLabel(auto) : "none available"})`;
+}
 
 export function providerLabel(p: string | null | undefined, fallback = "Default"): string {
   return p ? (PROVIDER_LABEL[p] ?? p) : fallback;
@@ -9,11 +20,11 @@ export function providerLabel(p: string | null | undefined, fallback = "Default"
 
 /** A small provider pill with an availability dot. Unavailable providers are greyed with the reason as the title. */
 export function ProviderChip({ status, compact = false }: { status: ProviderStatus; compact?: boolean }) {
-  const title = status.ok ? `${providerLabel(status.provider)}${status.version ? ` ${status.version}` : ""} is ready` : status.reason ?? "Unavailable";
+  const title = status.ok ? `${providerLabel(status.provider)}${status.version ? ` (${status.version})` : ""} is ready` : status.reason ?? "Unavailable";
   return (
     <span className={`chip ${status.ok ? "chip-ok" : "chip-off"}`} title={title} data-provider={status.provider}>
       <span className="chip-dot" aria-hidden="true" />
-      {compact ? providerLabel(status.provider) : `${providerLabel(status.provider)}${status.ok && status.version ? ` ${status.version}` : ""}`}
+      {compact ? providerLabel(status.provider) : `${providerLabel(status.provider)}${status.ok && status.version ? ` · ${status.version}` : ""}`}
       {!status.ok && <span className="sr-only"> unavailable: {status.reason}</span>}
     </span>
   );
@@ -31,7 +42,8 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // Portal to <body>: panels use backdrop-filter, which would otherwise trap a fixed-position modal inside them.
+  return createPortal(
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" ref={ref}>
         <div className="modal-head">
@@ -42,7 +54,8 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

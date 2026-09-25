@@ -79,3 +79,18 @@ test("README covers install, commands, providers, scopes and security", () => {
     assert.ok(md.includes(needle), `README missing ${needle}`);
   }
 });
+
+test(".mcp.json declares the session worker MCP server through the plugin root, and its skill exists", () => {
+  const mcp = readJson(".mcp.json");
+  const srv = mcp.mcpServers["agenticview-worker"];
+  assert.equal(srv.command, "node");
+  assert.deepEqual(srv.args, ["${CLAUDE_PLUGIN_ROOT}/bin/worker-mcp.mjs"]);
+  assert.ok(existsSync(join(root, "bin", "worker-mcp.mjs")));
+  assert.ok(existsSync(join(root, "packages", "server", "dist", "worker-mcp.js")), "worker-mcp must be built into dist");
+  const md = readFileSync(join(root, "skills", "agenticview-work", "SKILL.md"), "utf8");
+  assert.match(md, /^---\nname: agenticview-work\n/);
+  for (const tool of ["agenticview_next_task", "agenticview_report", "agenticview_complete", "agenticview_bridge"]) assert.ok(md.includes(tool), `skill must mention ${tool}`);
+  // The plugin must never launch claude for this provider.
+  const src = readFileSync(join(root, "packages", "server", "src", "runtimes", "session.ts"), "utf8");
+  assert.doesNotMatch(src, /claude-agent-sdk|child_process/);
+});

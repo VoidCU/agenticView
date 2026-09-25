@@ -290,6 +290,7 @@ export class GeminiRuntime implements Runtime {
       const viaStdin = promptText.length > MAX_ARG_PROMPT;
       const args = ["-p", viaStdin ? STDIN_MARKER : promptText, "--output-format", "stream-json", "--approval-mode", APPROVAL[req.permissionMode]];
       if (req.model) args.push("-m", req.model);
+      // req.effort is ignored: the Gemini CLI has no thinking/effort flag (the UI hides effort for Gemini).
       if (req.sessionId) args.push("--resume", req.sessionId);
       if (useBridge) args.push("--allowed-mcp-server-names", serverName);
       const env: Record<string, string> = {};

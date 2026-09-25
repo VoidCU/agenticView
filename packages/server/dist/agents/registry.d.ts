@@ -1,4 +1,4 @@
-import { type Agent, type Role, type Scope, type Provider, type ToolAllowance, type PermissionMode, type Appearance } from "@agenticview/shared";
+import { type Agent, type Effort, type Role, type Scope, type Provider, type ToolAllowance, type PermissionMode, type Appearance } from "@agenticview/shared";
 export type WorldRef = {
     kind: "project";
     projectPath: string;
@@ -11,6 +11,7 @@ export interface CreateAgentInput {
     description?: string;
     provider?: Provider | null;
     model?: string | null;
+    effort?: Effort | null;
     systemPrompt?: string;
     tools?: ToolAllowance;
     permissionMode?: PermissionMode;
@@ -35,6 +36,11 @@ export declare class AgentRegistry {
     update(id: string, patch: Partial<Agent>): Promise<Agent>;
     /** Clone a global agent into this project with fresh id and stats, remembering its origin. */
     copyToProject(id: string): Promise<Agent>;
+    /**
+     * Persist the resolved desk of every worker that has none yet (their auto-seat depends on who else
+     * is seated, so it would shift when someone moves). Returns the agents that changed.
+     */
+    pinPlacements(): Promise<Agent[]>;
     remove(id: string): Promise<void>;
     ensureManager(): Promise<Agent>;
     managerId(): Promise<string>;

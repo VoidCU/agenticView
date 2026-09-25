@@ -14,7 +14,8 @@ export const KnownProjectSchema = z.object({ path: z.string(), name: z.string(),
 export type KnownProject = z.infer<typeof KnownProjectSchema>;
 
 export const GlobalConfigSchema = z.object({
-  defaultProvider: ProviderSchema.default("claude"),
+  /** null = Automatic: the first available provider in PROVIDER_ORDER. */
+  defaultProvider: ProviderSchema.nullable().default(null),
   defaultModel: z.string().nullable().default(null),
   maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
   providers: z

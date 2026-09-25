@@ -16,7 +16,7 @@ describe("store.apply", () => {
     expect(Object.keys(s.agents)).toEqual([manager.id, worker.id]);
     expect(s.agents[worker.id]?.name).toBe("Pixel");
     expect(s.tasks["t_00000001"]?.status).toBe("queued");
-    expect(s.providers.map((p) => p.provider)).toEqual(["claude", "codex", "gemini"]);
+    expect(s.providers.map((p) => p.provider)).toEqual(["claude", "claude-session", "codex", "gemini"]);
     expect(s.settings?.maxConcurrentRuns).toBe(3);
   });
 
@@ -141,5 +141,13 @@ describe("agentStatus", () => {
   });
   it("ignores other agents' tasks", () => {
     expect(agentStatus(worker2, [task({ id: "t", status: "running" })], [], [], [], now)).toBe("idle");
+  });
+});
+
+describe("providers.updated", () => {
+  it("replaces provider statuses and the Automatic choice", () => {
+    useStore.getState().apply({ type: "providers.updated", providers: [{ provider: "claude-session", ok: true, version: "1 worker" }], autoProvider: "claude-session" });
+    expect(useStore.getState().providers).toEqual([{ provider: "claude-session", ok: true, version: "1 worker" }]);
+    expect(useStore.getState().autoProvider).toBe("claude-session");
   });
 });

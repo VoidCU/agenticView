@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Agent } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { CreateAgentModal } from "./CreateAgentModal";
@@ -12,11 +13,16 @@ export function AgentMenu({ agent }: { agent: Agent }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && !menuRef.current?.contains(t)) setOpen(false);
     };
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -30,8 +36,11 @@ export function AgentMenu({ agent }: { agent: Agent }) {
       <button type="button" className="icon-btn" aria-label={`Actions for ${agent.name}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <MoreIcon />
       </button>
-      {open && (
-        <div className="menu" role="menu">
+      {open &&
+        pos &&
+        createPortal(
+        // Fixed and portalled so the panel's overflow clipping cannot cut the menu off.
+        <div className="menu menu-fixed" role="menu" ref={menuRef} style={{ top: pos.top, right: pos.right }}>
           <button type="button" role="menuitem" onClick={() => (setOpen(false), setEditing(true))}>
             Edit {agent.name}
           </button>
@@ -56,7 +65,8 @@ export function AgentMenu({ agent }: { agent: Agent }) {
               </button>
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
       {editing && <CreateAgentModal edit={agent} onClose={() => setEditing(false)} />}
     </div>

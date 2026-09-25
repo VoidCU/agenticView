@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { newId } from "./ids.js";
+import { EffortSchema } from "./models.js";
 
-export const ProviderSchema = z.enum(["claude", "codex", "gemini"]);
+export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "gemini"]);
 export type Provider = z.infer<typeof ProviderSchema>;
 export const RoleSchema = z.enum(["manager", "worker"]);
 export type Role = z.infer<typeof RoleSchema>;
@@ -33,6 +34,13 @@ export const AppearanceSchema = z.object({
 });
 export type Appearance = z.infer<typeof AppearanceSchema>;
 
+export const PlacementSchema = z.object({
+  /** Space id from the office honeycomb, e.g. "pod-a", "meeting". */
+  space: z.string().min(1).max(40),
+  seat: z.number().int().min(0).max(31),
+});
+export type Placement = z.infer<typeof PlacementSchema>;
+
 export const AgentSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(40),
@@ -42,12 +50,15 @@ export const AgentSchema = z.object({
   description: z.string().max(2000).default(""),
   provider: ProviderSchema.nullable(),
   model: z.string().nullable(),
+  effort: EffortSchema.nullable().optional(),
   systemPrompt: z.string().max(20000).default(""),
   tools: ToolAllowanceSchema,
   permissionMode: PermissionModeSchema,
   appearance: AppearanceSchema,
   stats: AgentStatsSchema,
   originId: z.string().optional(),
+  /** Which space and desk a worker sits at in the office. */
+  placement: PlacementSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -73,6 +84,7 @@ export function defaultAgent(init: AgentInit): Agent {
     description: init.description ?? "",
     provider: init.provider ?? null,
     model: init.model ?? null,
+    effort: init.effort ?? null,
     systemPrompt: init.systemPrompt ?? "",
     tools: init.tools ?? (isManager ? { ...MANAGER_TOOLS } : { ...WORKER_TOOLS }),
     permissionMode: init.permissionMode ?? (isManager ? "auto" : "auto-edit"),
@@ -84,3 +96,13 @@ export function defaultAgent(init: AgentInit): Agent {
   if (init.originId) agent.originId = init.originId;
   return agent;
 }
+
+/** Automatic provider resolution order: the first provider whose check() is ok wins. */
+export const PROVIDER_ORDER: readonly Provider[] = ["claude", "claude-session", "codex", "gemini"];
+
+export const PROVIDER_LABELS: Record<Provider, string> = {
+  claude: "Claude",
+  "claude-session": "Claude Code session",
+  codex: "Codex",
+  gemini: "Gemini",
+};

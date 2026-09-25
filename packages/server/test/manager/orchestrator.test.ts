@@ -92,10 +92,40 @@ describe("Orchestrator", () => {
     expect(workerReq.systemPrompt).toContain("Nova");
     const managerReq = ctx.fake.runs.find((r) => r.agent.role === "manager")!;
     expect(managerReq.prompt.map((p) => (p.type === "text" ? p.text : ""))[0]).toContain("## Roster");
-    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["ask_user", "assign_task", "await_tasks", "create_agent", "list_agents", "list_tasks"]);
+    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["arrange_workers", "ask_user", "assign_task", "await_tasks", "create_agent", "list_agents", "list_spaces", "list_tasks", "move_worker", "update_agent"]);
     expect(ctx.orch.running()).toBe(0);
     const log = (await ctx.tasks.get(child.id))!.log;
     expect(log.some((l) => l.type === "file_changed")).toBe(true);
+  });
+
+  it("create_agent/update_agent take model and effort; runs get the effort the model supports", async () => {
+    const replies: string[] = [];
+    const ctx = await setup(async function* (req) {
+      if (req.agent.role === "manager") {
+        const create = req.bridgeTools.find((b) => b.name === "create_agent")!;
+        replies.push(await create.handler({ name: "Nova", specialty: "", provider: "claude", model: "opus", effort: "max" }));
+        const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
+        yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "a", description: "b" } };
+        yield { type: "call", tool: "await_tasks", args: { taskIds: (await ctx.tasks.list()).filter((t) => t.kind === "work").map((t) => t.id) } };
+        const update = req.bridgeTools.find((b) => b.name === "update_agent")!;
+        replies.push(await update.handler({ agentId: nova.id, model: "haiku" }));
+        yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "c", description: "d" } };
+        yield { type: "call", tool: "await_tasks", args: { taskIds: (await ctx.tasks.list()).filter((t) => t.kind === "work" && t.title === "c").map((t) => t.id) } };
+        yield { type: "text", text: "ok" };
+      } else {
+        yield { type: "text", text: "done" };
+      }
+    });
+    const m = await ctx.reg.ensureManager();
+    await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" })).id);
+    expect(replies[1]).toMatch(/model haiku, effort max/);
+    const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
+    expect(nova).toMatchObject({ model: "haiku", effort: "max" });
+    const workerRuns = ctx.fake.runs.filter((r) => r.agent.role === "worker");
+    expect(workerRuns[0]).toMatchObject({ model: "opus", effort: "max" });
+    // Haiku has no effort control, so the stored "max" is not sent.
+    expect(workerRuns[1]!.model).toBe("haiku");
+    expect(workerRuns[1]!.effort).toBeUndefined();
   });
 
   it("refuses cross-project assignment for project agents", async () => {
@@ -313,5 +343,49 @@ describe("Orchestrator", () => {
     expect(prompt.type === "text" ? prompt.text : "").toContain(`Target project: ${proj}`);
     expect(t.projectPath).toBe(proj);
     await expect(ctx.orch.handleUserMessage({ agentId: m.id, text: "x", projectPath: "C:/nope" })).rejects.toThrow(/not a known project/);
+  });
+});
+
+describe("Automatic provider", () => {
+  const status = (provider: Provider, ok: boolean): Runtime => ({
+    provider,
+    check: async () => (ok ? { provider, ok } : { provider, ok, reason: "nope" }),
+    run: async () => ({ text: "", stopReason: "done" }),
+  });
+
+  it("picks the first available provider in order claude, claude-session, codex, gemini", async () => {
+    const runtimes = new Map<Provider, Runtime>([
+      ["claude", status("claude", false)],
+      ["claude-session", status("claude-session", false)],
+      ["codex", status("codex", true)],
+      ["gemini", status("gemini", true)],
+    ]);
+    const ctx = await setup(async function* () {}, { runtimes });
+    const a = await ctx.reg.create({ name: "A", specialty: "" });
+    expect(await ctx.orch.autoProvider()).toBe("codex");
+    expect((await ctx.orch.resolveProviderLive(a)).provider).toBe("codex");
+    expect((await ctx.world.snapshot()).autoProvider).toBe("codex");
+    runtimes.set("claude-session", status("claude-session", true));
+    expect(await ctx.orch.autoProvider()).toBe("claude-session");
+    runtimes.set("claude", status("claude", true));
+    expect(await ctx.orch.autoProvider()).toBe("claude");
+  });
+
+  it("an explicit default overrides Automatic, and no available provider is a clear problem", async () => {
+    const runtimes = new Map<Provider, Runtime>([["claude", status("claude", false)], ["gemini", status("gemini", true)]]);
+    const ctx = await setup(async function* () {}, { runtimes, settings: { defaultProvider: "claude" } });
+    const a = await ctx.reg.create({ name: "A", specialty: "" });
+    expect((await ctx.orch.resolveProviderLive(a)).provider).toBe("claude");
+    expect(await ctx.orch.providerProblem(a)).toMatch(/provider claude unavailable/);
+
+    const none = await setup(async function* () {}, { runtimes: new Map([["claude", status("claude", false)]]), settings: { defaultProvider: null } });
+    const b = await none.reg.create({ name: "B", specialty: "" });
+    expect(await none.orch.providerProblem(b)).toMatch(/no provider available/);
+  });
+
+  it("an agent on claude-session is never refused for lack of a worker (its task waits in the queue)", async () => {
+    const ctx = await setup(async function* () {}, { runtimes: new Map([["claude-session", status("claude-session", false)]]) });
+    const a = await ctx.reg.create({ name: "A", specialty: "", provider: "claude-session" });
+    expect(await ctx.orch.providerProblem(a)).toBeUndefined();
   });
 });
