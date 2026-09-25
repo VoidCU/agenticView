@@ -1,61 +1,40 @@
-import type { Agent } from "@agenticview/shared";
+import { managerHome, nextPlacement, planOffice, seatPose, type Agent, type Placement, type SeatPose, type Space } from "@agenticview/shared";
 
-export type Zone = "podium" | "desk" | "lobby";
-export interface Spot {
-  x: number;
-  z: number;
-  zone: Zone;
+export interface Pose extends SeatPose {
+  space: string;
+  seat?: number;
 }
 
-export const LOBBY_Z = -9;
-export const LOBBY_SPACING = 2.2;
-
-export function ringRadius(count: number): number {
-  return 4 + 0.4 * count;
+export interface OfficeLayout {
+  spaces: Space[];
+  /** Resting pose of every agent: the manager at home, workers at their desks. */
+  poses: Record<string, Pose>;
+  placements: Record<string, Placement>;
+  /** "space#seat" -> agent id. */
+  occupied: Map<string, string>;
+  /** The desk a new worker would get. */
+  next?: Placement;
 }
 
-function ringSpot(index: number, count: number): { x: number; z: number } {
-  const r = ringRadius(count);
-  const angle = -Math.PI / 2 + (index * 2 * Math.PI) / count;
-  return { x: r * Math.cos(angle), z: r * Math.sin(angle) };
-}
+export const seatKey = (p: Placement) => `${p.space}#${p.seat}`;
 
-function byCreation(a: Agent, b: Agent): number {
-  return a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
-}
-
-/**
- * Desk positions: manager on the podium at the origin, project workers on a ring
- * whose radius grows with head-count, global workers on the lobby row at z=-9.
- */
-export function layoutFor(agents: Agent[]): Record<string, Spot> {
-  const out: Record<string, Spot> = {};
-  const managers = agents.filter((a) => a.role === "manager");
-  const project = agents.filter((a) => a.role === "worker" && a.scope === "project").sort(byCreation);
-  const global = agents.filter((a) => a.role === "worker" && a.scope === "global").sort(byCreation);
-
-  managers.forEach((m, i) => {
-    out[m.id] = { x: i * 1.6, z: 0, zone: "podium" };
-  });
-  project.forEach((w, i) => {
-    out[w.id] = { ...ringSpot(i, project.length), zone: "desk" };
-  });
-  const width = (global.length - 1) * LOBBY_SPACING;
-  global.forEach((w, i) => {
-    out[w.id] = { x: -width / 2 + i * LOBBY_SPACING, z: LOBBY_Z, zone: "lobby" };
-  });
-  return out;
-}
-
-/** Where the next project worker's desk would be: the last slot of a ring one larger. */
-export function nextDeskFor(agents: Agent[]): Spot {
-  const n = agents.filter((a) => a.role === "worker" && a.scope === "project").length;
-  return { ...ringSpot(n, n + 1), zone: "desk" };
-}
-
-/** Where the next global worker would stand in the lobby. */
-export function nextLobbyFor(agents: Agent[]): Spot {
-  const n = agents.filter((a) => a.role === "worker" && a.scope === "global").length;
-  const width = n * LOBBY_SPACING;
-  return { x: -width / 2 + n * LOBBY_SPACING, z: LOBBY_Z, zone: "lobby" };
+export function layoutFor(agents: Agent[]): OfficeLayout {
+  const { spaces, placements } = planOffice(agents);
+  const byId = new Map(spaces.map((s) => [s.id, s]));
+  const office = byId.get("office")!;
+  const poses: Record<string, Pose> = {};
+  const occupied = new Map<string, string>();
+  agents
+    .filter((a) => a.role === "manager")
+    .forEach((m, i) => {
+      const home = managerHome(office);
+      poses[m.id] = { ...home, x: home.x + i * 1.2, space: "office" };
+    });
+  for (const [id, p] of Object.entries(placements)) {
+    const s = byId.get(p.space);
+    if (!s) continue;
+    poses[id] = { ...seatPose(s, p.seat), space: s.id, seat: p.seat };
+    occupied.set(seatKey(p), id);
+  }
+  return { spaces, poses, placements, occupied, next: nextPlacement(agents) };
 }

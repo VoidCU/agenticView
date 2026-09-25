@@ -1,56 +1,23 @@
-import { Suspense, useMemo } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
-import type { Agent } from "@agenticview/shared";
+import * as THREE from "three";
+import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
-import { useEffect, useState } from "react";
-import { layoutFor, nextDeskFor, nextLobbyFor, LOBBY_Z, type Spot } from "./layout";
-import { Robot } from "./Robot";
+import { layoutFor, seatKey, type OfficeLayout } from "./layout";
+import { Robot, type RobotTarget } from "./Robot";
 import { Beam } from "./Beam";
 import { Confetti } from "./Confetti";
 import { PlusIcon } from "../hud/ui";
+import { Kit, buildWalls, furnishSpace } from "./kit";
+import { Batches, useMaterials } from "./Batches";
+import { PALETTES, carpetTexture, useSceneTheme, woodTexture, type Palette } from "./theme";
+import { dragPoint, livePos, useDrag, useFocus } from "./motion";
 
-const PODIUM_H = 0.32;
-const LOBBY_H = 0.26;
-const BG = "#0e1017";
+const DEG = Math.PI / 180;
 
-function baseFor(spot: Spot): number {
-  return spot.zone === "podium" ? PODIUM_H : spot.zone === "lobby" ? LOBBY_H : 0;
-}
-
-function Desk({ spot, color }: { spot: Spot; color: string }) {
-  // The desk sits behind the robot, on the side facing away from the camera.
-  const back = -1.05;
-  return (
-    <group position={[spot.x, baseFor(spot), spot.z]} rotation={[0, Math.PI / 4, 0]}>
-      <mesh position={[0, 0.62, back]}>
-        <boxGeometry args={[1.9, 0.08, 0.8]} />
-        <meshStandardMaterial color="#2c3146" roughness={0.7} />
-      </mesh>
-      {[-0.85, 0.85].map((x) => (
-        <mesh key={x} position={[x, 0.3, back]}>
-          <boxGeometry args={[0.08, 0.6, 0.7]} />
-          <meshStandardMaterial color="#1f2333" roughness={0.8} />
-        </mesh>
-      ))}
-      <mesh position={[0, 0.96, back - 0.22]}>
-        <boxGeometry args={[0.9, 0.55, 0.05]} />
-        <meshStandardMaterial color="#0b0d14" roughness={0.3} emissive={color} emissiveIntensity={0.55} />
-      </mesh>
-      <mesh position={[0, 0.72, back - 0.22]}>
-        <boxGeometry args={[0.08, 0.14, 0.08]} />
-        <meshStandardMaterial color="#3a4058" />
-      </mesh>
-      <mesh position={[0, 0.68, back + 0.15]}>
-        <boxGeometry args={[0.6, 0.03, 0.22]} />
-        <meshStandardMaterial color="#3a4058" roughness={0.6} />
-      </mesh>
-    </group>
-  );
-}
-
-/** Chips naming the files an agent touched in the last few seconds, floating above its desk and fading out. */
-function FileChips({ agentId, spot }: { agentId: string; spot: Spot }) {
+/** Chips naming the files an agent touched in the last few seconds, floating above it and fading out. */
+function FileChips({ agentId }: { agentId: string }) {
   const feed = useStore((s) => s.feed[agentId]);
   const [chips, setChips] = useState<FileChip[]>([]);
   useEffect(() => {
@@ -61,7 +28,7 @@ function FileChips({ agentId, spot }: { agentId: string; spot: Spot }) {
   }, [feed]);
   if (chips.length === 0) return null;
   return (
-    <Html center position={[spot.x, baseFor(spot) + 1.75, spot.z - 0.9]} distanceFactor={12} zIndexRange={[12, 0]} style={{ pointerEvents: "none" }}>
+    <Html center position={[0, 2.45, 0]} distanceFactor={16} zIndexRange={[12, 0]} style={{ pointerEvents: "none" }}>
       <div className="file-chips">
         {chips.map((c) => (
           <span key={c.path} className="file-chip" style={{ opacity: c.opacity }} title={c.path}>
@@ -73,71 +40,215 @@ function FileChips({ agentId, spot }: { agentId: string; spot: Spot }) {
   );
 }
 
-function Podium() {
+// ---------- floors, labels, hover ----------
+
+let slab: THREE.CylinderGeometry | undefined;
+let outline: THREE.RingGeometry | undefined;
+function floorGeometry() {
+  slab ??= new THREE.CylinderGeometry(HEX_R - 0.02, HEX_R - 0.02, 0.12, 6, 1);
+  outline ??= new THREE.RingGeometry(HEX_R - 0.32, HEX_R - 0.1, 6, 1);
+  return { slab, outline };
+}
+
+function useFloorMaterials(p: Palette) {
+  return useMemo(() => {
+    const edge = new THREE.MeshStandardMaterial({ color: p.floorEdge, roughness: 0.9 });
+    const top = (map: THREE.Texture, roughness: number) => new THREE.MeshStandardMaterial({ map, roughness, color: "#ffffff" });
+    return {
+      office: [edge, top(woodTexture(p.walnut), 0.55), edge],
+      pod: [edge, top(carpetTexture(p.carpetPod), 0.95), edge],
+      meeting: [edge, top(carpetTexture(p.carpetMeeting), 0.95), edge],
+      lounge: [edge, top(woodTexture(p.wood), 0.6), edge],
+    } satisfies Record<Space["kind"], THREE.Material[]>;
+  }, [p]);
+}
+
+function SpaceLabel({ space, count, lead }: { space: Space; count: number; lead?: string }) {
+  const setFocus = useFocus((s) => s.setFocus);
+  const focused = useFocus((s) => s.focus === space.id);
+  const hovered = useFocus((s) => s.hoverSpace === space.id);
+  const a = 60 * DEG;
+  return (
+    <Html center position={[space.x + 4.9 * Math.cos(a), 1.55, space.z + 4.9 * Math.sin(a)]} distanceFactor={22} zIndexRange={[8, 0]}>
+      <button
+        type="button"
+        className={`space-plate space-${space.kind} ${focused ? "is-focused" : ""} ${hovered ? "is-hover" : ""}`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          setFocus(focused ? undefined : space.id);
+        }}
+        title={focused ? "Back to the whole floor" : `Focus on ${space.name}`}
+      >
+        <span className="space-dot" aria-hidden />
+        <span className="space-name">{space.name}</span>
+        {space.seats > 0 ? (
+          <span className="space-count">
+            {count}/{space.seats}
+          </span>
+        ) : (
+          lead && <span className="space-count">{lead}</span>
+        )}
+      </button>
+    </Html>
+  );
+}
+
+function Floors({ spaces, palette, layout, managerName }: { spaces: Space[]; palette: Palette; layout: OfficeLayout; managerName?: string }) {
+  const mats = useFloorMaterials(palette);
+  const { slab, outline } = floorGeometry();
+  const hover = useFocus((s) => s.hoverSpace);
+  const focus = useFocus((s) => s.focus);
+  const setHover = useFocus((s) => s.setHover);
+  const setFocus = useFocus((s) => s.setFocus);
+  const dropSpace = useDrag((s) => (s.active ? s.overSpace : undefined));
+  const counts = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const k of layout.occupied.keys()) {
+      const id = k.split("#")[0]!;
+      c.set(id, (c.get(id) ?? 0) + 1);
+    }
+    return c;
+  }, [layout]);
+
   return (
     <group>
-      <mesh position={[0, PODIUM_H / 2, 0]}>
-        <cylinderGeometry args={[1.5, 1.7, PODIUM_H, 32]} />
-        <meshStandardMaterial color="#262b3f" roughness={0.6} metalness={0.2} />
-      </mesh>
-      <mesh position={[0, PODIUM_H + 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[1.32, 1.42, 48]} />
-        <meshStandardMaterial color="#ffd166" emissive="#ffd166" emissiveIntensity={0.9} toneMapped={false} />
-      </mesh>
-      <pointLight position={[0, 4.5, 0]} color="#ffd9a0" intensity={30} distance={11} decay={2} />
+      {spaces.map((s) => {
+        const lit = dropSpace ? dropSpace === s.id : hover === s.id || focus === s.id;
+        const color = dropSpace === s.id ? (s.seats > 0 ? palette.dropOk : "#ef4444") : palette.hover;
+        return (
+          <group key={s.id}>
+            <mesh
+              geometry={slab}
+              material={mats[s.kind]}
+              position={[s.x, -0.06, s.z]}
+              rotation={[0, Math.PI / 6, 0]}
+              receiveShadow
+              onPointerOver={(e) => {
+                e.stopPropagation();
+                setHover(s.id);
+              }}
+              onPointerOut={() => useFocus.getState().hoverSpace === s.id && setHover(undefined)}
+              onClick={(e: ThreeEvent<MouseEvent>) => {
+                if (e.delta > 4) return;
+                e.stopPropagation();
+                useStore.getState().select(undefined);
+                setFocus(s.id);
+              }}
+            />
+            {lit && (
+              <mesh geometry={outline} position={[s.x, 0.02, s.z]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+                <meshBasicMaterial color={color} transparent opacity={dropSpace ? 0.9 : hover === s.id ? 0.75 : 0.4} toneMapped={false} />
+              </mesh>
+            )}
+            <SpaceLabel space={s} count={counts.get(s.id) ?? 0} lead={s.kind === "office" ? managerName : undefined} />
+          </group>
+        );
+      })}
     </group>
   );
 }
 
-function Lobby() {
+// ---------- furniture ----------
+
+function Furniture({ spaces, layout, agents, palette }: { spaces: Space[]; layout: OfficeLayout; agents: Record<string, Agent>; palette: Palette }) {
+  const materials = useMaterials(palette);
+  // Only rebuild when the floor plan or who-sits-where changes, not on every stats update.
+  const signature = useMemo(() => {
+    const occ = [...layout.occupied.entries()].map(([k, id]) => `${k}=${agents[id]?.appearance.color ?? ""}`).sort();
+    return `${spaces.map((s) => s.id).join(",")}|${occ.join(",")}`;
+  }, [spaces, layout, agents]);
+  const items = useMemo(() => {
+    const kit = new Kit();
+    buildWalls(kit, spaces);
+    const bg = new THREE.Color(palette.screenOff);
+    for (const s of spaces) {
+      const seats = new Map<number, string>();
+      for (let seat = 0; seat < s.seats; seat++) {
+        const id = layout.occupied.get(`${s.id}#${seat}`);
+        const color = id ? agents[id]?.appearance.color : undefined;
+        if (color) seats.set(seat, `#${new THREE.Color(color).lerp(bg, 0.25).getHexString()}`);
+      }
+      furnishSpace(kit, s, { seats });
+    }
+    // Screens without anyone at them are dark.
+    for (const it of kit.items) if (it.mat === "screen" && !it.color) it.color = palette.screenOff;
+    return kit.items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, palette]);
+  return <Batches items={items} materials={materials} />;
+}
+
+// ---------- lights and ground ----------
+
+function Lights({ palette, spaces }: { palette: Palette; spaces: Space[] }) {
+  const extent = Math.max(...spaces.map((s) => Math.hypot(s.x, s.z))) + HEX_R + 2;
+  const sun = useRef<THREE.DirectionalLight>(null);
+  useEffect(() => {
+    const l = sun.current;
+    if (!l) return;
+    const cam = l.shadow.camera;
+    cam.left = cam.bottom = -extent;
+    cam.right = cam.top = extent;
+    cam.near = 1;
+    cam.far = 90;
+    cam.updateProjectionMatrix();
+  }, [extent]);
   return (
-    <group position={[0, 0, LOBBY_Z]}>
-      <mesh position={[0, LOBBY_H / 2, 0]}>
-        <boxGeometry args={[26, LOBBY_H, 5.2]} />
-        <meshStandardMaterial color="#232a3d" roughness={0.75} />
-      </mesh>
-      <mesh position={[0, LOBBY_H + 0.005, 2.55]}>
-        <boxGeometry args={[26, 0.01, 0.08]} />
-        <meshStandardMaterial color="#4fd1ff" emissive="#4fd1ff" emissiveIntensity={0.6} toneMapped={false} />
-      </mesh>
-      <Html center position={[-11.5, LOBBY_H + 0.4, 0]} distanceFactor={14} style={{ pointerEvents: "none" }}>
-        <div className="zone-label">Lobby</div>
-      </Html>
-    </group>
+    <>
+      <hemisphereLight args={[palette.sky, palette.groundLight, palette.hemi]} />
+      <ambientLight intensity={palette.ambient} />
+      <directionalLight
+        ref={sun}
+        castShadow
+        position={[16, 30, 10]}
+        intensity={palette.sunIntensity}
+        color={palette.sun}
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.04}
+      />
+      <directionalLight position={[-18, 14, -12]} intensity={palette.fillIntensity} color={palette.fill} />
+      {palette.lamps > 0 &&
+        spaces
+          .filter((s) => s.ring <= 1)
+          .map((s) => <pointLight key={s.id} position={[s.x, 3.4, s.z]} color={palette.lampGlow} intensity={24} distance={12} decay={1.6} />)}
+    </>
   );
 }
 
-function Floor() {
+function Ground({ palette }: { palette: Palette }) {
   return (
-    <group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
-        <planeGeometry args={[30, 30]} />
-        <meshStandardMaterial color="#1b1e2b" roughness={0.9} />
-      </mesh>
-      <gridHelper args={[30, 30, "#2b3044", "#232739"]} position={[0, 0.01, 0]} />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]}>
-        <ringGeometry args={[3.2, 3.26, 64]} />
-        <meshBasicMaterial color="#2f3550" transparent opacity={0.9} />
-      </mesh>
-    </group>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.13, 0]} receiveShadow raycast={() => null}>
+      <circleGeometry args={[140, 64]} />
+      <meshStandardMaterial color={palette.ground} roughness={1} />
+    </mesh>
   );
 }
 
-function NewAgentPad({ spot, onCreate }: { spot: Spot; onCreate: () => void }) {
-  const y = baseFor(spot);
+// ---------- new-agent pad ----------
+
+function NewAgentPad({ at, onCreate }: { at: { x: number; z: number }; onCreate: () => void }) {
+  const ring = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    const m = ring.current;
+    if (!m) return;
+    const s = 1 + Math.sin(clock.getElapsedTime() * 2.4) * 0.06;
+    m.scale.set(s, s, s);
+  });
   return (
-    <group position={[spot.x, y, spot.z]}>
-      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} onClick={(e) => (e.stopPropagation(), onCreate())}>
-        <ringGeometry args={[0.6, 0.8, 40]} />
-        <meshBasicMaterial color="#5b8cff" transparent opacity={0.55} />
+    <group position={[at.x, 0, at.z]}>
+      <mesh ref={ring} position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]} onClick={(e) => (e.stopPropagation(), onCreate())}>
+        <ringGeometry args={[0.5, 0.66, 40]} />
+        <meshBasicMaterial color="#5b8cff" transparent opacity={0.6} toneMapped={false} />
       </mesh>
-      <Html center position={[0, 0.9, 0]} distanceFactor={12} zIndexRange={[15, 0]} style={{ pointerEvents: "none" }}>
+      <Html center position={[0, 1.5, 0]} distanceFactor={14} zIndexRange={[15, 0]} style={{ pointerEvents: "none" }}>
         <button
           type="button"
           className="pad-btn"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => (e.stopPropagation(), onCreate())}
-          title="Add a new agent at this desk"
+          title="Hire a new agent for this desk"
         >
           <PlusIcon />
           <span>New agent</span>
@@ -146,6 +257,193 @@ function NewAgentPad({ spot, onCreate }: { spot: Spot; onCreate: () => void }) {
     </group>
   );
 }
+
+// ---------- manager walks ----------
+
+const VISIT_DWELL_MS = 2200;
+const MAX_VISITS = 6;
+
+/**
+ * The manager walks over to a worker when it hands them a task and again when the task finishes,
+ * lingers a moment, then goes to the next visit or back to its office.
+ */
+function useManagerVisits(tasks: Record<string, Task>, agents: Record<string, Agent>, managerId?: string) {
+  const [queue, setQueue] = useState<string[]>([]);
+  const seen = useRef(new Map<string, Task["status"]>());
+  const dwelling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    const add: string[] = [];
+    for (const t of Object.values(tasks)) {
+      const prev = seen.current.get(t.id);
+      seen.current.set(t.id, t.status);
+      if (t.kind !== "work" || !t.assigneeId || prev === t.status) continue;
+      if (t.status === "assigned" || (prev !== undefined && (t.status === "done" || t.status === "failed"))) add.push(t.assigneeId);
+    }
+    if (add.length) setQueue((q) => [...q, ...add].filter((id, i, all) => i === 0 || all[i - 1] !== id).slice(-MAX_VISITS));
+  }, [tasks]);
+
+  // Drop visits to agents that no longer exist.
+  const current = queue.find((id) => agents[id]);
+  useEffect(() => {
+    if (queue.length && queue[0] !== current) setQueue((q) => q.filter((id) => agents[id]));
+  }, [queue, current, agents]);
+
+  useEffect(() => () => clearTimeout(dwelling.current), []);
+
+  const onArrive = useCallback(
+    (id: string) => {
+      if (id !== managerId || !current || dwelling.current) return;
+      dwelling.current = setTimeout(() => {
+        dwelling.current = undefined;
+        setQueue((q) => q.slice(1));
+      }, VISIT_DWELL_MS);
+    },
+    [managerId, current],
+  );
+  return { visiting: current, onArrive };
+}
+
+// ---------- drag to reassign ----------
+
+function nearestSeat(space: Space, p: { x: number; z: number }): number {
+  let best = 0;
+  let bestD = Infinity;
+  for (let seat = 0; seat < space.seats; seat++) {
+    const s = seatPose(space, seat);
+    const d = Math.hypot(s.x - p.x, s.z - p.z);
+    if (d < bestD) {
+      bestD = d;
+      best = seat;
+    }
+  }
+  return best;
+}
+
+function useDragToReassign(layout: OfficeLayout) {
+  const { camera, gl } = useThree();
+  const controls = useThree((s) => s.controls) as unknown as { enabled: boolean } | null;
+  const latest = useRef(layout);
+  latest.current = layout;
+
+  return useCallback(
+    (id: string, e: ThreeEvent<PointerEvent>) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      if (controls) controls.enabled = false;
+      const sx = e.nativeEvent.clientX;
+      const sy = e.nativeEvent.clientY;
+      const ray = new THREE.Raycaster();
+      const ndc = new THREE.Vector2();
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const hit = new THREE.Vector3();
+      useDrag.getState().set({ heldId: id, active: false });
+      document.body.style.cursor = "grabbing";
+
+      const move = (ev: PointerEvent) => {
+        const st = useDrag.getState();
+        if (!st.active && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+        const rect = gl.domElement.getBoundingClientRect();
+        ndc.set(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+        ray.setFromCamera(ndc, camera);
+        if (!ray.ray.intersectPlane(plane, hit)) return;
+        dragPoint.x = hit.x;
+        dragPoint.z = hit.z;
+        const space = spaceAt(latest.current.spaces, hit.x, hit.z);
+        const seat = space && space.seats > 0 ? nearestSeat(space, hit) : undefined;
+        if (!st.active || st.overSpace !== space?.id || st.overSeat !== seat) st.set({ active: true, overSpace: space?.id, overSeat: seat });
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+        if (controls) controls.enabled = true;
+        document.body.style.cursor = "";
+        const st = useDrag.getState();
+        if (st.active && st.overSpace && st.overSeat !== undefined) {
+          const l = latest.current;
+          const dest = { space: st.overSpace, seat: st.overSeat };
+          const from = l.placements[id];
+          if (!from || seatKey(from) !== seatKey(dest)) {
+            const send = useStore.getState().send;
+            const other = l.occupied.get(seatKey(dest));
+            send({ type: "agent.update", id, patch: { placement: dest } });
+            if (other && other !== id && from) send({ type: "agent.update", id: other, patch: { placement: from } });
+          }
+        }
+        st.set({ heldId: undefined, active: false, overSpace: undefined, overSeat: undefined, droppedAt: st.active ? Date.now() : st.droppedAt });
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
+    },
+    [camera, gl, controls],
+  );
+}
+
+/** Ghost chair marker where a dragged robot would land. */
+function DropMarker({ spaces }: { spaces: Space[] }) {
+  const over = useDrag((s) => (s.active && s.overSpace && s.overSeat !== undefined ? `${s.overSpace}#${s.overSeat}` : undefined));
+  if (!over) return null;
+  const [id, seat] = over.split("#") as [string, string];
+  const space = spaces.find((s) => s.id === id);
+  if (!space) return null;
+  const p = seatPose(space, Number(seat));
+  return (
+    <mesh position={[p.x, 0.04, p.z]} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+      <ringGeometry args={[0.5, 0.72, 40]} />
+      <meshBasicMaterial color="#ffc14d" transparent opacity={0.85} toneMapped={false} />
+    </mesh>
+  );
+}
+
+// ---------- camera ----------
+
+function overviewDistance(spaces: Space[]): number {
+  const extent = Math.max(...spaces.map((s) => Math.hypot(s.x, s.z))) + HEX_R;
+  return extent * 2.5 + 6;
+}
+
+function CameraRig({ spaces }: { spaces: Space[] }) {
+  const focus = useFocus((s) => s.focus);
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as unknown as (THREE.EventDispatcher<{ start: object }> & { target: THREE.Vector3; update(): void }) | null;
+  const goal = useRef<{ target: THREE.Vector3; pos: THREE.Vector3 } | null>(null);
+  const rings = Math.max(...spaces.map((s) => s.ring));
+
+  useEffect(() => {
+    if (!controls) return;
+    const space = focus ? spaces.find((s) => s.id === focus) : undefined;
+    const target = space ? new THREE.Vector3(space.x, 0.5, space.z) : new THREE.Vector3(1.2, 0, 1.2);
+    const az = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
+    const polar = space ? 0.82 : 0.78;
+    const dist = space ? 19 : overviewDistance(spaces);
+    const pos = new THREE.Vector3(target.x + dist * Math.sin(polar) * Math.sin(az), dist * Math.cos(polar), target.z + dist * Math.sin(polar) * Math.cos(az));
+    goal.current = { target, pos };
+    // Rings change the overview distance; a focus change moves there.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus, rings, controls]);
+
+  useEffect(() => {
+    if (!controls) return;
+    const stop = () => (goal.current = null);
+    controls.addEventListener("start", stop);
+    return () => controls.removeEventListener("start", stop);
+  }, [controls]);
+
+  useFrame((_, dt) => {
+    const g = goal.current;
+    if (!g || !controls) return;
+    const k = 1 - Math.exp(-dt * 4.5);
+    controls.target.lerp(g.target, k);
+    camera.position.lerp(g.pos, k);
+    controls.update();
+    if (camera.position.distanceTo(g.pos) < 0.02 && controls.target.distanceTo(g.target) < 0.02) goal.current = null;
+  });
+  return null;
+}
+
+// ---------- scene ----------
 
 const YOU: Agent = {
   id: "you",
@@ -165,91 +463,150 @@ const YOU: Agent = {
   updatedAt: "",
 };
 
-function Scene({ onCreate }: { onCreate: () => void }) {
+const FRESH_MS = 10_000;
+
+function Scene({ onCreate, palette }: { onCreate: () => void; palette: Palette }) {
   const agents = useStore((s) => s.agents);
+  const tasks = useStore((s) => s.tasks);
   const beams = useStore((s) => s.beams);
   const celebrations = useStore((s) => s.celebrations);
-  const world = useStore((s) => s.world);
   const mirrorLatest = useStore((s) => s.mirror[0]);
   const list = useMemo(() => sortedAgents(agents), [agents]);
   const layout = useMemo(() => layoutFor(list), [list]);
-  const hub = world?.kind === "hub";
-  const padSpot = useMemo(() => (hub ? nextLobbyFor(list) : nextDeskFor(list)), [hub, list]);
-  const mirrorSpot: Spot = { x: 7.5, z: 5.5, zone: "desk" };
+  const { spaces } = layout;
+  const office = spaces[0]!;
+  const manager = list.find((a) => a.role === "manager");
+  const { visiting, onArrive } = useManagerVisits(tasks, agents, manager?.id);
+  const onGrab = useDragToReassign(layout);
+  const mountedAt = useRef(Date.now());
+
+  const targets = useMemo(() => {
+    const out: Record<string, RobotTarget> = {};
+    for (const [id, pose] of Object.entries(layout.poses)) out[id] = pose;
+    if (manager && visiting) {
+      const p = layout.placements[visiting];
+      const s = p && spaces.find((o) => o.id === p.space);
+      if (s && p) out[manager.id] = visitPose(s, p.seat);
+    }
+    return out;
+  }, [layout, manager, visiting, spaces]);
+
+  const youPose = useMemo(() => {
+    const a = 45 * DEG;
+    const p = { x: office.x + 2.25 * Math.cos(a), z: office.z + 2.25 * Math.sin(a) };
+    return { ...p, yaw: yawToward(p, managerHome(office)) };
+  }, [office]);
+
+  const nextPose = layout.next && spaces.find((s) => s.id === layout.next!.space) ? seatPose(spaces.find((s) => s.id === layout.next!.space)!, layout.next.seat) : undefined;
+  const at = (id: string) => livePos(id, targets[id]);
 
   return (
     <>
-      <color attach="background" args={[BG]} />
-      <fog attach="fog" args={[BG, 24, 46]} />
-      <hemisphereLight args={["#6f7cff", "#1a1420", 0.55]} />
-      <ambientLight intensity={0.35} />
-      <directionalLight position={[8, 14, 6]} intensity={1.25} color="#dfe6ff" />
-      <directionalLight position={[-10, 8, -8]} intensity={0.5} color="#7aa2ff" />
-
-      <Floor />
-      <Podium />
-      <Lobby />
+      <color attach="background" args={[palette.bg]} />
+      <fog attach="fog" args={[palette.bg, palette.fog[0], palette.fog[1]]} />
+      <Lights palette={palette} spaces={spaces} />
+      <Ground palette={palette} />
+      <Floors spaces={spaces} palette={palette} layout={layout} managerName={manager?.name} />
+      <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} />
+      <DropMarker spaces={spaces} />
 
       {list.map((a) => {
-        const spot = layout[a.id];
-        if (!spot) return null;
+        const target = targets[a.id];
+        if (!target) return null;
+        const fresh = a.role === "worker" && Date.parse(a.createdAt) > mountedAt.current - FRESH_MS;
+        const home = managerHome(office);
         return (
-          <group key={a.id}>
-            {spot.zone !== "podium" && <Desk spot={spot} color={a.appearance.color} />}
-            <Robot agent={a} spot={spot} baseY={baseFor(spot)} />
-            {spot.zone !== "podium" && <FileChips agentId={a.id} spot={spot} />}
-          </group>
+          <Robot
+            key={a.id}
+            agent={a}
+            target={target}
+            spaces={spaces}
+            spawnAt={fresh ? { x: home.x + 1.6, z: home.z + 1.6 } : undefined}
+            onArrive={a.role === "manager" ? onArrive : undefined}
+            onGrab={a.role === "worker" ? onGrab : undefined}
+          >
+            {a.role === "worker" && <FileChips agentId={a.id} />}
+          </Robot>
         );
       })}
 
-      {mirrorLatest && <Robot agent={YOU} spot={mirrorSpot} bubbleOverride={mirrorLatest.text.slice(0, 90)} />}
+      {mirrorLatest && <Robot agent={YOU} target={youPose} spaces={spaces} bubbleOverride={mirrorLatest.text.slice(0, 90)} />}
 
-      <NewAgentPad spot={padSpot} onCreate={onCreate} />
+      {nextPose && <NewAgentPad at={nextPose} onCreate={onCreate} />}
 
       {beams.map((b) => {
-        const from = layout[b.from];
-        const to = layout[b.to];
+        const from = at(b.from);
+        const to = at(b.to);
         if (!from || !to) return null;
-        return <Beam key={b.id} from={[from.x, baseFor(from) + 1.4, from.z]} to={[to.x, baseFor(to) + 1.4, to.z]} />;
+        return <Beam key={b.id} from={[from.x, 1.5, from.z]} to={[to.x, 1.5, to.z]} />;
       })}
 
       {celebrations.map((c, i) => {
-        const at = layout[c.agentId];
-        if (!at) return null;
-        return <Confetti key={`${c.agentId}-${c.until}-${i}`} origin={[at.x, baseFor(at), at.z]} until={c.until} />;
+        const p = at(c.agentId);
+        if (!p) return null;
+        return <Confetti key={`${c.agentId}-${c.until}-${i}`} origin={[p.x, 0, p.z]} until={c.until} />;
       })}
 
       <OrbitControls
         makeDefault
         enableDamping
         dampingFactor={0.08}
-        minPolarAngle={0.6}
-        maxPolarAngle={1.3}
-        minDistance={7}
-        maxDistance={40}
-        target={[0, 0.6, -1.5]}
+        minPolarAngle={0.35}
+        maxPolarAngle={1.22}
+        minDistance={6}
+        maxDistance={80}
+        target={[1.2, 0, 1.2]}
         enablePan
-        panSpeed={0.6}
+        panSpeed={0.7}
+        screenSpacePanning={false}
       />
+      <CameraRig spaces={spaces} />
     </>
   );
 }
 
 export function Office({ onCreate }: { onCreate: () => void }) {
   const select = useStore((s) => s.select);
+  const focus = useFocus((s) => s.focus);
+  const setFocus = useFocus((s) => s.setFocus);
+  const theme = useSceneTheme();
+  const palette = PALETTES[theme];
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const el = document.activeElement;
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      setFocus(undefined);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setFocus]);
+
   return (
-    <div className="office">
+    <div className="office" data-scene-theme={theme}>
       <Canvas
-        dpr={[1, 1.5]}
-        camera={{ position: [11, 12, 11], fov: 40, near: 0.5, far: 80 }}
-        shadows={false}
+        dpr={[1, 1.75]}
+        camera={{ position: [30, 36, 30], fov: 38, near: 0.5, far: 220 }}
+        shadows
         gl={{ antialias: true, powerPreference: "high-performance" }}
-        onPointerMissed={() => select(undefined)}
+        onPointerMissed={() => {
+          select(undefined);
+          useFocus.getState().setHover(undefined);
+        }}
       >
         <Suspense fallback={null}>
-          <Scene onCreate={onCreate} />
+          <Scene onCreate={onCreate} palette={palette} />
         </Suspense>
       </Canvas>
+      {focus && (
+        <button type="button" className="overview-btn" onClick={() => setFocus(undefined)} title="Back to the whole floor (Esc)">
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden>
+            <path d="M12 3 20 7.5v9L12 21l-8-4.5v-9Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          </svg>
+          Whole floor
+        </button>
+      )}
     </div>
   );
 }
