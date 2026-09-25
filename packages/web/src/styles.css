@@ -864,6 +864,11 @@ h3 {
   flex-direction: column;
 }
 
+.menu-fixed {
+  position: fixed;
+  z-index: 50;
+}
+
 .menu [role="menuitem"] {
   text-align: left;
   background: none;

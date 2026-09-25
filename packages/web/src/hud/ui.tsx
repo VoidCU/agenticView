@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { ProviderStatus } from "@agenticview/shared";
 
 export const PROVIDER_LABEL: Record<string, string> = { claude: "Claude", codex: "Codex", gemini: "Gemini" };
@@ -31,7 +32,8 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // Portal to <body>: panels use backdrop-filter, which would otherwise trap a fixed-position modal inside them.
+  return createPortal(
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" ref={ref}>
         <div className="modal-head">
@@ -42,7 +44,8 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

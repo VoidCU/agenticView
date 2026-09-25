@@ -78,6 +78,7 @@ describe("CodexRuntime", () => {
     const cfg = cap.ctor!.config as Record<string, any>;
     expect(cfg.mcp_servers.agenticview).toMatchObject({ command: process.execPath, args: ["C:/bridge.js"], env: { AGENTICVIEW_BRIDGE_URL: "http://127.0.0.1:1", AGENTICVIEW_RUN_ID: "r_1", AGENTICVIEW_BRIDGE_TOKEN: "t0k" } });
     expect(cfg.approval_policy).toBe("never");
+    expect(cfg.mcp_servers.agenticview.default_tools_approval_mode).toBe("approve");
     expect(cap.input).toEqual([{ type: "text", text: "You are C.\n\ndo it" }]);
   });
 

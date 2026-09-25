@@ -128,6 +128,9 @@ export class CodexRuntime implements Runtime {
             command: process.execPath,
             args: [this.opts.bridgeEntry],
             env: { AGENTICVIEW_BRIDGE_URL: this.opts.bridgeUrl(), AGENTICVIEW_RUN_ID: req.runId, AGENTICVIEW_BRIDGE_TOKEN: req.bridgeToken ?? "" },
+            // Newer Codex asks before every MCP tool call, separately from approval_policy; nobody can answer that
+            // prompt in a headless run, so the bridge tools (delegate, report, ...) are pre-approved.
+            default_tools_approval_mode: "approve",
           },
         };
       }
