@@ -92,39 +92,25 @@ function getDecalTexture(name: string, isDark: boolean): THREE.CanvasTexture {
   if (ctx) {
     ctx.clearRect(0, 0, 1024, 256);
 
-    const pillW = 960;
-    const pillH = 190;
-    const pillX = (1024 - pillW) / 2;
-    const pillY = (256 - pillH) / 2;
-    const r = 32;
-
-    ctx.beginPath();
-    if (typeof (ctx as any).roundRect === "function") {
-      (ctx as any).roundRect(pillX, pillY, pillW, pillH, r);
-    } else {
-      ctx.rect(pillX, pillY, pillW, pillH);
-    }
-    ctx.fillStyle = isDark ? "rgba(18, 24, 38, 0.42)" : "rgba(255, 255, 255, 0.48)";
-    ctx.fill();
-
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = isDark ? "rgba(148, 163, 184, 0.24)" : "rgba(100, 116, 139, 0.22)";
-    ctx.stroke();
-
+    // Painted straight onto the floor like a stencil: big uppercase letters, no background plate,
+    // a thin contrasting outline so the paint reads on carpet and wood alike.
+    const label = name.toUpperCase();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-
-    let fontSize = 68;
-    ctx.font = `700 ${fontSize}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-    let textWidth = ctx.measureText(name).width;
-    while (textWidth > pillW - 80 && fontSize > 32) {
-      fontSize -= 4;
-      ctx.font = `700 ${fontSize}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-      textWidth = ctx.measureText(name).width;
+    let fontSize = 150;
+    const setFont = () => (ctx.font = `800 ${fontSize}px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`);
+    setFont();
+    while (ctx.measureText(label).width > 980 && fontSize > 48) {
+      fontSize -= 6;
+      setFont();
     }
-
-    ctx.fillStyle = isDark ? "rgba(235, 242, 255, 0.90)" : "rgba(30, 41, 59, 0.88)";
-    ctx.fillText(name, 512, 128);
+    if ("letterSpacing" in ctx) (ctx as unknown as { letterSpacing: string }).letterSpacing = "6px";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = isDark ? "rgba(0, 0, 0, 0.35)" : "rgba(255, 255, 255, 0.55)";
+    ctx.strokeText(label, 512, 132);
+    ctx.fillStyle = isDark ? "rgba(226, 236, 255, 0.78)" : "rgba(28, 38, 58, 0.72)";
+    ctx.fillText(label, 512, 132);
   }
 
   tex = new THREE.CanvasTexture(canvas as any);
@@ -136,7 +122,7 @@ function getDecalTexture(name: string, isDark: boolean): THREE.CanvasTexture {
   return tex;
 }
 
-const decalGeometry = new THREE.PlaneGeometry(3.4, 0.85);
+const decalGeometry = new THREE.PlaneGeometry(4.6, 1.15);
 
 function FloorDecal({
   space,
@@ -154,7 +140,8 @@ function FloorDecal({
   const texture = useMemo(() => getDecalTexture(space.name, isDark), [space.name, isDark]);
 
   const a = 45 * DEG;
-  const dist = space.kind === "office" ? 3.0 : space.kind === "meeting" ? 3.3 : 3.1;
+  // In the open floor between the room's furniture and its front wall, toward the camera.
+  const dist = space.kind === "office" ? 2.9 : space.kind === "meeting" ? 3.0 : 2.7;
   const x = space.x + dist * Math.cos(a);
   const z = space.z + dist * Math.sin(a);
 
