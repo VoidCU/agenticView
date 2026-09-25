@@ -33,7 +33,8 @@ test("office loads, agent can be created, and the manager answers", async ({ pag
   await bar.fill("build a login page");
   await bar.press("Enter");
   await expect(page.getByRole("region", { name: "Done" }).or(page.locator("section[aria-label='Done']"))).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(/demo mode/).first()).toBeVisible({ timeout: 10_000 });
+  // The reply also lands in the collapsed Work log, so look for a visible copy rather than the first match.
+  await expect(page.getByText(/demo mode/).locator("visible=true").first()).toBeVisible({ timeout: 10_000 });
 
   await expect(page.locator("[data-status='idle'] .tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 15_000 });
   expect(errors, errors.join("\n")).toEqual([]);
