@@ -32,7 +32,8 @@ test("office loads, agent can be created, and the manager answers", async ({ pag
   const bar = page.getByLabel(/Tell Atlas what to build/);
   await bar.fill("build a login page");
   await bar.press("Enter");
-  await expect(page.getByRole("region", { name: "Done" }).or(page.locator("section[aria-label='Done']"))).toBeVisible({ timeout: 20_000 });
+  // The Tasks panel groups by board and agent; the request's own row turns Done.
+  await expect(page.locator(".task-row", { hasText: "build a login page" }).locator(".task-status", { hasText: /done/i }).first()).toBeVisible({ timeout: 20_000 });
   // The reply also lands in the collapsed Work log, so look for a visible copy rather than the first match.
   await expect(page.getByText(/demo mode/).locator("visible=true").first()).toBeVisible({ timeout: 10_000 });
 
