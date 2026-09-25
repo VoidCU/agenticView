@@ -88,6 +88,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   const select = useStore((s) => s.select);
   const bubble = useStore((s) => s.bubbles[agent.id]);
   const permission = useStore((s) => s.permissions.find((p) => p.agentId === agent.id));
+  const sessionInfo = useStore((s) => (agent.provider === "claude-session" && agent.session ? s.sessions.find((x) => x.id === agent.session!.id) : undefined));
   const question = useStore((s) => s.questions.find((q) => q.agentId === agent.id));
   const held = useDrag((s) => s.heldId === agent.id && s.active);
   const root = useRef<THREE.Group>(null);
@@ -335,6 +336,11 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           <button type="button" className="tag" onClick={() => select(selected ? undefined : agent.id)} style={{ borderColor: statusColor }}>
             <span className="tag-name">{agent.name}</span>
             <span className="tag-level">Lv {agent.stats.level}</span>
+            {agent.provider === "claude-session" && agent.session && (
+              <span className={`tag-session ${sessionInfo?.online ? "tag-session-on" : ""}`} title={sessionInfo?.model ?? undefined}>
+                {sessionInfo?.name ?? agent.session.name ?? "session"}
+              </span>
+            )}
           </button>
         </div>
       </Html>

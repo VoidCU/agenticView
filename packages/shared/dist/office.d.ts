@@ -96,8 +96,10 @@ export interface OfficePlan {
 }
 /**
  * Resolve every worker's seat. Workers keep a valid persisted placement (first come by creation wins a
- * contested seat); everyone else fills free pod desks in pod order. The honeycomb grows a ring when
- * the pods are full, and also far enough to contain any persisted placement.
+ * contested seat); everyone else fills free pod desks in pod order. The honeycomb grows a ring only
+ * when every pod desk of the existing rings is taken: a persisted placement in a ring the roster does
+ * not need (a stale seat from a bigger roster, or a global agent seated in another world) is ignored
+ * and that worker is reseated inside.
  */
 export declare function planOffice(agents: Agent[]): OfficePlan;
 export declare function firstFreeSeat(spaces: Space[], taken: Set<string>): Placement | undefined;
@@ -105,5 +107,5 @@ export declare function firstFreeSeat(spaces: Space[], taken: Set<string>): Plac
 export declare function nextPlacement(agents: Agent[]): Placement | undefined;
 /** Find a space by id or (case-insensitive) name. */
 export declare function findSpace(spaces: Space[], ref: string): Space | undefined;
-/** Everywhere a worker could be moved to: the current honeycomb plus the next ring (so the manager can expand). */
+/** Everywhere a worker could be moved to: every seat of the current honeycomb (it grows by itself when full). */
 export declare function assignableSpaces(agents: Agent[]): Space[];

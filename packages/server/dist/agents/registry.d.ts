@@ -18,6 +18,10 @@ export interface CreateAgentInput {
     scope?: Scope;
     role?: Role;
     appearance?: Appearance;
+    session?: {
+        id: string;
+        name?: string;
+    } | null;
 }
 export declare class ScopeError extends Error {
     constructor(msg: string);

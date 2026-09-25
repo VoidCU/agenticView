@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AgentSchema, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, ScopeSchema } from "./agent.js";
 import { EffortSchema } from "./models.js";
 import { ProjectSettingsSchema, KnownProjectSchema } from "./settings.js";
+import { AgentSessionSchema } from "./session.js";
 export const ProviderStatusSchema = z.object({
     provider: ProviderSchema,
     ok: z.boolean(),
@@ -25,6 +26,7 @@ export const CreateAgentPayloadSchema = z.object({
     tools: ToolAllowanceSchema.optional(),
     permissionMode: PermissionModeSchema.optional(),
     scope: ScopeSchema.optional(),
+    session: AgentSessionSchema.nullable().optional(),
     appearance: AgentSchema.shape.appearance.optional(),
 });
 // Explicit optional overrides: partial() would still apply the defaults and wipe fields a patch omits.
@@ -50,5 +52,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("question.respond"), id: z.string(), answer: z.string() }),
     z.object({ type: z.literal("settings.update"), settings: ProjectSettingsSchema.partial() }),
     z.object({ type: z.literal("project.open"), path: z.string() }),
+    z.object({ type: z.literal("session.rename"), id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) }),
+    z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),
 ]);
 //# sourceMappingURL=protocol.js.map

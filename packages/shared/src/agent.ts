@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { newId } from "./ids.js";
 import { EffortSchema } from "./models.js";
+import { AgentSessionSchema } from "./session.js";
 
 export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "gemini"]);
 export type Provider = z.infer<typeof ProviderSchema>;
@@ -59,6 +60,8 @@ export const AgentSchema = z.object({
   originId: z.string().optional(),
   /** Which space and desk a worker sits at in the office. */
   placement: PlacementSchema.optional(),
+  /** claude-session agents: the Claude Code session that serves this agent (sticky; null = any free session). */
+  session: AgentSessionSchema.nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -94,6 +97,7 @@ export function defaultAgent(init: AgentInit): Agent {
     updatedAt: init.updatedAt ?? now,
   };
   if (init.originId) agent.originId = init.originId;
+  if (init.session) agent.session = init.session;
   return agent;
 }
 

@@ -346,19 +346,14 @@ export interface OfficePlan {
 
 /**
  * Resolve every worker's seat. Workers keep a valid persisted placement (first come by creation wins a
- * contested seat); everyone else fills free pod desks in pod order. The honeycomb grows a ring when
- * the pods are full, and also far enough to contain any persisted placement.
+ * contested seat); everyone else fills free pod desks in pod order. The honeycomb grows a ring only
+ * when every pod desk of the existing rings is taken: a persisted placement in a ring the roster does
+ * not need (a stale seat from a bigger roster, or a global agent seated in another world) is ignored
+ * and that worker is reseated inside.
  */
 export function planOffice(agents: Agent[]): OfficePlan {
   const workers = agents.filter((a) => a.role === "worker").sort(byCreation);
-  let rings = ringsFor(workers.length);
-  const allIds = new Set(buildSpaces(MAX_RINGS).map((s) => s.id));
-  for (const w of workers) {
-    if (!w.placement || !allIds.has(w.placement.space)) continue;
-    const s = buildSpaces(MAX_RINGS).find((o) => o.id === w.placement!.space)!;
-    rings = Math.max(rings, s.ring);
-  }
-  const spaces = buildSpaces(rings);
+  const spaces = buildSpaces(ringsFor(workers.length));
   const byId = new Map(spaces.map((s) => [s.id, s]));
   const taken = new Set<string>();
   const placements: Record<string, Placement> = {};
@@ -401,9 +396,7 @@ export function findSpace(spaces: Space[], ref: string): Space | undefined {
   return spaces.find((s) => s.id === k || s.name.toLowerCase() === k) ?? spaces.find((s) => s.id === k.replace(/\s+/g, "-"));
 }
 
-/** Everywhere a worker could be moved to: the current honeycomb plus the next ring (so the manager can expand). */
+/** Everywhere a worker could be moved to: every seat of the current honeycomb (it grows by itself when full). */
 export function assignableSpaces(agents: Agent[]): Space[] {
-  const plan = planOffice(agents);
-  const ring = Math.min(MAX_RINGS, Math.max(...plan.spaces.map((s) => s.ring)) + 1);
-  return buildSpaces(ring).filter((s) => s.seats > 0);
+  return planOffice(agents).spaces.filter((s) => s.seats > 0);
 }

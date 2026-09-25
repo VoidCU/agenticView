@@ -195,12 +195,6 @@ export function whiteboard(k: Kit) {
   }
   k.box("alu", [0, 1.12, -0.005], [1.66, 0.96, 0.03]);
   k.box("whiteboard", [0, 1.12, 0.012], [1.6, 0.9, 0.01]);
-  // Sticky notes and a scribble strip.
-  const notes = ["#ffd166", "#ff9fb4", "#9be3c3", "#9cc7ff", "#ffd166"];
-  notes.forEach((c, i) => k.box("book", [-0.55 + (i % 3) * 0.2, 1.36 - Math.floor(i / 3) * 0.2, 0.02], [0.14, 0.14, 0.004], { color: c }));
-  k.box("book", [0.3, 1.3, 0.02], [0.6, 0.02, 0.003], { color: "#3f6f8f" });
-  k.box("book", [0.25, 1.2, 0.02], [0.5, 0.02, 0.003], { color: "#3f6f8f" });
-  k.box("book", [0.35, 1.1, 0.02], [0.7, 0.02, 0.003], { color: "#d9644a" });
 }
 
 export function floorLamp(k: Kit) {
@@ -310,7 +304,7 @@ function officeRoom(k: Kit, s: Space) {
     chair(k.frame(p.x, p.z, yawToward(p, home)));
   }
   bookshelf(corner(k, 180, 4.5), 3, 1.9);
-  bookshelf(corner(k, 240, 4.5), 5, 1.9);
+  whiteboard(corner(k, 240, 4.4));
   credenza(corner(k, 300), 2);
   armchair(corner(k, 0, 4.4));
   plant(corner(k, 60, 4.8), 1.25, 2);

@@ -6,6 +6,7 @@ import {
   newId,
   ProviderSchema,
   PROVIDER_ORDER,
+  WORK_COMMAND,
   type Agent,
   type PromptPart,
   type Provider,
@@ -23,6 +24,7 @@ import type { ToolRegistry } from "../bridge/toolRegistry.js";
 import type { EventBus } from "../events/bus.js";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { buildRosterPreamble } from "./preamble.js";
+import { SessionRuntime } from "../runtimes/session.js";
 import { MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
 
 export interface ResolvedSettings extends ProjectSettings {
@@ -325,7 +327,24 @@ export class Orchestrator {
     return [{ type: "text", text }, ...task.images.map((path): PromptPart => ({ type: "image", path }))];
   }
 
-  private bridgeToolsFor(task: Task, agent: Agent): BridgeTool[] {
+  /**
+   * claude-session deadlock guard for a Manager run `runId`: the target agent's task could only be
+   * picked up by the very session that is running the Manager (bound to it), which is busy until the
+   * Manager finishes.
+   */
+  async sessionConflict(runId: string, target: Agent): Promise<string | undefined> {
+    const rt = this.deps.runtimes.get("claude-session");
+    if (!(rt instanceof SessionRuntime)) return undefined;
+    const mine = rt.sessionOfRun(runId);
+    if (!mine) return undefined;
+    const fresh = (await this.deps.registry.get(target.id)) ?? target;
+    if ((await this.resolveProviderLive(fresh)).provider !== "claude-session") return undefined;
+    if (fresh.session?.id !== mine) return undefined;
+    const name = rt.session(mine)?.name ?? fresh.session.name ?? mine;
+    return `${fresh.name} is bound to Claude Code session "${name}", the same session that is running you (the Manager), so its task could never start while you wait. Ask the user to open another Claude Code session for ${fresh.name} (Sessions panel > New session, or run ${WORK_COMMAND} ${fresh.name} in a new session), or to switch ${fresh.name} to "Any free session" or another session in the office, then assign again.`;
+  }
+
+  private bridgeToolsFor(task: Task, agent: Agent, runId: string): BridgeTool[] {
     if (agent.role === "manager") {
       return managerTools({
         world: this.deps.world,
@@ -340,6 +359,8 @@ export class Orchestrator {
         setWaiting: (t, w) => this.setWaiting(t, w),
         emitAgent: (a) => this.emitAgent(a),
         checkProvider: (a) => this.providerProblem(a),
+        sessionConflict: (a) => this.sessionConflict(runId, a),
+        notify: (text) => this.deps.bus.emit({ type: "run.event", taskId: task.id, agentId: agent.id, event: { type: "status", text } }),
       });
     }
     return this.deps.workerTools?.(agent, task) ?? [];
@@ -398,10 +419,11 @@ export class Orchestrator {
       const key = this.sessionKey(task, agent);
       const sessionId = await this.loadSession(agent, key, provider);
       const cwd = task.projectPath || process.cwd();
-      const bridgeTools = this.bridgeToolsFor(task, agent);
+      const bridgeTools = this.bridgeToolsFor(task, agent, runId);
       const { token: bridgeToken } = this.deps.toolRegistry.register(runId, bridgeTools);
       const req: RunRequest = {
         runId,
+        taskId: task.id,
         agent,
         cwd,
         prompt: await this.buildPrompt(task, agent),

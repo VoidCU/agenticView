@@ -3,6 +3,7 @@ import { EFFORT_LABELS, effectiveEffort, modelLabel, type Agent, type RunEvent }
 import { useStore, useAgentStatus, type FeedItem } from "../state/store";
 import { uploadImage } from "../net/ws";
 import { AgentMenu } from "./AgentMenu";
+import { SessionChip, SessionNotice } from "./sessions";
 import { ImageIcon, SendIcon, basename, defaultProviderOf, prettyInput, providerLabel, xpProgress } from "./ui";
 
 interface Attachment {
@@ -99,9 +100,10 @@ function Header({ agent }: { agent: Agent }) {
           <span className={`chip ${pstat && !pstat.ok ? "chip-off" : "chip-ok"}`} title={pstat?.ok === false ? pstat.reason : undefined}>
             <span className="chip-dot" aria-hidden="true" />
             {providerLabel(provider)}
-            {agent.model ? ` · ${modelLabel(provider, agent.model)}` : ""}
+            {agent.model ? ` · ${provider === "claude-session" ? "wants " : ""}${modelLabel(provider, agent.model)}` : ""}
             {chipEffort ? ` · ${EFFORT_LABELS[chipEffort]} effort` : ""}
           </span>
+          {provider === "claude-session" && <SessionChip agent={agent} />}
           <span className={`status status-${status}`}>{STATUS_WORD[status]}</span>
         </div>
         <div className="xp" title={`${agent.stats.xp} xp, ${next - agent.stats.xp} to the next level`}>
@@ -202,6 +204,7 @@ export function ChatPanel() {
   return (
     <aside className="panel panel-chat" aria-label={`Chat with ${agent.name}`} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
       <Header agent={agent} />
+      <SessionNotice agent={agent} />
       <Feed items={items} />
       <form
         className="composer"

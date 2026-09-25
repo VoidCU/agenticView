@@ -84,6 +84,43 @@ describe("cli", () => {
     expect(await readdir(join(home, "instances"))).toEqual(["hub.json"]);
   }, 30000);
 
+  it("close stops the office for a project, removes its instance file, and is a no-op afterwards", async () => {
+    const office = run(["open", "--project", proj, "--no-browser"]);
+    const url = (await office.line("AgenticView: ")).slice("AgenticView: ".length).trim().split("/#")[0]!;
+    const closer = run(["close", "--project", proj]);
+    expect((await closer.exit).code).toBe(0);
+    expect(closer.out()).toContain(`AgenticView: closed ${proj}`);
+    expect((await office.exit).code).toBe(0);
+    await expect(fetch(`${url}/healthz`)).rejects.toThrow();
+    expect(await readdir(join(home, "instances"))).toEqual([]);
+    const again = run(["close", "--project", proj]);
+    expect((await again.exit).code).toBe(0);
+    expect(again.out()).toContain("no office is running");
+  }, 30000);
+
+  it("close --all stops every running office and tidies stale instance files", async () => {
+    const a = run(["open", "--project", proj, "--no-browser"]);
+    const h = run(["hub", "--no-browser"]);
+    await a.line("AgenticView: ");
+    await h.line("AgenticView: ");
+    // A stale record from a crashed office (dead pid) is removed silently.
+    await writeFile(join(home, "instances", "stale.json"), JSON.stringify({ pid: 2 ** 30, url: "http://127.0.0.1:1", token: "x", projectPath: "/gone", startedAt: "" }));
+    const closer = run(["close", "--all"]);
+    expect((await closer.exit).code).toBe(0);
+    expect(closer.out()).toContain("closed hub");
+    expect(closer.out()).toContain(`closed ${proj}`);
+    expect(closer.out()).not.toContain("/gone");
+    await Promise.all([a.exit, h.exit]);
+    expect(await readdir(join(home, "instances"))).toEqual([]);
+  }, 30000);
+
+  it("rejects /api/shutdown without the token", async () => {
+    const office = run(["open", "--project", proj, "--no-browser"]);
+    const url = (await office.line("AgenticView: ")).slice("AgenticView: ".length).trim().split("/#")[0]!;
+    expect((await fetch(`${url}/api/shutdown`, { method: "POST" })).status).toBe(401);
+    expect((await fetch(`${url}/healthz`)).status).toBe(200);
+  }, 30000);
+
   it("hook exits 0 quickly when no server is listening", async () => {
     const h = run(["hook"], JSON.stringify({ hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "a.ts" }, cwd: proj }));
     const r = await h.exit;

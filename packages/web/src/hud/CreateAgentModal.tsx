@@ -3,6 +3,7 @@ import { EFFORT_LABELS, MODEL_CATALOGUE, PALETTE, effortsFor, findModel, type Ag
 import { useStore } from "../state/store";
 import { Modal, automaticLabel, defaultProviderOf, providerLabel } from "./ui";
 import { modeHint } from "./modeHint";
+import { ENTER_HINT, NewSessionLink, modelMismatchHint } from "./sessions";
 
 const TOOL_LABELS: { key: keyof ToolAllowance; label: string; hint: string }[] = [
   { key: "edit", label: "Edit files", hint: "Read and write files in the project" },
@@ -16,6 +17,7 @@ const MODES: { value: PermissionMode; label: string; hint: string }[] = [
   { value: "auto", label: "Fully automatic", hint: "Never asks; best for trusted, sandboxed work" },
 ];
 const CUSTOM = "__custom__";
+const NEW_SESSION = "__new__";
 const EYES: Agent["appearance"]["eyes"][] = ["round", "visor", "dots"];
 
 interface Props {
@@ -32,6 +34,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
   const world = useStore((s) => s.world);
   const agents = useStore((s) => s.agents);
   const errors = useStore((s) => s.errors);
+  const sessions = useStore((s) => s.sessions);
   const hub = world?.kind === "hub";
   const uid = useId();
 
@@ -48,6 +51,9 @@ export function CreateAgentModal({ onClose, edit }: Props) {
   const [scope, setScope] = useState<Scope>(edit?.scope ?? (hub ? "global" : "project"));
   const [color, setColor] = useState<string>(edit?.appearance.color ?? PALETTE[Object.keys(agents).length % PALETTE.length]!);
   const [eyes, setEyes] = useState<Agent["appearance"]["eyes"]>(edit?.appearance.eyes ?? "round");
+  const [sessionChoice, setSessionChoice] = useState<string>(edit?.session?.id ?? "");
+  /** Name of a just-created claude-session agent: the form turns into an "open a session" step. */
+  const [created, setCreated] = useState<string | undefined>();
   const [submittedAt, setSubmittedAt] = useState<number | undefined>();
   const idsAtSubmit = useRef<Set<string>>(new Set());
 
@@ -87,8 +93,20 @@ export function CreateAgentModal({ onClose, edit }: Props) {
       if (current && current.updatedAt !== edit.updatedAt) onClose();
       return;
     }
-    if (Object.keys(agents).some((id) => !idsAtSubmit.current.has(id))) onClose();
-  }, [agents, submittedAt, edit, onClose]);
+    const fresh = Object.values(agents).find((a) => !idsAtSubmit.current.has(a.id));
+    if (!fresh || created) return;
+    // A new Claude Code session agent needs a session: offer to open one instead of closing.
+    if (effectiveProvider === "claude-session" && !fresh.session) setCreated(fresh.name);
+    else onClose();
+  }, [agents, submittedAt, edit, onClose, created, effectiveProvider]);
+
+  /** The binding to store for a Session choice: null = any free session (also while a new one is being opened). */
+  const sessionBinding = (choice: string): { id: string; name?: string } | null => {
+    if (!choice || choice === NEW_SESSION) return null;
+    const s = sessions.find((x) => x.id === choice);
+    const name = s?.name ?? edit?.session?.name;
+    return name ? { id: choice, name } : { id: choice };
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -96,15 +114,39 @@ export function CreateAgentModal({ onClose, edit }: Props) {
     if (!trimmed) return;
     const modelOut = catalogue.models.length > 0 || catalogue.allowCustom ? effectiveModel : null;
     const appearance = { color, accent: edit?.appearance.accent ?? "#ffffff", eyes };
+    const sessionOut = effectiveProvider === "claude-session" ? sessionBinding(sessionChoice) : undefined;
     const msg: ClientMessage = edit
       ? {
           type: "agent.update",
           id: edit.id,
-          patch: { name: trimmed, specialty: specialty.trim(), description: description.trim(), provider: provider || null, model: modelOut, effort: shownEffort || null, tools, permissionMode: mode, appearance },
+          patch: {
+            name: trimmed,
+            specialty: specialty.trim(),
+            description: description.trim(),
+            provider: provider || null,
+            model: modelOut,
+            effort: shownEffort || null,
+            tools,
+            permissionMode: mode,
+            appearance,
+            ...(sessionOut !== undefined ? { session: sessionOut } : {}),
+          },
         }
       : {
           type: "agent.create",
-          agent: { name: trimmed, specialty: specialty.trim(), description: description.trim(), provider: provider || null, model: modelOut, effort: shownEffort || null, tools, permissionMode: mode, scope, appearance },
+          agent: {
+            name: trimmed,
+            specialty: specialty.trim(),
+            description: description.trim(),
+            provider: provider || null,
+            model: modelOut,
+            effort: shownEffort || null,
+            tools,
+            permissionMode: mode,
+            scope,
+            appearance,
+            ...(sessionOut ? { session: sessionOut } : {}),
+          },
         };
     idsAtSubmit.current = new Set(Object.keys(agents));
     setSubmittedAt(Date.now());
@@ -112,6 +154,29 @@ export function CreateAgentModal({ onClose, edit }: Props) {
   };
 
   const busy = Boolean(submittedAt) && !error;
+  const pickedSession = sessions.find((s) => s.id === sessionChoice);
+  const mismatch = effectiveProvider === "claude-session" ? modelMismatchHint(effectiveModel, pickedSession) : undefined;
+
+  if (created) {
+    return (
+      <Modal title={`${created} is ready`} onClose={onClose}>
+        <div className="session-created">
+          <p>
+            {created} runs on a <strong>Claude Code session</strong>. Open one for it: a new Claude Code tab opens in VS Code with <code>/agenticview:agenticview-work {created}</code> typed in,
+            and that session serves {created} from then on.
+          </p>
+          <NewSessionLink agentName={created} className="btn btn-primary" />
+          <p className="field-hint">{ENTER_HINT}</p>
+          <div className="form-actions">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Done
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal title={edit ? `Edit ${edit.name}` : "New agent"} onClose={onClose} wide>
       <form className="form" onSubmit={submit}>
@@ -146,7 +211,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
               <input value="" disabled placeholder="Uses the session's own model" aria-label="Model" />
             ) : (
               <select value={modelChoice} onChange={(e) => pickModel(e.target.value)} aria-label="Model">
-                <option value="">Provider default</option>
+                <option value="">{effectiveProvider === "claude-session" ? "Whatever the session runs" : "Provider default"}</option>
                 {catalogue.models.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.label}
@@ -156,6 +221,40 @@ export function CreateAgentModal({ onClose, edit }: Props) {
               </select>
             )}
           </label>
+          {effectiveProvider === "claude-session" && (
+            <label className="field">
+              <span>Session</span>
+              <select value={sessionChoice} onChange={(e) => setSessionChoice(e.target.value)} aria-label="Session">
+                <option value="">Any free session</option>
+                {sessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.online ? "online" : "offline"}
+                    {s.model ? `, ${s.model}` : ""})
+                  </option>
+                ))}
+                {edit?.session && !sessions.some((s) => s.id === edit.session!.id) && (
+                  <option value={edit.session.id}>{edit.session.name ?? edit.session.id} (unknown)</option>
+                )}
+                <option value={NEW_SESSION}>Open a new session…</option>
+              </select>
+            </label>
+          )}
+          {effectiveProvider === "claude-session" && (sessionChoice === NEW_SESSION || mismatch || !sessionChoice) && (
+            <div className="field field-full">
+              {sessionChoice === NEW_SESSION && (
+                <>
+                  <NewSessionLink agentName={name.trim() || undefined} className="btn btn-ghost btn-sm" label={name.trim() ? `Open a Claude Code session for ${name.trim()}` : "Open a new Claude Code session"} />
+                  <p className="field-hint">{ENTER_HINT} The new session binds itself to this agent when it connects.</p>
+                </>
+              )}
+              {!sessionChoice && <p className="field-hint">The first free session to pick up a task keeps this agent from then on.</p>}
+              {mismatch && (
+                <p className="field-hint session-mismatch" data-testid="model-mismatch">
+                  {mismatch}
+                </p>
+              )}
+            </div>
+          )}
           {modelChoice === CUSTOM && (
             <label className="field">
               <span>Custom model id</span>
@@ -179,7 +278,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
                   </button>
                 ))}
               </div>
-              {effectiveProvider === "claude-session" && <p className="field-hint">The session keeps its own model; effort tells it how thorough to be.</p>}
+              {effectiveProvider === "claude-session" && <p className="field-hint">A session runs on its own model (only /model in that session changes it): the model picked here is a request the office checks against the session. Effort tells it how thorough to be.</p>}
             </div>
           )}
         </div>

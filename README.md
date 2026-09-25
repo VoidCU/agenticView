@@ -58,6 +58,7 @@ You can install the plugin first and add credentials later; the office shows eac
 | `/agenticview` | The office for the current project |
 | `/agenticview-work` | Not a page: turns this Claude Code session into a worker for the *Claude Code session* provider, pulling queued office tasks until you interrupt it |
 | `/agenticview-hub` | The Hub: global agents plus your list of known projects |
+| `/agenticview-close` | Close the office for the current project. `/agenticview-close hub` closes the Hub, `/agenticview-close all` closes every running office |
 
 Run `/agenticview` inside a project (Claude Code must be started in the project folder). Claude runs the launcher, and the first time it installs the plugin's own dependencies (about a minute; later launches take a second). It then prints a line like:
 
@@ -93,6 +94,7 @@ git clone https://github.com/VoidCU/agenticView.git
 cd agenticView && npm install --omit=dev
 node bin/agenticview.mjs open --project /path/to/your/project
 node bin/agenticview.mjs hub
+node bin/agenticview.mjs close --project /path/to/your/project   # or: close --hub, close --all
 ```
 
 ### Troubleshooting
@@ -101,7 +103,7 @@ node bin/agenticview.mjs hub
 |---|---|
 | `/agenticview` says `plugin-root` is missing | The SessionStart hook has not run yet. Restart Claude Code once, then retry. |
 | `AgenticView needs its launch link` page | You opened the address without its `#token=` part. Use the exact link the command printed, or run `/agenticview` again (it reuses the running server and prints the link). |
-| Provider shows *unavailable* in the office | Hover the chip or open Settings to read the reason: usually a missing key or CLI. Fix it, restart the office (`/agenticview` again after stopping the old one), and reload the page. Provider checks are cached for a minute. |
+| Provider shows *unavailable* in the office | Hover the chip or open Settings to read the reason: usually a missing key or CLI. Fix it, restart the office (`/agenticview-close`, then `/agenticview`), and reload the page. Provider checks are cached for a minute. |
 | Claude agent fails immediately | `ANTHROPIC_API_KEY` is not visible to the shell Claude Code runs in. Set it in `~/.agenticview/config.json` instead, or switch the agent to *Claude Code session* if you are on a Max/Pro plan. |
 | Claude Code session task sits "waiting for a worker" | No session is polling. Run `/agenticview-work` in a Claude Code session opened in the project folder (restart Claude Code once after installing or updating the plugin so its `agenticview-worker` MCP server loads). |
 | Codex worker cannot edit files on Windows | Codex's Windows sandbox cannot write. Use *auto-edit* or *auto* (both run unsandboxed there) or run under WSL. |
@@ -131,7 +133,7 @@ The settings panel in the office shows each provider's status and the reason whe
 
 With the default provider on **Automatic**, agents without their own provider run on the first available provider in the order claude, claude-session, codex, gemini. The settings panel shows the current choice, e.g. *Automatic (Codex)*.
 
-Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; Gemini offers its model aliases and has no effort control. A *Claude Code session* worker keeps its own model and treats the effort as a hint for how thorough to be. *Custom…* accepts any model id.
+Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; Gemini offers its model aliases and has no effort control. A *Claude Code session* worker keeps its own model (the office shows it and hints at `/model` when it differs from the one picked, see below) and treats the effort as a hint for how thorough to be. *Custom…* accepts any model id.
 
 Only Claude supports interactive permission prompts. For Codex and Gemini, the `ask` mode maps to the most restrictive non-interactive setting each CLI offers, and the office says so:
 
@@ -144,6 +146,17 @@ Only Claude supports interactive permission prompts. For Codex and Gemini, the `
 Gemini reads MCP servers and tool exclusions from settings files, so while a Gemini worker runs, AgenticView temporarily adds an `agenticview-<run>` server entry and a `tools.exclude` list (for tools that agent may not use) to `<project>/.gemini/settings.json`, and restores the file when the last Gemini run in that project finishes. Concurrent runs each get their own entry; exclusions are the union of all running agents. If the server ever dies mid-run, the next launch strips the leftovers.
 
 An agent whose tools disallow both editing and shell (the Manager, for example) runs Codex in a `read-only` sandbox and Gemini with the write, shell and web tools excluded, regardless of its permission mode.
+
+## Claude Code sessions as workers
+
+The *Claude Code session* provider uses sessions you start yourself; AgenticView never launches `claude` or the Agent SDK for it. Run `/agenticview:agenticview-work` (or `/agenticview-work`) in a Claude Code session for the project, optionally with an agent name: `/agenticview:agenticview-work Nova`.
+
+- **Which session serves which agent.** Each session identifies itself with its Claude Code session id and reports the model it runs on. A session takes tasks of agents bound to it first. A task of an agent with no session goes to any free session, and that session becomes the agent's session from then on. Naming an agent in the command binds it to that session. The office shows the bound session, its online state and its model in the chat header and on the robot's name tag.
+- **Several sessions.** Open more sessions for more parallel workers: one task per session at a time. Give each agent its own session to keep their contexts apart.
+- **Persistence.** Sessions (`.agenticview/worker-sessions.json`, not committed) and bindings (on each agent) survive closing the office and the session. When you resume the session (`claude --resume <id>`, or **Open session** in the office) and run the command again, it picks up its agents' tasks. While an agent's session is offline its tasks wait, and the chat shows *Waiting for session …* with **Open session**, **Use any session**, or a pick of another session.
+- **Managing sessions in the office.** **Sessions** in the top bar lists every known session (online dot, model, agents it serves, current task, last seen) with Rename, Forget and Open session, plus **New session**, which opens a new Claude Code tab in VS Code with the command typed in. Press Enter in that tab to connect it: the prompt is never sent automatically. The agent form has a **Session** picker (Any free session, a known session, or Open a new session…), and creating a Claude Code session agent offers to open a session for it. The links use the Claude Code VS Code extension (`vscode://anthropic.claude-code/open`); without it the office shows the command to run in a terminal instead.
+- **Models.** A session runs on the model it was started with; only you can switch it, with `/model` in that session. The model picked for the agent in the office is a request: when the session reports a different one, the office shows *Session X is on Y; run /model Z in that session to switch*, and the session says so in its first report on each task.
+- **Managers on a session.** A Manager's `await_tasks` over a session returns about every 4 minutes with the tasks still running, and the session calls it again, so long waits are never cut off by a timeout. A Manager cannot wait on a worker bound to the same session that runs the Manager (it would wait forever): `assign_task` and `await_tasks` refuse with a message, and the office shows it. Open another session for that worker.
 
 ## Scopes and where data lives
 
@@ -158,6 +171,49 @@ An agent whose tools disallow both editing and shell (the Manager, for example) 
 ## Security
 
 The server binds to `127.0.0.1` only. Every request and WebSocket connection needs the random token that is minted at launch and passed once in the URL. Agents only receive the tools you allowed on them. Custom tools handed to Codex and Gemini go through a per-run bridge token that stops working when the run ends.
+
+## FAQ
+
+### What does AgenticView do? Does it change my actual project?
+
+AgenticView puts a team of coding agents in a browser-based 3D office. You give the Manager a request, workers carry it out in your project's working tree, and the office shows their activity. Review the changes in your editor or with `git diff`; see the [test drive](#test-drive-in-a-project-5-minutes) for a first task.
+
+### What do I need to get started? Can I try it without credentials?
+
+For the plugin, use Claude Code 2.x, Node.js 22 or newer on PATH, and a browser. Follow [Install](#install), restart Claude Code once, then run `/agenticview` from a session opened in your project folder. Real agents need a configured provider; [demo mode](#try-it-with-no-credentials-demo-mode) uses scripted echo agents without credentials. You can also [run from a clone](#without-the-plugin-from-a-clone).
+
+### Which providers can I use, and how do I set them up?
+
+- **Claude API (`claude`):** set `ANTHROPIC_API_KEY`, or put the key under `providers.claude.apiKey` in `~/.agenticview/config.json`.
+- **Claude Code session (`claude-session`):** sign in to Claude Code and run `/agenticview-work` in a session for the project. This supports your Max/Pro session; the API provider does not reuse that login.
+- **Codex (`codex`):** install with `npm i -g @openai/codex`, then run `codex login` or set `CODEX_API_KEY`.
+- **Gemini (`gemini`):** install with `npm i -g @google/gemini-cli`, then run `gemini` to sign in or set `GEMINI_API_KEY`.
+
+Choose a provider per agent or use the office default. **Automatic** selects the first available provider in this order: Claude API, Claude Code session, Codex, Gemini. See [Providers and credentials](#providers-and-credentials) for availability, models, and permission differences.
+
+### What does the Manager do, and what do workers do?
+
+Atlas reads the project, plans assignments, chooses or creates workers, and collects their results before reporting back. The Manager is instructed never to edit files itself and has read-only file tools by default. Workers make the requested changes and run relevant checks using their allowed tools. Give Atlas the desired outcome, scope, and verification criteria; click a worker to talk to it directly.
+
+### How do I assign work, track it, or cancel it?
+
+Use the bottom command bar to send work to Atlas, or a worker's chat to send it a request directly. The **Tasks** panel shows the assignee and status: **Queued** includes assigned tasks, **Running** means work is active, **Waiting** means an office question or approval needs your response, and **Done** or **Failed** shows the outcome (cancelled tasks appear under Failed). Click a task to open its agent's chat; use **Cancel** on an unfinished task to stop it.
+
+### Why is a Claude Code session task waiting for a worker or session?
+
+Run `/agenticview-work` in a Claude Code session opened in the same project. If the agent is bound to an offline session, use **Open session**, **Use any session**, or choose another session in the office. One session handles one task at a time: a session-backed Manager and its worker need separate sessions. If the worker tools are missing after installation or an update, restart Claude Code so the plugin's MCP server loads. See [Claude Code sessions as workers](#claude-code-sessions-as-workers).
+
+### When will agents ask for approval?
+
+Set tool allowances and the permission mode in the agent form. Claude API agents can show **Allow**/**Deny** prompts in the office; `auto-edit` accepts edits and `auto` bypasses permission prompts. Codex and Gemini do not support those interactive office prompts: `ask` uses Codex's read-only sandbox or Gemini's restrictive headless mode. Claude Code session workers use their session's own permission prompts; the office setting does not change them. Check the [permission mapping](#providers-and-credentials) before choosing a mode, especially on Windows, where Codex `auto-edit` runs unsandboxed.
+
+### Why will the office not open, or why is a provider unavailable?
+
+If `plugin-root` is missing, restart Claude Code and retry `/agenticview`. If the page asks for its launch link, use the complete printed URL, including `#token=`. For an unavailable provider, hover its status chip or open **Settings** to read the reason, then check that its CLI or credentials are visible to the server. Provider checks are cached for a minute; after changing the server's environment, stop and relaunch the office. See [Troubleshooting](#troubleshooting) for specific provider errors.
+
+### Can I reuse agents across projects, and where is their data stored?
+
+Project agents work only in their own project; global agents appear in every office and can work in known projects or be copied into a project. Open `/agenticview-hub` to manage global agents and known projects. Project data lives under `<project>/.agenticview/`, while global agents and defaults live under `~/.agenticview/`; see [Scopes and where data lives](#scopes-and-where-data-lives) for storage and Git tracking details.
 
 ## Development
 

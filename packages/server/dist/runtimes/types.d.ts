@@ -14,6 +14,8 @@ export interface PermissionRequest {
 }
 export interface RunRequest {
     runId: string;
+    /** Office task this run belongs to. */
+    taskId?: string;
     agent: Agent;
     cwd: string;
     prompt: PromptPart[];

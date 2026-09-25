@@ -1,4 +1,5 @@
-import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo } from "@agenticview/shared";
+import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo } from "@agenticview/shared";
+import { SessionRuntime } from "./runtimes/session.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { Orchestrator, type ResolvedSettings } from "./manager/orchestrator.js";
@@ -26,6 +27,10 @@ export interface World {
     info: () => Promise<WorldInfo>;
     snapshot: () => Promise<Snapshot>;
     providerStatuses: () => Promise<ProviderStatus[]>;
+    /** Claude Code sessions known to this world, with live state and the agents bound to each. */
+    sessions: () => Promise<WorkerSessionInfo[]>;
+    /** The claude-session runtime, when configured. */
+    sessionRuntime?: SessionRuntime;
     /** Push fresh provider availability (and the Automatic choice) to every client. */
     emitProviders: () => Promise<void>;
 }

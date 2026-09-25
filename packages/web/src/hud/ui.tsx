@@ -30,22 +30,54 @@ export function ProviderChip({ status, compact = false }: { status: ProviderStat
   );
 }
 
-/** Modal shell: focus trap-lite (focus first field, Escape closes, click on the backdrop closes). */
+/** Modal shell: contain focus, restore the opener, and close on Escape or backdrop click. */
 export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
-    const first = ref.current?.querySelector<HTMLElement>("input, select, textarea, button");
-    first?.focus();
+    const dialog = ref.current!;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const controls = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]',
+    )).filter(el => {
+      if (el.tabIndex < 0 || el.matches(':disabled, input[type="hidden"]') || el.closest('[hidden], [inert]')) return false;
+      for (let node: HTMLElement | null = el; node && node !== dialog; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === "none" || style.visibility === "hidden") return false;
+        if (node.parentElement instanceof HTMLDetailsElement && !node.parentElement.open && node.tagName !== "SUMMARY") return false;
+      }
+      return true;
+    }).sort((a, b) => (a.tabIndex || Infinity) - (b.tabIndex || Infinity));
+    const focusFirst = () => (controls()[0] ?? dialog).focus();
+    focusFirst();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeRef.current();
+      if (e.key !== "Tab") return;
+      const items = controls();
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!first || !items.includes(active as HTMLElement) || (e.shiftKey ? active === first : active === last)) {
+        e.preventDefault();
+        (e.shiftKey ? last ?? dialog : first ?? dialog).focus();
+      }
+    };
+    const onFocus = (e: FocusEvent) => {
+      if (!dialog.contains(e.target as Node)) focusFirst();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    document.addEventListener("focusin", onFocus);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocus);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
   // Portal to <body>: panels use backdrop-filter, which would otherwise trap a fixed-position modal inside them.
   return createPortal(
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" ref={ref}>
+      <div className={`modal ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" ref={ref} tabIndex={-1}>
         <div className="modal-head">
           <h2 id="modal-title">{title}</h2>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">

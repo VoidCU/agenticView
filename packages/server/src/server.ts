@@ -25,6 +25,8 @@ export interface ServerOptions {
   staticDir?: string;
   openProject?: (path: string) => Promise<string>;
   workerTools?: (agent: Agent, task: Task) => BridgeTool[];
+  /** Called after an authenticated POST /api/shutdown has been answered (the CLI's `close`). */
+  onShutdown?: () => void;
 }
 
 export interface RunningServer {
@@ -55,11 +57,20 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
   app.route("/", bridgeRoutes(toolRegistry));
   app.use("/api/*", requireToken(opts.token));
   app.use("/hooks", requireToken(opts.token));
+  // Graceful stop for `agenticview close`: answer first, then let the owner tear down (signals are unreliable on Windows).
+  app.post("/api/shutdown", (c) => {
+    if (!opts.onShutdown) return c.json({ error: "shutdown not supported" }, 501);
+    setTimeout(() => opts.onShutdown?.(), 50);
+    return c.json({ ok: true });
+  });
   const session = runtimes.get("claude-session");
   if (session instanceof SessionRuntime) {
     session.onWorkersChanged = () => void world.emitProviders().catch(() => undefined);
     app.route("/", workerRoutes(session, toolRegistry));
   }
+  // Sessions go offline by time alone; re-check now and then so the office sees it.
+  const pulse = session instanceof SessionRuntime ? setInterval(() => session.pulse(), 15_000) : undefined;
+  pulse?.unref();
   app.route("/", apiRoutes(world));
   if (opts.staticDir) app.route("/", staticRoutes(opts.staticDir));
 
@@ -81,6 +92,7 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
     orchestrator: world.orchestrator,
     bus,
     close: async () => {
+      if (pulse) clearInterval(pulse);
       await ws.close();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     },

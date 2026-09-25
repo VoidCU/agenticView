@@ -20,6 +20,13 @@ export interface ManagerToolContext {
     setWaiting: (taskId: string, waiting: boolean) => Promise<void>;
     emitAgent: (agent: Agent) => void;
     checkProvider: (agent: Agent) => Promise<string | undefined>;
+    /**
+     * claude-session guard: a message when `agent`'s task could only run in the Claude Code session
+     * that is running this Manager (it would wait forever while the Manager waits on it).
+     */
+    sessionConflict?: (agent: Agent) => Promise<string | undefined>;
+    /** Surface a status line in the Manager's feed. */
+    notify?: (text: string) => void;
 }
 /** Resolve the target project for an assignment, or return an error string. */
 export declare function resolveAssignmentTarget(ctx: Pick<ManagerToolContext, "world" | "knownProjects">, agent: Agent, projectPath: string | undefined): {

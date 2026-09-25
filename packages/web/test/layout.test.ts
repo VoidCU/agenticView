@@ -85,10 +85,24 @@ describe("planOffice", () => {
     expect(plan.placements["w_00000002"]).toEqual({ space: "pod-a", seat: 1 });
   });
 
-  it("grows to fit a persisted outer-ring placement", () => {
-    const plan = planOffice([w(1, { space: "pod-e", seat: 1 })]);
-    expect(plan.spaces.some((s) => s.id === "pod-e")).toBe(true);
-    expect(plan.placements["w_00000001"]).toEqual({ space: "pod-e", seat: 1 });
+  it("does not grow a ring for a stale outer-ring placement while inner desks are free", () => {
+    // Four workers, two of them with seats persisted in ring 2 (e.g. from a bigger roster or another world).
+    const plan = planOffice([w(1, { space: "pod-e", seat: 1 }), w(2, { space: "pod-p", seat: 0 }), w(3), w(4)]);
+    expect(Math.max(...plan.spaces.map((s) => s.ring))).toBe(1);
+    expect(plan.spaces.filter((s) => s.kind === "pod")).toHaveLength(4);
+    expect(Object.values(plan.placements).every((p) => ["pod-a", "pod-b", "pod-c", "pod-d"].includes(p.space))).toBe(true);
+    expect(new Set(Object.values(plan.placements).map((p) => `${p.space}#${p.seat}`)).size).toBe(4);
+  });
+
+  it("adds a ring only once every desk of the existing rings is taken", () => {
+    const full = Array.from({ length: 15 }, (_, i) => w(i + 1));
+    expect(Math.max(...planOffice(full).spaces.map((s) => s.ring))).toBe(1);
+    const more = Array.from({ length: 16 }, (_, i) => w(i + 1));
+    const plan = planOffice(more);
+    expect(Math.max(...plan.spaces.map((s) => s.ring))).toBe(2);
+    // Once ring 2 exists, a persisted ring-2 seat is honoured.
+    const moved = planOffice([...more.slice(0, 15), w(16, { space: "pod-e", seat: 1 })]);
+    expect(moved.placements["w_00000016"]).toEqual({ space: "pod-e", seat: 1 });
   });
 
   it("nextPlacement is the first free desk", () => {

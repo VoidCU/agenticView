@@ -68,6 +68,24 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
       await world.updateSettings(msg.settings);
       bus.emit({ type: "snapshot", ...(await world.snapshot()) });
       return;
+    case "session.rename": {
+      const rt = world.sessionRuntime;
+      if (!rt || !(await rt.rename(msg.id, msg.name))) throw new Error(`Unknown session ${msg.id}`);
+      // Agents keep a copy of the session name for when the session is offline.
+      for (const a of await registry.list()) {
+        if (a.session?.id === msg.id) bus.emit({ type: "agent.updated", agent: await registry.update(a.id, { session: { id: msg.id, name: msg.name.trim() } }) });
+      }
+      return;
+    }
+    case "session.forget": {
+      const rt = world.sessionRuntime;
+      if (!rt) throw new Error("The Claude Code session provider is not configured");
+      await rt.forget(msg.id);
+      for (const a of await registry.list()) {
+        if (a.session?.id === msg.id) bus.emit({ type: "agent.updated", agent: await registry.update(a.id, { session: null }) });
+      }
+      return;
+    }
     case "project.open": {
       if (world.ref.kind !== "hub" || !opts.openProject) throw new Error("project.open is only available in the hub");
       await assertDirectory(msg.path);
