@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentSchema, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, ScopeSchema, type Agent, type Provider } from "./agent.js";
 import { type Task } from "./task.js";
+import { EffortSchema } from "./models.js";
 import { ProjectSettingsSchema, KnownProjectSchema, type ProjectSettings } from "./settings.js";
 import type { RunEvent } from "./runtime.js";
 
@@ -26,6 +27,7 @@ export const CreateAgentPayloadSchema = z.object({
   description: z.string().optional(),
   provider: ProviderSchema.nullable().optional(),
   model: z.string().nullable().optional(),
+  effort: EffortSchema.nullable().optional(),
   systemPrompt: z.string().optional(),
   tools: ToolAllowanceSchema.optional(),
   permissionMode: PermissionModeSchema.optional(),
@@ -34,7 +36,11 @@ export const CreateAgentPayloadSchema = z.object({
 });
 export type CreateAgentPayload = z.infer<typeof CreateAgentPayloadSchema>;
 
-export const AgentPatchSchema = AgentSchema.partial().omit({ id: true, role: true, scope: true, stats: true, createdAt: true, updatedAt: true, originId: true });
+// Explicit optional overrides: partial() would still apply the defaults and wipe fields a patch omits.
+export const AgentPatchSchema = AgentSchema.partial().omit({ id: true, role: true, scope: true, stats: true, createdAt: true, updatedAt: true, originId: true }).extend({
+  description: z.string().max(2000).optional(),
+  systemPrompt: z.string().max(20000).optional(),
+});
 export type AgentPatch = z.infer<typeof AgentPatchSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion("type", [

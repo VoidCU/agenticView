@@ -129,7 +129,7 @@ export class CodexRuntime {
                 };
             }
             const codex = new sdk.Codex({ env, config: config });
-            const threadOpts = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: sandboxFor(req.permissionMode, process.platform, req.tools), ...(req.model ? { model: req.model } : {}) };
+            const threadOpts = codexThreadOptions(req, process.platform);
             const thread = req.sessionId ? codex.resumeThread(req.sessionId, threadOpts) : codex.startThread(threadOpts);
             const input = [];
             const textParts = req.prompt.filter((p) => p.type === "text").map((p) => (p.type === "text" ? p.text : ""));
@@ -169,5 +169,14 @@ export class CodexRuntime {
             return { text, stopReason: "error", error: e.message, sessionId };
         }
     }
+}
+/** ThreadOptions for a run: sandbox, plus model and `modelReasoningEffort` when the agent sets them. */
+export function codexThreadOptions(req, platform) {
+    const opts = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: sandboxFor(req.permissionMode, platform, req.tools) };
+    if (req.model)
+        opts.model = req.model;
+    if (req.effort)
+        opts.modelReasoningEffort = req.effort;
+    return opts;
 }
 //# sourceMappingURL=codex.js.map

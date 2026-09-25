@@ -47,7 +47,7 @@ export class SessionRuntime {
     async check() {
         const n = this.workers();
         if (n > 0)
-            return { provider: this.provider, ok: true, version: `${n} session worker${n === 1 ? "" : "s"} connected` };
+            return { provider: this.provider, ok: true, version: `${n} worker${n === 1 ? "" : "s"}` };
         return { provider: this.provider, ok: false, reason: SESSION_WORKER_HINT };
     }
     touch(workerId) {
@@ -217,6 +217,7 @@ function toSessionTask(req) {
         prompt: req.prompt.map((p) => (p.type === "text" ? p.text : "")).filter(Boolean).join("\n\n"),
         images: req.prompt.flatMap((p) => (p.type === "image" ? [p.path] : [])),
         model: req.model,
+        effort: req.effort,
         tools: req.tools,
         permissionMode: req.permissionMode,
         bridgeTools: req.bridgeTools.map((t) => ({

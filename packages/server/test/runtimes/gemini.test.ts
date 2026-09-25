@@ -249,4 +249,16 @@ describe("cleanupGeminiSettings", () => {
     await expect(access(file)).rejects.toThrow();
     await expect(cleanupGeminiSettings(join(cwd, "nowhere"))).resolves.toBeUndefined();
   });
+
+  it("passes the model with -m and sends no effort flag (the CLI has none)", async () => {
+    let seenArgv: string[] = [];
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      seenArgv = args;
+      return nodeSpawn(process.execPath, [fixture, ...args], opts as never);
+    }) as never;
+    const runtime = new GeminiRuntime({ bin: "gemini", bridgeEntry: "C:/bridge/stdioBridge.js", bridgeUrl: () => "http://127.0.0.1:4242", spawn, which: async () => "gemini" });
+    await runtime.run(req({ model: "flash", effort: "high" }), () => {}, new AbortController().signal);
+    expect(seenArgv).toEqual(expect.arrayContaining(["-m", "flash"]));
+    expect(seenArgv.join(" ")).not.toMatch(/effort|thinking|high/);
+  });
 });

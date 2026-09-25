@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import type { Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance, PermissionMode } from "@agenticview/shared";
+import type { Effort, Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance, PermissionMode } from "@agenticview/shared";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 
 /**
@@ -20,6 +20,8 @@ export interface SessionTask {
   prompt: string;
   images: string[];
   model?: string;
+  /** Requested reasoning effort; the session cannot change it, so it scales thoroughness instead. */
+  effort?: Effort;
   tools: ToolAllowance;
   permissionMode: PermissionMode;
   bridgeTools: { name: string; description: string; inputSchema: Record<string, unknown> }[];
@@ -100,7 +102,7 @@ export class SessionRuntime implements Runtime {
 
   async check(): Promise<ProviderStatus> {
     const n = this.workers();
-    if (n > 0) return { provider: this.provider, ok: true, version: `${n} session worker${n === 1 ? "" : "s"} connected` };
+    if (n > 0) return { provider: this.provider, ok: true, version: `${n} worker${n === 1 ? "" : "s"}` };
     return { provider: this.provider, ok: false, reason: SESSION_WORKER_HINT };
   }
 
@@ -264,6 +266,7 @@ function toSessionTask(req: RunRequest): SessionTask {
     prompt: req.prompt.map((p) => (p.type === "text" ? p.text : "")).filter(Boolean).join("\n\n"),
     images: req.prompt.flatMap((p) => (p.type === "image" ? [p.path] : [])),
     model: req.model,
+    effort: req.effort,
     tools: req.tools,
     permissionMode: req.permissionMode,
     bridgeTools: req.bridgeTools.map((t) => ({

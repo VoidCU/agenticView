@@ -16,6 +16,7 @@ const req = (runId: string, extra: Partial<RunRequest> = {}): RunRequest => ({
   bridgeToken: "btok",
   permissionMode: "auto-edit",
   model: "opus",
+  effort: "high",
   ...extra,
 });
 
@@ -27,9 +28,9 @@ describe("SessionRuntime", () => {
     rt.onWorkersChanged = () => changes.push(rt.workers());
     expect(await rt.check()).toEqual({ provider: "claude-session", ok: false, reason: SESSION_WORKER_HINT });
     expect(await rt.claim("w1", 0)).toBeNull();
-    expect(await rt.check()).toMatchObject({ ok: true, version: "1 session worker connected" });
+    expect(await rt.check()).toMatchObject({ ok: true, version: "1 worker" });
     await rt.claim("w2", 0);
-    expect((await rt.check()).version).toBe("2 session workers connected");
+    expect((await rt.check()).version).toBe("2 workers");
     now += 61_000;
     expect((await rt.check()).ok).toBe(false);
     expect(changes).toEqual([1, 2]);
@@ -50,6 +51,7 @@ describe("SessionRuntime", () => {
       prompt: "do it",
       images: ["/tmp/a.png"],
       model: "opus",
+      effort: "high",
       tools: { edit: false, shell: true },
       agent: { name: "Nova", specialty: "tests" },
     });

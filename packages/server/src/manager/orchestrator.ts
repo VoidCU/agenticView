@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { z } from "zod";
 import {
+  effectiveEffort,
   isTerminal,
   newId,
   ProviderSchema,
@@ -411,6 +412,7 @@ export class Orchestrator {
         bridgeToken,
         permissionMode: agent.permissionMode,
         model,
+        effort: effectiveEffort(provider, model, agent.effort) ?? undefined,
         onPermission: (p) => this.requestPermission(task.id, agent.id, p),
       };
       let chain = Promise.resolve();

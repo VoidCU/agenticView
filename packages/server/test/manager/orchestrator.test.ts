@@ -92,10 +92,40 @@ describe("Orchestrator", () => {
     expect(workerReq.systemPrompt).toContain("Nova");
     const managerReq = ctx.fake.runs.find((r) => r.agent.role === "manager")!;
     expect(managerReq.prompt.map((p) => (p.type === "text" ? p.text : ""))[0]).toContain("## Roster");
-    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["ask_user", "assign_task", "await_tasks", "create_agent", "list_agents", "list_tasks"]);
+    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["ask_user", "assign_task", "await_tasks", "create_agent", "list_agents", "list_tasks", "update_agent"]);
     expect(ctx.orch.running()).toBe(0);
     const log = (await ctx.tasks.get(child.id))!.log;
     expect(log.some((l) => l.type === "file_changed")).toBe(true);
+  });
+
+  it("create_agent/update_agent take model and effort; runs get the effort the model supports", async () => {
+    const replies: string[] = [];
+    const ctx = await setup(async function* (req) {
+      if (req.agent.role === "manager") {
+        const create = req.bridgeTools.find((b) => b.name === "create_agent")!;
+        replies.push(await create.handler({ name: "Nova", specialty: "", provider: "claude", model: "opus", effort: "max" }));
+        const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
+        yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "a", description: "b" } };
+        yield { type: "call", tool: "await_tasks", args: { taskIds: (await ctx.tasks.list()).filter((t) => t.kind === "work").map((t) => t.id) } };
+        const update = req.bridgeTools.find((b) => b.name === "update_agent")!;
+        replies.push(await update.handler({ agentId: nova.id, model: "haiku" }));
+        yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "c", description: "d" } };
+        yield { type: "call", tool: "await_tasks", args: { taskIds: (await ctx.tasks.list()).filter((t) => t.kind === "work" && t.title === "c").map((t) => t.id) } };
+        yield { type: "text", text: "ok" };
+      } else {
+        yield { type: "text", text: "done" };
+      }
+    });
+    const m = await ctx.reg.ensureManager();
+    await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" })).id);
+    expect(replies[1]).toMatch(/model haiku, effort max/);
+    const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
+    expect(nova).toMatchObject({ model: "haiku", effort: "max" });
+    const workerRuns = ctx.fake.runs.filter((r) => r.agent.role === "worker");
+    expect(workerRuns[0]).toMatchObject({ model: "opus", effort: "max" });
+    // Haiku has no effort control, so the stored "max" is not sent.
+    expect(workerRuns[1]!.model).toBe("haiku");
+    expect(workerRuns[1]!.effort).toBeUndefined();
   });
 
   it("refuses cross-project assignment for project agents", async () => {

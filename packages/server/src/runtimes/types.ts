@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type {
   Agent,
+  Effort,
   PermissionMode,
   PromptPart,
   Provider,
@@ -37,6 +38,8 @@ export interface RunRequest {
   bridgeToken?: string;
   permissionMode: PermissionMode;
   model?: string;
+  /** Reasoning effort, already filtered to what the resolved provider/model supports. */
+  effort?: Effort;
   maxTurns?: number;
   /** Called by runtimes that support interactive permission prompts. Resolves true to allow. */
   onPermission?: (req: PermissionRequest) => Promise<boolean>;

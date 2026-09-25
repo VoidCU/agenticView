@@ -39,4 +39,9 @@ export declare class ClaudeRuntime implements Runtime {
     private loadSdk;
     run(req: RunRequest, sink: EventSink, signal: AbortSignal): Promise<RunResult>;
 }
+/** Model (alias or full id) and `effort` for the Agent SDK. Claude has no "ultra"/"minimal"; those are dropped upstream by effectiveEffort(). */
+export declare function claudeModelOptions(req: Pick<RunRequest, "model" | "effort">): {
+    model?: string;
+    effort?: string;
+};
 export {};

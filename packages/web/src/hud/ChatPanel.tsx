@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
-import type { Agent, RunEvent } from "@agenticview/shared";
+import { EFFORT_LABELS, effectiveEffort, modelLabel, type Agent, type RunEvent } from "@agenticview/shared";
 import { useStore, useAgentStatus, type FeedItem } from "../state/store";
 import { uploadImage } from "../net/ws";
 import { AgentMenu } from "./AgentMenu";
@@ -85,6 +85,7 @@ function Header({ agent }: { agent: Agent }) {
   const autoProvider = useStore((s) => s.autoProvider);
   const provider = agent.provider ?? defaultProviderOf(settings?.defaultProvider, autoProvider);
   const pstat = providers.find((p) => p.provider === provider);
+  const chipEffort = effectiveEffort(provider, agent.model, agent.effort);
   const { pct, next } = xpProgress(agent.stats.xp, agent.stats.level);
   return (
     <div className="chat-head">
@@ -98,7 +99,8 @@ function Header({ agent }: { agent: Agent }) {
           <span className={`chip ${pstat && !pstat.ok ? "chip-off" : "chip-ok"}`} title={pstat?.ok === false ? pstat.reason : undefined}>
             <span className="chip-dot" aria-hidden="true" />
             {providerLabel(provider)}
-            {agent.model ? ` · ${agent.model}` : ""}
+            {agent.model ? ` · ${modelLabel(provider, agent.model)}` : ""}
+            {chipEffort ? ` · ${EFFORT_LABELS[chipEffort]} effort` : ""}
           </span>
           <span className={`status status-${status}`}>{STATUS_WORD[status]}</span>
         </div>

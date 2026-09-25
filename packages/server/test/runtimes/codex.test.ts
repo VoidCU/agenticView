@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { defaultAgent } from "@agenticview/shared";
-import { CodexRuntime, sandboxFor, type CodexSdk } from "../../src/runtimes/codex.js";
+import { CodexRuntime, codexThreadOptions, sandboxFor, type CodexSdk } from "../../src/runtimes/codex.js";
 import type { RunRequest } from "../../src/runtimes/types.js";
 
 const agent = defaultAgent({ name: "C", role: "worker", scope: "project", specialty: "", provider: "codex" });
@@ -164,5 +164,15 @@ describe("CodexRuntime edge cases", () => {
     expect(sandboxFor("auto-edit", "darwin")).toBe("workspace-write");
     expect(sandboxFor("ask", "win32")).toBe("read-only");
     expect(sandboxFor("ask", "linux")).toBe("read-only");
+  });
+});
+
+describe("codexThreadOptions", () => {
+  it("maps model and effort to ThreadOptions.model / modelReasoningEffort", () => {
+    const base = { runId: "r", agent, cwd: "C:/p", prompt: [], systemPrompt: "", tools: agent.tools, bridgeTools: [], permissionMode: "auto-edit" as const };
+    expect(codexThreadOptions({ ...base, model: "gpt-6-sol", effort: "ultra" }, "linux")).toMatchObject({ model: "gpt-6-sol", modelReasoningEffort: "ultra", workingDirectory: "C:/p", sandboxMode: "workspace-write" });
+    const bare = codexThreadOptions(base, "linux");
+    expect(bare).not.toHaveProperty("model");
+    expect(bare).not.toHaveProperty("modelReasoningEffort");
   });
 });

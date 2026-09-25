@@ -1345,6 +1345,42 @@ h3 {
   gap: 8px 16px;
 }
 
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input);
+  padding: 2px;
+  gap: 2px;
+  align-self: flex-start;
+}
+
+.segment {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.segment:hover {
+  color: var(--text);
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+.segment-on {
+  background: var(--blue);
+  color: #fff;
+}
+
 .choices-col {
   flex-direction: column;
   gap: 6px;

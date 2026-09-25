@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { z } from "zod";
-import { isTerminal, newId, ProviderSchema, PROVIDER_ORDER, } from "@agenticview/shared";
+import { effectiveEffort, isTerminal, newId, ProviderSchema, PROVIDER_ORDER, } from "@agenticview/shared";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { buildRosterPreamble } from "./preamble.js";
 import { MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
@@ -372,6 +372,7 @@ export class Orchestrator {
                 bridgeToken,
                 permissionMode: agent.permissionMode,
                 model,
+                effort: effectiveEffort(provider, model, agent.effort) ?? undefined,
                 onPermission: (p) => this.requestPermission(task.id, agent.id, p),
             };
             let chain = Promise.resolve();

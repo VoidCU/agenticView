@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultAgent } from "@agenticview/shared";
-import { ClaudeRuntime, claudeOptionsFor, mapClaudeMessage, type ClaudeSdk } from "../../src/runtimes/claude.js";
+import { ClaudeRuntime, claudeModelOptions, claudeOptionsFor, mapClaudeMessage, type ClaudeSdk } from "../../src/runtimes/claude.js";
 import type { RunRequest } from "../../src/runtimes/types.js";
 
 const agent = defaultAgent({ name: "N", role: "worker", scope: "project", specialty: "" });
@@ -195,4 +195,22 @@ it("mapClaudeMessage ignores unknown messages", () => {
   const seen = new Map();
   expect(mapClaudeMessage({ type: "system", subtype: "compact_boundary" }, seen)).toEqual([]);
   expect(mapClaudeMessage({ type: "stream_event" }, seen)).toEqual([]);
+});
+
+describe("claudeModelOptions", () => {
+  it("maps model and effort onto the Agent SDK options, omitting unset ones", () => {
+    expect(claudeModelOptions({})).toEqual({});
+    expect(claudeModelOptions({ model: "opus", effort: "xhigh" })).toEqual({ model: "opus", effort: "xhigh" });
+  });
+
+  it("passes effort through run() to query options", async () => {
+    const cap: Capture = {};
+    const rt = new ClaudeRuntime({ sdk: fakeSdk(cap) });
+    await rt.run(req({ model: "sonnet", effort: "low" }), () => {}, new AbortController().signal);
+    expect(cap.options).toMatchObject({ model: "sonnet", effort: "low" });
+    const cap2: Capture = {};
+    await new ClaudeRuntime({ sdk: fakeSdk(cap2) }).run(req(), () => {}, new AbortController().signal);
+    expect(cap2.options!.effort).toBeUndefined();
+    expect(cap2.options!.model).toBeUndefined();
+  });
 });

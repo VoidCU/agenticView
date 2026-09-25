@@ -272,6 +272,7 @@ export class GeminiRuntime {
             const args = ["-p", viaStdin ? STDIN_MARKER : promptText, "--output-format", "stream-json", "--approval-mode", APPROVAL[req.permissionMode]];
             if (req.model)
                 args.push("-m", req.model);
+            // req.effort is ignored: the Gemini CLI has no thinking/effort flag (the UI hides effort for Gemini).
             if (req.sessionId)
                 args.push("--resume", req.sessionId);
             if (useBridge)

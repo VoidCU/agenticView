@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { newId } from "./ids.js";
+import { EffortSchema } from "./models.js";
 export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "gemini"]);
 export const RoleSchema = z.enum(["manager", "worker"]);
 export const ScopeSchema = z.enum(["project", "global"]);
@@ -30,6 +31,7 @@ export const AgentSchema = z.object({
     description: z.string().max(2000).default(""),
     provider: ProviderSchema.nullable(),
     model: z.string().nullable(),
+    effort: EffortSchema.nullable().optional(),
     systemPrompt: z.string().max(20000).default(""),
     tools: ToolAllowanceSchema,
     permissionMode: PermissionModeSchema,
@@ -55,6 +57,7 @@ export function defaultAgent(init) {
         description: init.description ?? "",
         provider: init.provider ?? null,
         model: init.model ?? null,
+        effort: init.effort ?? null,
         systemPrompt: init.systemPrompt ?? "",
         tools: init.tools ?? (isManager ? { ...MANAGER_TOOLS } : { ...WORKER_TOOLS }),
         permissionMode: init.permissionMode ?? (isManager ? "auto" : "auto-edit"),

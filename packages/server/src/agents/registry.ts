@@ -3,6 +3,7 @@ import {
   defaultAgent,
   MANAGER_TOOLS,
   type Agent,
+  type Effort,
   type Role,
   type Scope,
   type Provider,
@@ -22,6 +23,7 @@ export interface CreateAgentInput {
   description?: string;
   provider?: Provider | null;
   model?: string | null;
+  effort?: Effort | null;
   systemPrompt?: string;
   tools?: ToolAllowance;
   permissionMode?: PermissionMode;

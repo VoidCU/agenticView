@@ -20,11 +20,11 @@ export function providerLabel(p: string | null | undefined, fallback = "Default"
 
 /** A small provider pill with an availability dot. Unavailable providers are greyed with the reason as the title. */
 export function ProviderChip({ status, compact = false }: { status: ProviderStatus; compact?: boolean }) {
-  const title = status.ok ? `${providerLabel(status.provider)}${status.version ? ` ${status.version}` : ""} is ready` : status.reason ?? "Unavailable";
+  const title = status.ok ? `${providerLabel(status.provider)}${status.version ? ` (${status.version})` : ""} is ready` : status.reason ?? "Unavailable";
   return (
     <span className={`chip ${status.ok ? "chip-ok" : "chip-off"}`} title={title} data-provider={status.provider}>
       <span className="chip-dot" aria-hidden="true" />
-      {compact ? providerLabel(status.provider) : `${providerLabel(status.provider)}${status.ok && status.version ? ` ${status.version}` : ""}`}
+      {compact ? providerLabel(status.provider) : `${providerLabel(status.provider)}${status.ok && status.version ? ` · ${status.version}` : ""}`}
       {!status.ok && <span className="sr-only"> unavailable: {status.reason}</span>}
     </span>
   );

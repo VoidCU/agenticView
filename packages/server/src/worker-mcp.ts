@@ -68,6 +68,7 @@ export function formatTask(t: SessionTask): string {
     `Working directory: ${t.cwd}`,
     `Permission mode: ${t.permissionMode}`,
     t.model ? `Requested model: ${t.model} (informational; keep using this session's model)` : "",
+    t.effort ? `Requested effort: ${t.effort} (scale how thorough you are to this level)` : "",
     "",
     "## Allowed tools",
     ...allowed.map((a) => `- ${a}`),

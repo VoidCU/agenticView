@@ -1,4 +1,4 @@
-import type { Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance, PermissionMode } from "@agenticview/shared";
+import type { Effort, Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance, PermissionMode } from "@agenticview/shared";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 /**
  * `claude-session` provider: work is done by the user's own Claude Code session running
@@ -20,6 +20,8 @@ export interface SessionTask {
     prompt: string;
     images: string[];
     model?: string;
+    /** Requested reasoning effort; the session cannot change it, so it scales thoroughness instead. */
+    effort?: Effort;
     tools: ToolAllowance;
     permissionMode: PermissionMode;
     bridgeTools: {

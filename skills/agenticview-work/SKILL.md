@@ -27,6 +27,7 @@ If any worker tool replies that the task was cancelled, stop working on it at on
 Keep looping until the user interrupts you. One session handles one task at a time; to run tasks in parallel, open more Claude Code sessions in the project and run `/agenticview-work` in each.
 
 Notes:
-- The office shows the provider as available while this session is polling or working ("N session workers connected").
+- The office shows the provider as available while this session is polling or working ("N workers").
 - Your permission prompts are this session's own: the office's per-agent permission mode does not change them.
-- Stay on this session's model; a model named in the task is informational.
+- Stay on this session's model: a session cannot switch models, so a **Requested model** in the task is informational only.
+- Scale effort to the task's **Requested effort** (low, medium, high, xhigh, max). Low: answer directly with the minimum reading and checking needed. Medium: normal care. High and above: investigate thoroughly, consider edge cases, and verify (tests, typecheck) before completing; at max, be exhaustive. With no requested effort, use your normal judgement.

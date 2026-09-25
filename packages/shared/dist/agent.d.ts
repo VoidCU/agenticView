@@ -66,6 +66,15 @@ export declare const AgentSchema: z.ZodObject<{
         gemini: "gemini";
     }>>;
     model: z.ZodNullable<z.ZodString>;
+    effort: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        minimal: "minimal";
+        low: "low";
+        medium: "medium";
+        high: "high";
+        xhigh: "xhigh";
+        max: "max";
+        ultra: "ultra";
+    }>>>;
     systemPrompt: z.ZodDefault<z.ZodString>;
     tools: z.ZodObject<{
         edit: z.ZodBoolean;

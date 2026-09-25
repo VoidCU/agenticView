@@ -181,7 +181,7 @@ export class ClaudeRuntime implements Runtime {
         abortController,
       };
       if (req.sessionId) options.resume = req.sessionId;
-      if (req.model) options.model = req.model;
+      Object.assign(options, claudeModelOptions(req));
       // The configured key goes to the SDK subprocess only, never into this process's env (other providers' CLIs inherit that).
       if (this.apiKey && !process.env.ANTHROPIC_API_KEY) options.env = { ...process.env, ANTHROPIC_API_KEY: this.apiKey };
       if (req.bridgeTools.length > 0) {
@@ -236,4 +236,12 @@ export class ClaudeRuntime implements Runtime {
       return { text, stopReason: "error", error: (e as Error).message };
     }
   }
+}
+
+/** Model (alias or full id) and `effort` for the Agent SDK. Claude has no "ultra"/"minimal"; those are dropped upstream by effectiveEffort(). */
+export function claudeModelOptions(req: Pick<RunRequest, "model" | "effort">): { model?: string; effort?: string } {
+  const out: { model?: string; effort?: string } = {};
+  if (req.model) out.model = req.model;
+  if (req.effort) out.effort = req.effort;
+  return out;
 }

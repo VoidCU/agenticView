@@ -1,4 +1,4 @@
-import { type Agent, type Role, type Scope, type Provider, type ToolAllowance, type PermissionMode, type Appearance } from "@agenticview/shared";
+import { type Agent, type Effort, type Role, type Scope, type Provider, type ToolAllowance, type PermissionMode, type Appearance } from "@agenticview/shared";
 export type WorldRef = {
     kind: "project";
     projectPath: string;
@@ -11,6 +11,7 @@ export interface CreateAgentInput {
     description?: string;
     provider?: Provider | null;
     model?: string | null;
+    effort?: Effort | null;
     systemPrompt?: string;
     tools?: ToolAllowance;
     permissionMode?: PermissionMode;

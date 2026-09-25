@@ -75,7 +75,7 @@ describe("session worker API", () => {
     expect(claimed.task.prompt).toContain("Write the thing");
     const runId = claimed.task.runId as string;
     expect(claimed.task.bridgeTools.map((t: { name: string }) => t.name)).toContain("echo");
-    expect((await s.world.snapshot()).providers.find((p) => p.provider === "claude-session")).toMatchObject({ ok: true, version: "1 session worker connected" });
+    expect((await s.world.snapshot()).providers.find((p) => p.provider === "claude-session")).toMatchObject({ ok: true, version: "1 worker" });
 
     expect((await call(`/api/worker/${runId}/report`, { events: [{ type: "text", text: "halfway" }] })).json).toEqual({ ok: true });
     expect((await call(`/api/worker/${runId}/bridge`, { name: "echo", args: { s: "hey" } })).json).toEqual({ ok: true, result: "echo:hey" });

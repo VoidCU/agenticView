@@ -146,8 +146,8 @@ describe("agentStatus", () => {
 
 describe("providers.updated", () => {
   it("replaces provider statuses and the Automatic choice", () => {
-    useStore.getState().apply({ type: "providers.updated", providers: [{ provider: "claude-session", ok: true, version: "1 session worker connected" }], autoProvider: "claude-session" });
-    expect(useStore.getState().providers).toEqual([{ provider: "claude-session", ok: true, version: "1 session worker connected" }]);
+    useStore.getState().apply({ type: "providers.updated", providers: [{ provider: "claude-session", ok: true, version: "1 worker" }], autoProvider: "claude-session" });
+    expect(useStore.getState().providers).toEqual([{ provider: "claude-session", ok: true, version: "1 worker" }]);
     expect(useStore.getState().autoProvider).toBe("claude-session");
   });
 });

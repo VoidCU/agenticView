@@ -48,6 +48,8 @@ describe("worker MCP", () => {
       images: ["/tmp/a.png"],
       tools: { edit: false, shell: true, web: false, screenshot: false },
       permissionMode: "auto",
+      model: "opus",
+      effort: "max",
       bridgeTools: [{ name: "take_screenshot", description: "Shoot", inputSchema: { type: "object" } }],
     });
     expect(text).toContain('"Nova"');
@@ -57,6 +59,8 @@ describe("worker MCP", () => {
     expect(text).toContain("take_screenshot: Shoot");
     expect(text).toContain("Be Nova.");
     expect(text).toContain("Fix the bug");
+    expect(text).toContain("Requested model: opus");
+    expect(text).toContain("Requested effort: max");
     expect(text).toContain("/tmp/a.png");
   });
 });

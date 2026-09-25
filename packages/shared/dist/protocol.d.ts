@@ -40,6 +40,15 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
         gemini: "gemini";
     }>>>;
     model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    effort: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        minimal: "minimal";
+        low: "low";
+        medium: "medium";
+        high: "high";
+        xhigh: "xhigh";
+        max: "max";
+        ultra: "ultra";
+    }>>>;
     systemPrompt: z.ZodOptional<z.ZodString>;
     tools: z.ZodOptional<z.ZodObject<{
         edit: z.ZodBoolean;
@@ -68,6 +77,24 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type CreateAgentPayload = z.infer<typeof CreateAgentPayloadSchema>;
 export declare const AgentPatchSchema: z.ZodObject<{
+    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        gemini: "gemini";
+    }>>>;
+    name: z.ZodOptional<z.ZodString>;
+    specialty: z.ZodOptional<z.ZodString>;
+    model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        minimal: "minimal";
+        low: "low";
+        medium: "medium";
+        high: "high";
+        xhigh: "xhigh";
+        max: "max";
+        ultra: "ultra";
+    }>>>>;
     tools: z.ZodOptional<z.ZodObject<{
         edit: z.ZodBoolean;
         shell: z.ZodBoolean;
@@ -88,17 +115,8 @@ export declare const AgentPatchSchema: z.ZodObject<{
             dots: "dots";
         }>;
     }, z.core.$strip>>;
-    name: z.ZodOptional<z.ZodString>;
-    specialty: z.ZodOptional<z.ZodString>;
-    description: z.ZodOptional<z.ZodDefault<z.ZodString>>;
-    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-        claude: "claude";
-        "claude-session": "claude-session";
-        codex: "codex";
-        gemini: "gemini";
-    }>>>;
-    model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-    systemPrompt: z.ZodOptional<z.ZodDefault<z.ZodString>>;
+    description: z.ZodOptional<z.ZodString>;
+    systemPrompt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type AgentPatch = z.infer<typeof AgentPatchSchema>;
 export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -122,6 +140,15 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             gemini: "gemini";
         }>>>;
         model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        effort: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            minimal: "minimal";
+            low: "low";
+            medium: "medium";
+            high: "high";
+            xhigh: "xhigh";
+            max: "max";
+            ultra: "ultra";
+        }>>>;
         systemPrompt: z.ZodOptional<z.ZodString>;
         tools: z.ZodOptional<z.ZodObject<{
             edit: z.ZodBoolean;
@@ -152,6 +179,24 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"agent.update">;
     id: z.ZodString;
     patch: z.ZodObject<{
+        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            gemini: "gemini";
+        }>>>;
+        name: z.ZodOptional<z.ZodString>;
+        specialty: z.ZodOptional<z.ZodString>;
+        model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            minimal: "minimal";
+            low: "low";
+            medium: "medium";
+            high: "high";
+            xhigh: "xhigh";
+            max: "max";
+            ultra: "ultra";
+        }>>>>;
         tools: z.ZodOptional<z.ZodObject<{
             edit: z.ZodBoolean;
             shell: z.ZodBoolean;
@@ -172,17 +217,8 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 dots: "dots";
             }>;
         }, z.core.$strip>>;
-        name: z.ZodOptional<z.ZodString>;
-        specialty: z.ZodOptional<z.ZodString>;
-        description: z.ZodOptional<z.ZodDefault<z.ZodString>>;
-        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-            claude: "claude";
-            "claude-session": "claude-session";
-            codex: "codex";
-            gemini: "gemini";
-        }>>>;
-        model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        systemPrompt: z.ZodOptional<z.ZodDefault<z.ZodString>>;
+        description: z.ZodOptional<z.ZodString>;
+        systemPrompt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"agent.copyToProject">;

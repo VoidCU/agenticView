@@ -31,7 +31,8 @@ describe("CreateAgentModal", () => {
     await userEvent.type(screen.getByLabelText(/specialty/i), "Backend APIs");
     await userEvent.type(screen.getByLabelText(/description/i), "Owns the server");
     await userEvent.selectOptions(select, "gemini");
-    await userEvent.type(screen.getByLabelText(/model/i), "gemini-2.5-pro");
+    await userEvent.selectOptions(screen.getByLabelText(/^model/i), "gemini-2.5-pro");
+    expect(screen.queryByRole("radiogroup", { name: /reasoning effort/i })).toBeNull();
     await userEvent.click(screen.getByLabelText(/^web$/i));
     await userEvent.click(screen.getByLabelText(/ask before every tool/i));
     await userEvent.click(screen.getByLabelText(/global/i));
@@ -86,5 +87,75 @@ describe("CreateAgentModal", () => {
     await userEvent.type(screen.getByLabelText(/specialty/i), "Design systems");
     await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "agent.update", id: worker.id, patch: expect.objectContaining({ specialty: "Design systems" }) }));
+  });
+
+  describe("model and effort", () => {
+    const effortGroup = () => screen.queryByRole("radiogroup", { name: /reasoning effort/i });
+    const levels = () => screen.getAllByRole("radio").filter((r) => r.classList.contains("segment")).map((r) => r.textContent);
+
+    it("offers the Claude catalogue with efforts and sends model + effort", async () => {
+      const send = vi.fn();
+      useStore.setState({ send });
+      render(<CreateAgentModal onClose={vi.fn()} />);
+      await userEvent.type(screen.getByLabelText(/^name/i), "Nova");
+      const modelSel = screen.getByLabelText(/^model/i) as HTMLSelectElement;
+      expect([...modelSel.options].map((o) => o.value)).toEqual(["", "opus", "sonnet", "haiku", "fable", "__custom__"]);
+      await userEvent.selectOptions(modelSel, "opus");
+      expect(levels()).toEqual(["Default", "Low", "Medium", "High", "X-High", "Max"]);
+      await userEvent.click(screen.getByRole("radio", { name: "High" }));
+      await userEvent.click(screen.getByRole("button", { name: /create agent/i }));
+      expect(send.mock.calls[0]![0].agent).toMatchObject({ model: "opus", effort: "high" });
+    });
+
+    it("hides effort for models without it and drops a stale effort", async () => {
+      const send = vi.fn();
+      useStore.setState({ send });
+      render(<CreateAgentModal onClose={vi.fn()} />);
+      await userEvent.type(screen.getByLabelText(/^name/i), "Nova");
+      await userEvent.click(screen.getByRole("radio", { name: "Max" }));
+      await userEvent.selectOptions(screen.getByLabelText(/^model/i), "haiku");
+      expect(effortGroup()).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: /create agent/i }));
+      expect(send.mock.calls[0]![0].agent).toMatchObject({ model: "haiku", effort: null });
+    });
+
+    it("switches catalogue with the provider and resets a model the new provider lacks", async () => {
+      render(<CreateAgentModal onClose={vi.fn()} />);
+      await userEvent.selectOptions(screen.getByLabelText(/^model/i), "sonnet");
+      await userEvent.selectOptions(screen.getByLabelText(/provider/i), "gemini");
+      const modelSel = screen.getByLabelText(/^model/i) as HTMLSelectElement;
+      expect(modelSel.value).toBe("");
+      expect([...modelSel.options].some((o) => o.value === "flash")).toBe(true);
+      expect(effortGroup()).toBeNull();
+    });
+
+    it("supports a custom model id", async () => {
+      const send = vi.fn();
+      useStore.setState({ send });
+      render(<CreateAgentModal onClose={vi.fn()} />);
+      await userEvent.type(screen.getByLabelText(/^name/i), "Nova");
+      await userEvent.selectOptions(screen.getByLabelText(/^model/i), "__custom__");
+      await userEvent.type(screen.getByLabelText(/custom model id/i), "claude-opus-5-5");
+      await userEvent.click(screen.getByRole("button", { name: /create agent/i }));
+      expect(send.mock.calls[0]![0].agent).toMatchObject({ model: "claude-opus-5-5" });
+    });
+
+    it("prefills model and effort when editing, including a custom id", async () => {
+      const send = vi.fn();
+      useStore.setState({ send });
+      render(<CreateAgentModal onClose={vi.fn()} edit={{ ...worker, provider: "claude", model: "claude-opus-5-5", effort: "xhigh" }} />);
+      expect((screen.getByLabelText(/^model/i) as HTMLSelectElement).value).toBe("__custom__");
+      expect((screen.getByLabelText(/custom model id/i) as HTMLInputElement).value).toBe("claude-opus-5-5");
+      expect(screen.getByRole("radio", { name: "X-High" })).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(send.mock.calls[0]![0].patch).toMatchObject({ model: "claude-opus-5-5", effort: "xhigh" });
+    });
+
+    it("shows no model picker for a Claude Code session but keeps effort", async () => {
+      render(<CreateAgentModal onClose={vi.fn()} />);
+      await userEvent.selectOptions(screen.getByLabelText(/provider/i), "claude-session");
+      expect(screen.getByLabelText(/^model/i)).toBeDisabled();
+      expect(effortGroup()).not.toBeNull();
+    });
   });
 });
