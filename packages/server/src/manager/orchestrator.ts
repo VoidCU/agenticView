@@ -175,18 +175,27 @@ export class Orchestrator {
     if (this.pumping) return;
     this.pumping = true;
     try {
-      while (this.queue.length > 0) {
-        const id = this.queue[0]!;
+      let i = 0;
+      while (i < this.queue.length) {
+        const id = this.queue[i]!;
         const task = await this.deps.tasks.get(id);
         if (!task || task.status !== "assigned") {
-          this.queue.shift();
+          this.queue.splice(i, 1);
           continue;
         }
         const agent = await this.deps.registry.get(task.assigneeId);
         const isManager = agent?.role === "manager";
-        if (!isManager && this.active.size >= this.deps.settings().maxConcurrentRuns) break;
-        this.queue.shift();
-        if (!isManager) this.active.add(id);
+        // Claude Code session runs happen in the user's own sessions, which enforce their own per-session
+        // capacity, so they neither wait for nor take up the office-wide worker slots.
+        const inSession = !!agent && (await this.resolveProviderLive(agent)).provider === "claude-session";
+        const limited = !isManager && !inSession;
+        if (limited && this.active.size >= this.deps.settings().maxConcurrentRuns) {
+          // Keep FIFO among limited tasks, but let managers and session tasks behind it start.
+          i++;
+          continue;
+        }
+        this.queue.splice(i, 1);
+        if (limited) this.active.add(id);
         void this.execute(task).finally(() => {
           this.active.delete(id);
           void this.pump();
