@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Html, OrbitControls } from "@react-three/drei";
+import { Html, OrbitControls, useCursor } from "@react-three/drei";
 import * as THREE from "three";
 import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
@@ -13,6 +13,8 @@ import { Kit, buildWalls, furnishSpace } from "./kit";
 import { Batches, useMaterials } from "./Batches";
 import { PALETTES, carpetTexture, useSceneTheme, woodTexture, type Palette } from "./theme";
 import { dragPoint, livePos, useDrag, useFocus } from "./motion";
+import { PodBoard } from "../hud/PodBoard";
+import { BOARD_COLORS, podBoard } from "../state/boards";
 
 const DEG = Math.PI / 180;
 
@@ -177,6 +179,38 @@ function Furniture({ spaces, layout, agents, palette }: { spaces: Space[]; layou
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, palette]);
   return <Batches items={items} materials={materials} />;
+}
+
+/** Matches the scaled corner transform used by kit.ts. */
+function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Space) => void }) {
+  const [hovered, setHovered] = useState(false);
+  useCursor(hovered);
+  const agents = useStore(s => s.agents);
+  const tasks = useStore(s => s.tasks);
+  const board = useMemo(() => podBoard(space.id, Object.values(agents), Object.values(tasks)), [space.id, agents, tasks]);
+  const active = (["queued", "running", "waiting", "failed"] as const).flatMap(status => board.columns[status].map(task => ({ task, status })));
+  const angle = (space.kind === "meeting" ? 180 : 240) * DEG;
+  const x = (4.4 * HEX_R / 6) * Math.cos(angle);
+  const z = (4.4 * HEX_R / 6) * Math.sin(angle);
+  const cols = Math.max(6, Math.ceil(Math.sqrt(active.length * 1.7)));
+  const rows = Math.max(3, Math.ceil(active.length / cols));
+  return <group position={[space.x + x, 0, space.z + z]} rotation={[0, yawToward({ x, z }, { x: 0, z: 0 }), 0]}>
+    <mesh position={[0, 1.12, 0.04]}
+      onPointerOver={e => { e.stopPropagation(); setHovered(true); }} onPointerOut={() => setHovered(false)}
+      onClick={e => { e.stopPropagation(); if (e.delta <= 4) { setHovered(false); onOpen(space); } }}>
+      <boxGeometry args={[1.72, 1.02, 0.055]} />
+      <meshBasicMaterial color="#78baff" transparent opacity={hovered ? 0.24 : 0} depthWrite={false} />
+    </mesh>
+    {space.kind === "pod" && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + (i % cols + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, 0.076]} raycast={() => null}>
+      <planeGeometry args={[1.12 / cols, 0.57 / rows]} /><meshBasicMaterial color={BOARD_COLORS[status]} side={THREE.DoubleSide} />
+    </mesh>)}
+    <Html center position={[0, 1.9, 0]} distanceFactor={14} zIndexRange={[9, 0]}>
+      <button type="button" className={`board-open ${hovered ? "is-hover" : ""}`} aria-label={space.kind === "pod" ? `Open ${space.name} board` : `Open Manager board from ${space.name}`}
+        onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} onClick={() => { setHovered(false); onOpen(space); }}>
+        {space.kind === "pod" ? `Tasks · ${active.length}` : "Manager board"}
+      </button>
+    </Html>
+  </group>;
 }
 
 // ---------- lights and ground ----------
@@ -465,7 +499,7 @@ const YOU: Agent = {
 
 const FRESH_MS = 10_000;
 
-function Scene({ onCreate, palette }: { onCreate: () => void; palette: Palette }) {
+function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: Palette; onBoard: (space: Space) => void }) {
   const agents = useStore((s) => s.agents);
   const tasks = useStore((s) => s.tasks);
   const beams = useStore((s) => s.beams);
@@ -508,6 +542,7 @@ function Scene({ onCreate, palette }: { onCreate: () => void; palette: Palette }
       <Ground palette={palette} />
       <Floors spaces={spaces} palette={palette} layout={layout} managerName={manager?.name} />
       <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} />
+      {spaces.filter(s => s.kind !== "lounge").map(s => <Whiteboard key={s.id} space={s} onOpen={onBoard} />)}
       <DropMarker spaces={spaces} />
 
       {list.map((a) => {
@@ -566,6 +601,8 @@ function Scene({ onCreate, palette }: { onCreate: () => void; palette: Palette }
 }
 
 export function Office({ onCreate }: { onCreate: () => void }) {
+  const [boardSpace, setBoardSpace] = useState<Space>();
+  const closeBoard = useCallback(() => setBoardSpace(undefined), []);
   const select = useStore((s) => s.select);
   const focus = useFocus((s) => s.focus);
   const setFocus = useFocus((s) => s.setFocus);
@@ -596,9 +633,10 @@ export function Office({ onCreate }: { onCreate: () => void }) {
         }}
       >
         <Suspense fallback={null}>
-          <Scene onCreate={onCreate} palette={palette} />
+          <Scene onCreate={onCreate} palette={palette} onBoard={setBoardSpace} />
         </Suspense>
       </Canvas>
+      {boardSpace && <PodBoard space={boardSpace} onClose={closeBoard} />}
       {focus && (
         <button type="button" className="overview-btn" onClick={() => setFocus(undefined)} title="Back to the whole floor (Esc)">
           <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden>

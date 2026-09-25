@@ -1735,3 +1735,34 @@ h3 {
     animation: none;
   }
 }
+
+/* Interactive office whiteboards. Sticky ink stays legible in either theme. */
+.board-open { border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel-solid); color: var(--text); padding: 4px 8px; white-space: nowrap; cursor: pointer; font-size: 11px; }
+.board-open:hover, .board-open.is-hover { outline: 2px solid #78baff; }
+.modal:has(.whiteboard-panel) { width: min(1180px, 100%); }
+.whiteboard-panel { background: #f6f3e9; color: #292e35; border: 5px solid #b9b8b1; border-radius: 6px; padding: 20px; }
+.board-roster, .board-meta, .board-assignee { display: flex; align-items: center; gap: 8px; }
+.board-roster { flex-wrap: wrap; margin-bottom: 20px; }
+.board-assignee i { width: 12px; height: 12px; border-radius: 50%; border: 1px solid #5558; flex-shrink: 0; }
+.board-columns { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.whiteboard-panel h3 { font-family: 'Segoe Print', 'Comic Sans MS', cursive; font-size: 16px; margin: 0 0 14px; }
+.whiteboard-panel h3 small { font: 12px var(--font); }
+.board-card { background: #ffe49a; color: #252a32; margin: 0 0 12px; box-shadow: 1px 3px 5px #0002; border-radius: 2px; }
+.board-running { background: #a9d6ff; } .board-waiting { background: #e4c4ff; } .board-done { background: #b5e5cb; } .board-failed { background: #ffb9b1; }
+.board-card summary, .board-request summary { cursor: pointer; padding: 12px; overflow-wrap: anywhere; }
+.board-card summary strong, .board-request summary strong { display: block; margin: 7px 0 10px; }
+.board-meta { flex-wrap: wrap; justify-content: space-between; font-size: 11px; }
+.board-progress { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; font-size: 12px; margin-top: 10px; }
+.board-detail { padding: 0 12px 12px; font-size: 13px; }
+.board-detail p, .board-request p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.board-empty, .board-caption { font-size: 12px; opacity: .75; }
+.board-request { border-bottom: 1px solid #8886; padding: 10px 0; }
+.board-request summary > span { font-size: 12px; }
+.board-reply { border-left: 3px solid #bc8b26; padding: 12px 18px; margin-bottom: 20px; background: #8881; }
+.board-tree { list-style: none; padding-left: 20px; border-left: 1px solid #8886; }
+.board-status { display: block; font-size: 12px; margin-bottom: 5px; }
+.whiteboard-panel summary:focus-visible, .board-open:focus-visible { outline: 3px solid #326bb1; outline-offset: 3px; }
+@media (prefers-color-scheme: dark) { .whiteboard-panel { background: #292c30; color: #f0eee5; border-color: #5b6066; } }
+:root[data-theme="dark"] .whiteboard-panel { background: #292c30; color: #f0eee5; border-color: #5b6066; }
+@media (max-width: 850px) { .board-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .board-columns { grid-template-columns: 1fr; } .whiteboard-panel { padding: 12px; } }
