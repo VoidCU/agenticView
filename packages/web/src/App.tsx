@@ -98,7 +98,7 @@ export function App() {
           <nav className="tabs" aria-label="Panels">
             {(["office", "tasks", "chat"] as Tab[]).map((t) => (
               <button key={t} type="button" className={`tab ${tab === t ? "tab-on" : ""}`} aria-pressed={tab === t} onClick={() => setTab(t)}>
-                {t === "office" ? "Office" : t === "tasks" ? (hub ? "Projects" : "Tasks") : "Chat"}
+                {t === "office" ? "Office" : t === "tasks" ? (hub ? "Projects & Tasks" : "Tasks") : "Chat"}
               </button>
             ))}
           </nav>

@@ -1,137 +1,71 @@
-import { useMemo } from "react";
+import { useId, useMemo, useState } from "react";
 import type { Task, TaskStatus } from "@agenticview/shared";
 import { useStore } from "../state/store";
+import { groupTasksByBoard } from "../state/taskGroups";
 import { timeAgo } from "./ui";
 
-type Group = "Running" | "Queued" | "Waiting" | "Done" | "Failed";
-const GROUPS: Group[] = ["Running", "Queued", "Waiting", "Done", "Failed"];
-const GROUP_OF: Record<TaskStatus, Group> = {
-  running: "Running",
-  queued: "Queued",
-  assigned: "Queued",
-  waiting: "Waiting",
-  done: "Done",
-  failed: "Failed",
-  cancelled: "Failed",
-};
 const STATUS_WORD: Record<TaskStatus, string> = {
-  running: "running",
-  queued: "queued",
-  assigned: "assigned",
-  waiting: "waiting on you",
-  done: "done",
-  failed: "failed",
-  cancelled: "cancelled",
+  running: "running", queued: "queued", assigned: "assigned", waiting: "waiting on you",
+  done: "done", failed: "failed", cancelled: "cancelled",
 };
-const DONE_LIMIT = 25;
 
-interface Node {
-  task: Task;
-  children: Node[];
-}
-
-/** Build a per-group forest: a task nests under its parent only when both sit in the same group. */
-export function groupTasks(tasks: Task[]): Record<Group, Node[]> {
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-  const out: Record<Group, Node[]> = { Running: [], Queued: [], Waiting: [], Done: [], Failed: [] };
-  const nodes = new Map<string, Node>();
-  const sorted = [...tasks].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  for (const t of sorted) nodes.set(t.id, { task: t, children: [] });
-  for (const t of sorted) {
-    const node = nodes.get(t.id)!;
-    const parent = t.parentId ? byId.get(t.parentId) : undefined;
-    if (parent && GROUP_OF[parent.status] === GROUP_OF[t.status]) nodes.get(parent.id)!.children.push(node);
-    else out[GROUP_OF[t.status]].push(node);
-  }
-  for (const n of nodes.values()) n.children.sort((a, b) => a.task.createdAt.localeCompare(b.task.createdAt));
-  return out;
-}
-
-function isCancellable(status: TaskStatus): boolean {
-  return status === "queued" || status === "assigned" || status === "running" || status === "waiting";
-}
-
-function TaskRow({ node, depth }: { node: Node; depth: number }) {
-  const { task } = node;
-  const agent = useStore((s) => s.agents[task.assigneeId]);
-  const send = useStore((s) => s.send);
-  const select = useStore((s) => s.select);
-  const selected = useStore((s) => s.selectedAgentId === task.assigneeId);
+function TaskRow({ task }: { task: Task }) {
+  const agent = useStore(s => s.agents[task.assigneeId]);
+  const send = useStore(s => s.send);
+  const select = useStore(s => s.select);
+  const selected = useStore(s => s.selectedAgentId === task.assigneeId);
   const when = task.finishedAt ?? task.startedAt ?? task.createdAt;
+  const cancellable = ["queued", "assigned", "running", "waiting"].includes(task.status);
   return (
-    <li className={`task task-${task.status} ${selected ? "task-selected" : ""}`} data-depth={depth} data-kind={task.kind}>
-      <div className="task-row" onClick={() => select(task.assigneeId)} role="presentation">
+    <li className={`task task-${task.status} ${selected ? "task-selected" : ""}`} data-kind={task.kind}>
+      <div className="task-row">
         <span className="task-dot" aria-hidden="true" style={agent ? { background: agent.appearance.color } : undefined} />
         <div className="task-main">
-          <div className="task-title">{task.title}</div>
-          <div className="task-meta">
-            {agent ? <span className="task-agent">{agent.name}</span> : <span className="task-agent">unassigned</span>}
-            <span className="task-when">{STATUS_WORD[task.status]} {timeAgo(when)}</span>
-          </div>
+          <button type="button" className="task-title task-select" disabled={!agent} onClick={() => select(task.assigneeId)} aria-label={`View ${task.title}`}>
+            {task.title}
+          </button>
+          <div className="task-meta"><span className="task-status">{STATUS_WORD[task.status]}</span><time dateTime={when}>{timeAgo(when)}</time></div>
           {task.error && <div className="task-error">{task.error}</div>}
         </div>
-        {isCancellable(task.status) && (
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              send({ type: "task.cancel", id: task.id });
-            }}
-            aria-label={`Cancel ${task.title}`}
-          >
-            Cancel
-          </button>
-        )}
+        {cancellable && <button type="button" className="btn btn-ghost btn-xs" onClick={() => send({ type: "task.cancel", id: task.id })} aria-label={`Cancel ${task.title}`}>Cancel</button>}
       </div>
-      {node.children.length > 0 && (
-        <ul className="task-children">
-          {node.children.map((c) => (
-            <TaskRow key={c.task.id} node={c} depth={depth + 1} />
-          ))}
-        </ul>
-      )}
     </li>
   );
 }
 
-function countNodes(nodes: Node[]): number {
-  return nodes.reduce((n, node) => n + 1 + countNodes(node.children), 0);
-}
-
 export function TaskBoard() {
-  const tasks = useStore((s) => s.tasks);
-  const groups = useMemo(() => groupTasks(Object.values(tasks)), [tasks]);
+  const tasks = useStore(s => s.tasks);
+  const agents = useStore(s => s.agents);
+  const world = useStore(s => s.world);
+  const boards = useMemo(() => groupTasksByBoard(Object.values(tasks), world), [tasks, world]);
+  const [collapsed, setCollapsed] = useState(false);
+  const bodyId = useId();
   const total = Object.keys(tasks).length;
-
   return (
-    <aside className="panel panel-tasks" aria-label="Task board">
+    <aside className={`panel panel-tasks${collapsed ? " panel-tasks-collapsed" : ""}`} aria-label="Task board">
       <div className="panel-head">
-        <h2>Tasks</h2>
-        <span className="panel-count">{total}</span>
+        <h2>Tasks</h2><span className="panel-count">{total}</span>
+        <button type="button" className="btn btn-ghost btn-xs task-panel-toggle" aria-expanded={!collapsed} aria-controls={bodyId} onClick={() => setCollapsed(!collapsed)}>{collapsed ? "Expand tasks" : "Collapse tasks"}</button>
       </div>
-      <div className="panel-body">
-        {total === 0 && (
-          <p className="empty">
-            No tasks yet. Ask the manager for something in the bar below and the work will show up here.
-          </p>
-        )}
-        {GROUPS.map((g) => {
-          const nodes = g === "Done" ? groups[g].slice(0, DONE_LIMIT) : groups[g];
-          if (nodes.length === 0) return null;
-          return (
-            <section key={g} className={`task-group task-group-${g.toLowerCase()}`} aria-label={g}>
-              <h3>
-                {g} <span className="panel-count">{countNodes(groups[g])}</span>
-              </h3>
-              <ul className="task-list">
-                {nodes.map((n) => (
-                  <TaskRow key={n.task.id} node={n} depth={0} />
-                ))}
-              </ul>
-            </section>
-          );
-        })}
+      <div id={bodyId} className="panel-body" hidden={collapsed}>
+        {total === 0 && <p className="empty">No tasks yet. Ask the manager for something in the bar below and the work will show up here.</p>}
+        {boards.map(board => (
+          <details key={board.id} className="task-board-group" open>
+            <summary aria-label={`Board: ${board.name}`}><span className="task-group-label">{board.name}</span><span className="panel-count">{board.tasks.length}</span></summary>
+            {board.path && <div className="task-board-path" title={board.path}>{board.path}</div>}
+            {!board.tasks.length && <p className="empty">No tasks loaded for this board.</p>}
+            {[...board.agents].sort(([a], [b]) => (agents[a]?.name ?? a).localeCompare(agents[b]?.name ?? b)).map(([agentId, assigned]) => (
+              <details key={agentId} className="task-agent-group" open>
+                <summary aria-label={`Agent: ${agents[agentId]?.name ?? (agentId ? `Unknown agent (${agentId})` : "Unassigned")}`}>
+                  <span className="task-dot" aria-hidden="true" style={agents[agentId] ? { background: agents[agentId].appearance.color } : undefined} />
+                  <span className="task-group-label">{agents[agentId]?.name ?? (agentId ? `Unknown agent (${agentId})` : "Unassigned")}</span>
+                  <span className="panel-count">{assigned.length}</span>
+                </summary>
+                <ul className="task-list">{assigned.map(task => <TaskRow key={task.id} task={task} />)}</ul>
+              </details>
+            ))}
+          </details>
+        ))}
       </div>
     </aside>
   );
