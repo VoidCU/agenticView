@@ -3,6 +3,7 @@ import { EFFORT_LABELS, effectiveEffort, modelLabel, type Agent, type RunEvent }
 import { useStore, useAgentStatus, type FeedItem } from "../state/store";
 import { uploadImage } from "../net/ws";
 import { AgentMenu } from "./AgentMenu";
+import { LimitChip, SwitchAgentModal } from "./LimitChip";
 import { ServingChip, SessionChip, SessionNotice } from "./sessions";
 import { WorkLog } from "./WorkLog";
 import { ImageIcon, SendIcon, basename, defaultProviderOf, prettyInput, providerLabel, xpProgress } from "./ui";
@@ -89,6 +90,7 @@ function Header({ agent }: { agent: Agent }) {
   const pstat = providers.find((p) => p.provider === provider);
   const chipEffort = effectiveEffort(provider, agent.model, agent.effort);
   const { pct, next } = xpProgress(agent.stats.xp, agent.stats.level);
+  const [switchOpen, setSwitchOpen] = useState(false);
   return (
     <div className="chat-head">
       <span className="avatar" style={{ background: agent.appearance.color }} aria-hidden="true">
@@ -106,6 +108,9 @@ function Header({ agent }: { agent: Agent }) {
           </span>
           {provider === "claude-session" && <SessionChip agent={agent} />}
           {provider === "claude-session" && <ServingChip agent={agent} />}
+          {agent.limit?.limited && (
+            <LimitChip limit={agent.limit} onSwitch={() => setSwitchOpen(true)} />
+          )}
           <span className={`status status-${status}`}>{STATUS_WORD[status]}</span>
         </div>
         <div className="xp" title={`${agent.stats.xp} xp, ${next - agent.stats.xp} to the next level`}>
@@ -117,6 +122,15 @@ function Header({ agent }: { agent: Agent }) {
         </div>
       </div>
       <AgentMenu agent={agent} />
+      {switchOpen && (
+        <SwitchAgentModal
+          agentId={agent.id}
+          agentName={agent.name}
+          currentProvider={agent.provider}
+          currentModel={agent.model}
+          onClose={() => setSwitchOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { connect, getToken } from "./net/ws";
 import { Office } from "./scene/Office";
 import { TopBar } from "./hud/TopBar";
 import { TaskBoard } from "./hud/TaskBoard";
+import { Inbox } from "./hud/Inbox";
 import { ChatPanel } from "./hud/ChatPanel";
 import { CommandBar } from "./hud/CommandBar";
 import { PermissionToast } from "./hud/PermissionToast";
@@ -14,7 +15,7 @@ import { SessionsModal } from "./hud/sessions";
 import { ProjectsPanel } from "./hub/HubView";
 import { CloseIcon } from "./hud/ui";
 
-type Modal = "create" | "settings" | "sessions" | undefined;
+type Modal = "create" | "settings" | "sessions" | "inbox" | undefined;
 type Tab = "office" | "tasks" | "chat";
 
 function ErrorToasts() {
@@ -78,6 +79,12 @@ export function App() {
     if (selected && window.innerWidth < 900) setTab("chat");
   }, [selected]);
 
+  useEffect(() => {
+    const handleOpenInbox = () => setModal("inbox");
+    window.addEventListener("agenticview:open-inbox", handleOpenInbox);
+    return () => window.removeEventListener("agenticview:open-inbox", handleOpenInbox);
+  }, []);
+
   if (!hasToken) return <NoToken />;
 
   const hub = world?.kind === "hub";
@@ -85,10 +92,15 @@ export function App() {
     <div className="app" data-tab={tab}>
       <Office onCreate={() => setModal("create")} />
       <div className="hud">
-        <TopBar onSettings={() => setModal("settings")} onCreate={() => setModal("create")} onSessions={() => setModal("sessions")} />
+        <TopBar
+          onSettings={() => setModal("settings")}
+          onCreate={() => setModal("create")}
+          onSessions={() => setModal("sessions")}
+          onInbox={() => setModal("inbox")}
+        />
         <div className="hud-left">
           {hub && <ProjectsPanel />}
-          <TaskBoard />
+          <TaskBoard onOpenInbox={() => setModal("inbox")} />
         </div>
         <div className="hud-right">
           <ChatPanel />
@@ -120,6 +132,7 @@ export function App() {
       {modal === "create" && <CreateAgentModal onClose={() => setModal(undefined)} />}
       {modal === "settings" && <SettingsModal onClose={() => setModal(undefined)} />}
       {modal === "sessions" && <SessionsModal onClose={() => setModal(undefined)} />}
+      {modal === "inbox" && <Inbox onClose={() => setModal(undefined)} />}
     </div>
   );
 }
