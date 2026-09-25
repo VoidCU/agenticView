@@ -1,5 +1,6 @@
 import { basename, join } from "node:path";
-import { GlobalConfigSchema, PROVIDER_ORDER, ProjectSettingsSchema, } from "@agenticview/shared";
+import { GlobalConfigSchema, PROVIDER_ORDER, ProjectSettingsSchema, WorkerSessionFileSchema, } from "@agenticview/shared";
+import { SessionRuntime } from "./runtimes/session.js";
 import { AgentRegistry } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { Orchestrator } from "./manager/orchestrator.js";
@@ -77,6 +78,45 @@ export async function createWorld(ref, opts) {
         workerTools: opts.workerTools,
     };
     const orchestrator = new Orchestrator(deps);
+    // Claude Code sessions (claude-session workers): records persist next to the agents, and the
+    // agent<->session binding persists on each agent.
+    const sessionRt = opts.runtimes.get("claude-session");
+    const sessionRuntime = sessionRt instanceof SessionRuntime ? sessionRt : undefined;
+    const sessionsFile = join(root, "worker-sessions.json");
+    const sessions = async () => {
+        if (!sessionRuntime)
+            return [];
+        const agents = await registry.list();
+        return sessionRuntime.sessionList().map(({ currentRunId: _r, currentAgentId: _a, ...s }) => ({
+            ...s,
+            agentIds: agents.filter((a) => a.session?.id === s.id).map((a) => a.id),
+        }));
+    };
+    if (sessionRuntime) {
+        const saved = await readJsonFile(sessionsFile, WorkerSessionFileSchema, { sessions: [] }).catch(() => ({ sessions: [] }));
+        sessionRuntime.attach({
+            bindingOf: async (id) => (await registry.get(id))?.session?.id ?? null,
+            bind: async (id, s) => {
+                const agent = await registry.update(id, { session: s });
+                opts.bus.emit({ type: "agent.updated", agent });
+            },
+            findAgent: async (ref) => {
+                const all = await registry.list();
+                const k = ref.trim().toLowerCase();
+                const a = all.find((x) => x.id === ref.trim()) ?? all.find((x) => x.name.toLowerCase() === k);
+                return a ? { id: a.id, name: a.name } : undefined;
+            },
+            save: (list) => writeJsonFile(sessionsFile, { sessions: list }),
+        }, saved.sessions);
+        sessionRuntime.onSessionsChanged = () => void sessions().then((list) => opts.bus.emit({ type: "sessions.updated", sessions: list }), () => undefined);
+        // A binding changed in the office (or a new agent): a waiting session may now take its task.
+        opts.bus.on((m) => {
+            if (m.type === "agent.updated" || m.type === "agent.removed") {
+                sessionRuntime.kick();
+                void sessions().then((list) => opts.bus.emit({ type: "sessions.updated", sessions: list }), () => undefined);
+            }
+        });
+    }
     const providerStatuses = async () => {
         const out = [];
         for (const p of PROVIDER_ORDER) {
@@ -96,6 +136,8 @@ export async function createWorld(ref, opts) {
         settings,
         info,
         providerStatuses,
+        sessions,
+        sessionRuntime,
         emitProviders: async () => {
             opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
         },
@@ -123,6 +165,7 @@ export async function createWorld(ref, opts) {
             providers: await providerStatuses(),
             autoProvider: await orchestrator.autoProvider(),
             settings: projectSettings,
+            sessions: await sessions(),
             ...orchestrator.pending(),
         }),
     };

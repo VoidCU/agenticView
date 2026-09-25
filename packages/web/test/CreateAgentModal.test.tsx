@@ -151,11 +151,15 @@ describe("CreateAgentModal", () => {
       expect(send.mock.calls[0]![0].patch).toMatchObject({ model: "claude-opus-5-5", effort: "xhigh" });
     });
 
-    it("shows no model picker for a Claude Code session but keeps effort", async () => {
+    it("offers a requested model, effort and a Session picker for a Claude Code session", async () => {
       render(<CreateAgentModal onClose={vi.fn()} />);
       await userEvent.selectOptions(screen.getByLabelText(/provider/i), "claude-session");
-      expect(screen.getByLabelText(/^model/i)).toBeDisabled();
+      const model = screen.getByLabelText(/^model/i) as HTMLSelectElement;
+      expect(model).not.toBeDisabled();
+      expect(model.options[0]?.textContent).toMatch(/whatever the session runs/i);
       expect(effortGroup()).not.toBeNull();
+      const session = screen.getByLabelText(/^session$/i) as HTMLSelectElement;
+      expect([...session.options].map((o) => o.textContent)).toEqual(["Any free session", "Open a new session…"]);
     });
   });
 });

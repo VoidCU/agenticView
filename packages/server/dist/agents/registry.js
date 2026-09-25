@@ -96,7 +96,9 @@ export class AgentRegistry {
         const changed = [];
         for (const a of all) {
             const p = placements[a.id];
-            if (a.role === "worker" && !a.placement && p)
+            // Also re-pin a stale placement the plan ignored (a seat in a ring the office no longer has).
+            const stale = a.placement && p && (a.placement.space !== p.space || a.placement.seat !== p.seat);
+            if (a.role === "worker" && p && (!a.placement || stale))
                 changed.push(await this.update(a.id, { placement: p }));
         }
         return changed;

@@ -60,10 +60,16 @@ export const MODEL_CATALOGUE: Record<Provider, ProviderModelCatalogue> = {
     ],
   },
   "claude-session": {
-    // The worker session keeps its own model; effort is guidance for how thorough to be.
+    // The session runs on the model the user picked in it (/model). A model chosen here is a request:
+    // the office shows the session's real model and a hint to switch it; effort guides thoroughness.
     defaultEfforts: CLAUDE_EFFORTS,
     allowCustom: false,
-    models: [],
+    models: [
+      { id: "opus", label: "Opus", efforts: CLAUDE_EFFORTS },
+      { id: "sonnet", label: "Sonnet", efforts: CLAUDE_EFFORTS },
+      { id: "haiku", label: "Haiku", efforts: CLAUDE_EFFORTS },
+      { id: "fable", label: "Fable", efforts: CLAUDE_EFFORTS },
+    ],
   },
   codex: {
     defaultEfforts: ["low", "medium", "high"],

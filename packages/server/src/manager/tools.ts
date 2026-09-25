@@ -46,6 +46,13 @@ export interface ManagerToolContext {
   setWaiting: (taskId: string, waiting: boolean) => Promise<void>;
   emitAgent: (agent: Agent) => void;
   checkProvider: (agent: Agent) => Promise<string | undefined>;
+  /**
+   * claude-session guard: a message when `agent`'s task could only run in the Claude Code session
+   * that is running this Manager (it would wait forever while the Manager waits on it).
+   */
+  sessionConflict?: (agent: Agent) => Promise<string | undefined>;
+  /** Surface a status line in the Manager's feed. */
+  notify?: (text: string) => void;
 }
 
 function agentLine(a: Agent, tasks: Task[]): Record<string, unknown> {
@@ -164,6 +171,11 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         if (!target.ok) return target.error;
         const problem = await ctx.checkProvider(agent);
         if (problem) return `ERROR: ${problem}`;
+        const conflict = await ctx.sessionConflict?.(agent);
+        if (conflict) {
+          ctx.notify?.(conflict);
+          return `ERROR: ${conflict}`;
+        }
         const task = await ctx.tasks.create({
           kind: "work",
           title: String(args.title),
@@ -179,14 +191,51 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
     },
     {
       name: "await_tasks",
-      description: "Block until every listed task is finished, then return each task's status and result or error.",
-      schema: { taskIds: z.array(z.string()).min(1) },
+      description:
+        "Block until every listed task is finished, then return each task's status and result or error. With maxWaitSeconds, returns early with the tasks still running; call it again with those ids.",
+      schema: {
+        taskIds: z.array(z.string()).min(1),
+        maxWaitSeconds: z.number().int().min(1).max(86_400).optional().describe("Return after this long even if tasks are still running (default: wait until all finish)"),
+      },
       handler: async (args) => {
         const ids = args.taskIds as string[];
+        if (ctx.sessionConflict) {
+          const blocked: string[] = [];
+          for (const id of ids) {
+            const t = await ctx.tasks.get(id);
+            if (!t || isTerminal(t.status)) continue;
+            const a = await ctx.registry.get(t.assigneeId);
+            const conflict = a && (await ctx.sessionConflict(a));
+            if (conflict) blocked.push(`${id}: ${conflict}`);
+          }
+          if (blocked.length) {
+            ctx.notify?.(blocked.join("\n"));
+            return `ERROR: waiting would deadlock.\n${blocked.join("\n")}`;
+          }
+        }
+        const line = (t: Task) => ({ id: t.id, title: t.title, status: t.status, result: t.result, error: t.error });
+        const maxMs = typeof args.maxWaitSeconds === "number" ? args.maxWaitSeconds * 1000 : undefined;
         await ctx.setWaiting(ctx.requestTask.id, true);
         try {
-          const results = await Promise.all(ids.map((id) => ctx.awaitTask(id)));
-          return JSON.stringify(results.map((t) => ({ id: t.id, title: t.title, status: t.status, result: t.result, error: t.error })), null, 2);
+          const all = Promise.all(ids.map((id) => ctx.awaitTask(id)));
+          if (maxMs === undefined) return JSON.stringify((await all).map(line), null, 2);
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          const timedOut = new Promise<null>((r) => (timer = setTimeout(() => r(null), maxMs)));
+          const results = await Promise.race([all, timedOut]);
+          clearTimeout(timer);
+          if (results) return JSON.stringify(results.map(line), null, 2);
+          const now = await Promise.all(ids.map((id) => ctx.tasks.get(id)));
+          const finished = now.filter((t): t is Task => Boolean(t && isTerminal(t.status)));
+          const running = now.filter((t): t is Task => Boolean(t && !isTerminal(t.status)));
+          return JSON.stringify(
+            {
+              stillRunning: running.map((t) => ({ id: t.id, title: t.title, status: t.status })),
+              finished: finished.map(line),
+              message: `Not finished after ${Math.round(maxMs / 1000)}s. Call await_tasks again with taskIds ${JSON.stringify(running.map((t) => t.id))} to keep waiting.`,
+            },
+            null,
+            2,
+          );
         } finally {
           await ctx.setWaiting(ctx.requestTask.id, false);
         }

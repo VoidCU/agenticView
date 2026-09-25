@@ -31,6 +31,7 @@ export interface CreateAgentInput {
   scope?: Scope;
   role?: Role;
   appearance?: Appearance;
+  session?: { id: string; name?: string } | null;
 }
 
 export class ScopeError extends Error {
@@ -126,7 +127,9 @@ export class AgentRegistry {
     const changed: Agent[] = [];
     for (const a of all) {
       const p = placements[a.id];
-      if (a.role === "worker" && !a.placement && p) changed.push(await this.update(a.id, { placement: p }));
+      // Also re-pin a stale placement the plan ignored (a seat in a ring the office no longer has).
+      const stale = a.placement && p && (a.placement.space !== p.space || a.placement.seat !== p.seat);
+      if (a.role === "worker" && p && (!a.placement || stale)) changed.push(await this.update(a.id, { placement: p }));
     }
     return changed;
   }

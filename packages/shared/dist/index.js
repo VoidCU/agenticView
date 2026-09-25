@@ -7,4 +7,5 @@ export * from "./xp.js";
 export * from "./protocol.js";
 export * from "./models.js";
 export * from "./office.js";
+export * from "./session.js";
 //# sourceMappingURL=index.js.map

@@ -10,10 +10,11 @@ import { PermissionToast } from "./hud/PermissionToast";
 import { QuestionToast } from "./hud/QuestionToast";
 import { CreateAgentModal } from "./hud/CreateAgentModal";
 import { SettingsModal } from "./hud/SettingsModal";
+import { SessionsModal } from "./hud/sessions";
 import { ProjectsPanel } from "./hub/HubView";
 import { CloseIcon } from "./hud/ui";
 
-type Modal = "create" | "settings" | undefined;
+type Modal = "create" | "settings" | "sessions" | undefined;
 type Tab = "office" | "tasks" | "chat";
 
 function ErrorToasts() {
@@ -84,7 +85,7 @@ export function App() {
     <div className="app" data-tab={tab}>
       <Office onCreate={() => setModal("create")} />
       <div className="hud">
-        <TopBar onSettings={() => setModal("settings")} onCreate={() => setModal("create")} />
+        <TopBar onSettings={() => setModal("settings")} onCreate={() => setModal("create")} onSessions={() => setModal("sessions")} />
         <div className="hud-left">
           {hub && <ProjectsPanel />}
           <TaskBoard />
@@ -118,6 +119,7 @@ export function App() {
       <ErrorToasts />
       {modal === "create" && <CreateAgentModal onClose={() => setModal(undefined)} />}
       {modal === "settings" && <SettingsModal onClose={() => setModal(undefined)} />}
+      {modal === "sessions" && <SessionsModal onClose={() => setModal(undefined)} />}
     </div>
   );
 }

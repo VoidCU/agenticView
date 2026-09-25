@@ -60,6 +60,9 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
     session.onWorkersChanged = () => void world.emitProviders().catch(() => undefined);
     app.route("/", workerRoutes(session, toolRegistry));
   }
+  // Sessions go offline by time alone; re-check now and then so the office sees it.
+  const pulse = session instanceof SessionRuntime ? setInterval(() => session.pulse(), 15_000) : undefined;
+  pulse?.unref();
   app.route("/", apiRoutes(world));
   if (opts.staticDir) app.route("/", staticRoutes(opts.staticDir));
 
@@ -81,6 +84,7 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
     orchestrator: world.orchestrator,
     bus,
     close: async () => {
+      if (pulse) clearInterval(pulse);
       await ws.close();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     },

@@ -18,9 +18,12 @@ function Mark() {
 interface Props {
   onSettings: () => void;
   onCreate: () => void;
+  onSessions?: () => void;
 }
 
-export function TopBar({ onSettings, onCreate }: Props) {
+export function TopBar({ onSettings, onCreate, onSessions }: Props) {
+  const sessions = useStore((s) => s.sessions);
+  const online = sessions.filter((s) => s.online).length;
   const world = useStore((s) => s.world);
   const providers = useStore((s) => s.providers);
   const connected = useStore((s) => s.connected);
@@ -51,6 +54,11 @@ export function TopBar({ onSettings, onCreate }: Props) {
             Hub
           </span>
         </span>
+        {onSessions && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onSessions} title="Claude Code sessions serving this office" data-testid="sessions-button">
+            Sessions{sessions.length ? ` ${online}/${sessions.length}` : ""}
+          </button>
+        )}
         <button type="button" className="btn btn-primary btn-sm" onClick={onCreate}>
           <PlusIcon />
           New agent

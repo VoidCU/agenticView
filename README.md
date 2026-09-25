@@ -131,7 +131,7 @@ The settings panel in the office shows each provider's status and the reason whe
 
 With the default provider on **Automatic**, agents without their own provider run on the first available provider in the order claude, claude-session, codex, gemini. The settings panel shows the current choice, e.g. *Automatic (Codex)*.
 
-Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; Gemini offers its model aliases and has no effort control. A *Claude Code session* worker keeps its own model and treats the effort as a hint for how thorough to be. *Custom…* accepts any model id.
+Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; Gemini offers its model aliases and has no effort control. A *Claude Code session* worker keeps its own model (the office shows it and hints at `/model` when it differs from the one picked, see below) and treats the effort as a hint for how thorough to be. *Custom…* accepts any model id.
 
 Only Claude supports interactive permission prompts. For Codex and Gemini, the `ask` mode maps to the most restrictive non-interactive setting each CLI offers, and the office says so:
 
@@ -144,6 +144,17 @@ Only Claude supports interactive permission prompts. For Codex and Gemini, the `
 Gemini reads MCP servers and tool exclusions from settings files, so while a Gemini worker runs, AgenticView temporarily adds an `agenticview-<run>` server entry and a `tools.exclude` list (for tools that agent may not use) to `<project>/.gemini/settings.json`, and restores the file when the last Gemini run in that project finishes. Concurrent runs each get their own entry; exclusions are the union of all running agents. If the server ever dies mid-run, the next launch strips the leftovers.
 
 An agent whose tools disallow both editing and shell (the Manager, for example) runs Codex in a `read-only` sandbox and Gemini with the write, shell and web tools excluded, regardless of its permission mode.
+
+## Claude Code sessions as workers
+
+The *Claude Code session* provider uses sessions you start yourself; AgenticView never launches `claude` or the Agent SDK for it. Run `/agenticview:agenticview-work` (or `/agenticview-work`) in a Claude Code session for the project, optionally with an agent name: `/agenticview:agenticview-work Nova`.
+
+- **Which session serves which agent.** Each session identifies itself with its Claude Code session id and reports the model it runs on. A session takes tasks of agents bound to it first. A task of an agent with no session goes to any free session, and that session becomes the agent's session from then on. Naming an agent in the command binds it to that session. The office shows the bound session, its online state and its model in the chat header and on the robot's name tag.
+- **Several sessions.** Open more sessions for more parallel workers: one task per session at a time. Give each agent its own session to keep their contexts apart.
+- **Persistence.** Sessions (`.agenticview/worker-sessions.json`, not committed) and bindings (on each agent) survive closing the office and the session. When you resume the session (`claude --resume <id>`, or **Open session** in the office) and run the command again, it picks up its agents' tasks. While an agent's session is offline its tasks wait, and the chat shows *Waiting for session …* with **Open session**, **Use any session**, or a pick of another session.
+- **Managing sessions in the office.** **Sessions** in the top bar lists every known session (online dot, model, agents it serves, current task, last seen) with Rename, Forget and Open session, plus **New session**, which opens a new Claude Code tab in VS Code with the command typed in. Press Enter in that tab to connect it: the prompt is never sent automatically. The agent form has a **Session** picker (Any free session, a known session, or Open a new session…), and creating a Claude Code session agent offers to open a session for it. The links use the Claude Code VS Code extension (`vscode://anthropic.claude-code/open`); without it the office shows the command to run in a terminal instead.
+- **Models.** A session runs on the model it was started with; only you can switch it, with `/model` in that session. The model picked for the agent in the office is a request: when the session reports a different one, the office shows *Session X is on Y; run /model Z in that session to switch*, and the session says so in its first report on each task.
+- **Managers on a session.** A Manager's `await_tasks` over a session returns about every 4 minutes with the tasks still running, and the session calls it again, so long waits are never cut off by a timeout. A Manager cannot wait on a worker bound to the same session that runs the Manager (it would wait forever): `assign_task` and `await_tasks` refuse with a message, and the office shows it. Open another session for that worker.
 
 ## Scopes and where data lives
 

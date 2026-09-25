@@ -4,6 +4,7 @@ import { type Task } from "./task.js";
 import { EffortSchema } from "./models.js";
 import { ProjectSettingsSchema, KnownProjectSchema, type ProjectSettings } from "./settings.js";
 import type { RunEvent } from "./runtime.js";
+import { AgentSessionSchema, type WorkerSessionInfo } from "./session.js";
 
 export const ProviderStatusSchema = z.object({
   provider: ProviderSchema,
@@ -32,6 +33,7 @@ export const CreateAgentPayloadSchema = z.object({
   tools: ToolAllowanceSchema.optional(),
   permissionMode: PermissionModeSchema.optional(),
   scope: ScopeSchema.optional(),
+  session: AgentSessionSchema.nullable().optional(),
   appearance: AgentSchema.shape.appearance.optional(),
 });
 export type CreateAgentPayload = z.infer<typeof CreateAgentPayloadSchema>;
@@ -61,6 +63,8 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("question.respond"), id: z.string(), answer: z.string() }),
   z.object({ type: z.literal("settings.update"), settings: ProjectSettingsSchema.partial() }),
   z.object({ type: z.literal("project.open"), path: z.string() }),
+  z.object({ type: z.literal("session.rename"), id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) }),
+  z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
@@ -90,6 +94,8 @@ export interface Snapshot {
   settings: ProjectSettings;
   permissions: PendingPermissionInfo[];
   questions: PendingQuestionInfo[];
+  /** Claude Code sessions known to this office (claude-session workers). */
+  sessions?: WorkerSessionInfo[];
 }
 
 export type MirrorEvent = { kind: string; text: string; ts: string };
@@ -107,4 +113,5 @@ export type ServerMessage =
   | { type: "mirror.event"; event: MirrorEvent }
   | { type: "error"; message: string; ref?: string }
   | { type: "opened"; url: string }
-  | { type: "providers.updated"; providers: ProviderStatus[]; autoProvider: Provider | null };
+  | { type: "providers.updated"; providers: ProviderStatus[]; autoProvider: Provider | null }
+  | { type: "sessions.updated"; sessions: WorkerSessionInfo[] };

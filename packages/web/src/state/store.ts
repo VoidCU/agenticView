@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Agent, ClientMessage, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Task, WorldInfo } from "@agenticview/shared";
+import type { Agent, ClientMessage, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
 export type Bubble = { text: string; until: number };
@@ -28,6 +28,8 @@ export interface Store {
   /** What "Automatic" resolves to on the server right now. */
   autoProvider: Provider | null;
   settings?: ProjectSettings;
+  /** Claude Code sessions known to the office (claude-session workers). */
+  sessions: WorkerSessionInfo[];
   feed: Record<string, FeedItem[]>;
   bubbles: Record<string, Bubble>;
   beams: Beam[];
@@ -92,6 +94,7 @@ const initial = () => ({
   providers: [] as ProviderStatus[],
   autoProvider: null as Provider | null,
   settings: undefined as ProjectSettings | undefined,
+  sessions: [] as WorkerSessionInfo[],
   feed: {} as Record<string, FeedItem[]>,
   bubbles: {} as Record<string, Bubble>,
   beams: [] as Beam[],
@@ -123,6 +126,7 @@ export const useStore = create<Store>()((set, get) => ({
           providers: msg.providers,
           autoProvider: msg.autoProvider ?? null,
           settings: msg.settings,
+          sessions: msg.sessions ?? [],
           // The server is the source of truth for prompts still waiting on the user (reload / reconnect).
           permissions: (msg.permissions ?? []).map((p) => ({ id: p.id, agentId: p.agentId, taskId: p.taskId, tool: p.tool, input: p.input })),
           questions: (msg.questions ?? []).map((q) => ({ id: q.id, agentId: q.agentId, taskId: q.taskId, question: q.question })),
@@ -131,6 +135,9 @@ export const useStore = create<Store>()((set, get) => ({
       }
       case "providers.updated":
         set({ providers: msg.providers, autoProvider: msg.autoProvider });
+        return;
+      case "sessions.updated":
+        set({ sessions: msg.sessions });
         return;
       case "agent.updated":
         set((s) => ({ agents: { ...s.agents, [msg.agent.id]: msg.agent } }));

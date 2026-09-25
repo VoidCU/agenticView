@@ -77,11 +77,12 @@ describe("SessionRuntime", () => {
     expect(await done).toMatchObject({ stopReason: "error", error: "could not" });
   });
 
-  it("serves runs in FIFO order, one per claim", async () => {
+  it("serves runs of unbound agents in FIFO order, one per claim", async () => {
     const rt = new SessionRuntime();
     const sig = new AbortController().signal;
+    const other = defaultAgent({ name: "Orion", role: "worker", scope: "project", specialty: "" });
     void rt.run(req("a"), () => undefined, sig);
-    void rt.run(req("b"), () => undefined, sig);
+    void rt.run(req("b", { agent: other }), () => undefined, sig);
     expect((await rt.claim("w1", 0))?.runId).toBe("a");
     expect((await rt.claim("w2", 0))?.runId).toBe("b");
     expect(await rt.claim("w3", 0)).toBeNull();

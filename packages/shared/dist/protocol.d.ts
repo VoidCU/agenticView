@@ -3,6 +3,7 @@ import { type Agent, type Provider } from "./agent.js";
 import { type Task } from "./task.js";
 import { type ProjectSettings } from "./settings.js";
 import type { RunEvent } from "./runtime.js";
+import { type WorkerSessionInfo } from "./session.js";
 export declare const ProviderStatusSchema: z.ZodObject<{
     provider: z.ZodEnum<{
         claude: "claude";
@@ -57,14 +58,18 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
         screenshot: z.ZodBoolean;
     }, z.core.$strip>>;
     permissionMode: z.ZodOptional<z.ZodEnum<{
-        auto: "auto";
         ask: "ask";
         "auto-edit": "auto-edit";
+        auto: "auto";
     }>>;
     scope: z.ZodOptional<z.ZodEnum<{
         project: "project";
         global: "global";
     }>>;
+    session: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>;
     appearance: z.ZodOptional<z.ZodObject<{
         color: z.ZodString;
         accent: z.ZodString;
@@ -84,9 +89,9 @@ export declare const AgentPatchSchema: z.ZodObject<{
         screenshot: z.ZodBoolean;
     }, z.core.$strip>>;
     permissionMode: z.ZodOptional<z.ZodEnum<{
-        auto: "auto";
         ask: "ask";
         "auto-edit": "auto-edit";
+        auto: "auto";
     }>>;
     appearance: z.ZodOptional<z.ZodObject<{
         color: z.ZodString;
@@ -119,6 +124,10 @@ export declare const AgentPatchSchema: z.ZodObject<{
         space: z.ZodString;
         seat: z.ZodNumber;
     }, z.core.$strip>>>;
+    session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>>;
     description: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -161,14 +170,18 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             screenshot: z.ZodBoolean;
         }, z.core.$strip>>;
         permissionMode: z.ZodOptional<z.ZodEnum<{
-            auto: "auto";
             ask: "ask";
             "auto-edit": "auto-edit";
+            auto: "auto";
         }>>;
         scope: z.ZodOptional<z.ZodEnum<{
             project: "project";
             global: "global";
         }>>;
+        session: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>;
         appearance: z.ZodOptional<z.ZodObject<{
             color: z.ZodString;
             accent: z.ZodString;
@@ -190,9 +203,9 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             screenshot: z.ZodBoolean;
         }, z.core.$strip>>;
         permissionMode: z.ZodOptional<z.ZodEnum<{
-            auto: "auto";
             ask: "ask";
             "auto-edit": "auto-edit";
+            auto: "auto";
         }>>;
         appearance: z.ZodOptional<z.ZodObject<{
             color: z.ZodString;
@@ -225,6 +238,10 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             space: z.ZodString;
             seat: z.ZodNumber;
         }, z.core.$strip>>>;
+        session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>>;
         description: z.ZodOptional<z.ZodString>;
         systemPrompt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -260,6 +277,13 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"project.open">;
     path: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"session.rename">;
+    id: z.ZodString;
+    name: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"session.forget">;
+    id: z.ZodString;
 }, z.core.$strip>], "type">;
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export interface PendingPermissionInfo {
@@ -286,6 +310,8 @@ export interface Snapshot {
     settings: ProjectSettings;
     permissions: PendingPermissionInfo[];
     questions: PendingQuestionInfo[];
+    /** Claude Code sessions known to this office (claude-session workers). */
+    sessions?: WorkerSessionInfo[];
 }
 export type MirrorEvent = {
     kind: string;
@@ -341,4 +367,7 @@ export type ServerMessage = ({
     type: "providers.updated";
     providers: ProviderStatus[];
     autoProvider: Provider | null;
+} | {
+    type: "sessions.updated";
+    sessions: WorkerSessionInfo[];
 };
