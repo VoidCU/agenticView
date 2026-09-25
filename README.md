@@ -141,17 +141,17 @@ Only Claude supports interactive permission prompts. For Codex, Antigravity and 
 
 | Agent permission mode | Claude | Codex | Antigravity | Gemini |
 |---|---|---|---|---|
-| `ask` | prompts you in the office | `read-only` sandbox | default mode (headless: edits workspace files, shell commands are rejected) | `default` approval mode (headless: unapproved tools are rejected) |
-| `auto-edit` | accept edits | `workspace-write` sandbox (`danger-full-access` on Windows, where Codex's sandbox cannot write files) | `--mode accept-edits` (shell commands are rejected) | `auto_edit` |
+| `ask` | prompts you in the office | `read-only` sandbox | read-only: file-edit and shell tools blocked by deny hooks | `default` approval mode (headless: unapproved tools are rejected) |
+| `auto-edit` | accept edits | `workspace-write` sandbox (`danger-full-access` on Windows, where Codex's sandbox cannot write files) | edits allowed, shell tools blocked (`--mode accept-edits` plus deny hooks) | `auto_edit` |
 | `auto` | bypass permissions | `danger-full-access` | `--dangerously-skip-permissions` | `yolo` |
 
 Gemini reads MCP servers and tool exclusions from settings files, so while a Gemini worker runs, AgenticView temporarily adds an `agenticview-<run>` server entry and a `tools.exclude` list (for tools that agent may not use) to `<project>/.gemini/settings.json`, and restores the file when the last Gemini run in that project finishes. Concurrent runs each get their own entry; exclusions are the union of all running agents. If the server ever dies mid-run, the next launch strips the leftovers.
 
-Antigravity only has a global MCP config (`~/.gemini/config/mcp_config.json`), which AgenticView never edits. Instead, while an Antigravity worker that has office tools (delegate, report, ...) runs, AgenticView writes a workspace plugin at `<project>/.agents/plugins/agenticview-<run>/` (a `plugin.json` plus an `mcp_config.json` for the bridge server) and deletes it, along with agy's schema cache for it under `~/.gemini/antigravity-cli/mcp/`, when the run ends. It also removes `.agents/plugins` and `.agents` again if the run created them. Stale plugins from a crashed server are removed on the next launch. Antigravity has no switch to hide individual tools, so disallowed tools are stated in the prompt; `auto` falls back to `--mode accept-edits` when the agent may not use the shell.
+Antigravity only has a global MCP config (`~/.gemini/config/mcp_config.json`), which AgenticView never edits. Instead, while an Antigravity agent runs with office tools (delegate, report, ...) or with tools it may not use, AgenticView writes a workspace plugin at `<project>/.agents/plugins/agenticview-<run>/`: `mcp_config.json` for the bridge server, and `hooks.json` with `PreToolUse` hooks that deny the blocked tools (file edits, shell, web/browser). It deletes the plugin, along with agy's schema cache for it under `~/.gemini/antigravity-cli/mcp/`, when the run ends, and removes `.agents/plugins` and `.agents` again if the run created them. Stale plugins from a crashed server are removed on the next launch. Headless agy rejects MCP tool calls unless it runs with `--dangerously-skip-permissions` (hooks can deny tools but cannot approve them), so runs with office tools use that flag and rely on the deny hooks for the agent's limits.
 
 **Gemini vs Antigravity.** Both are Google agents but they sign in differently: the Gemini CLI needs a Gemini API key (`GEMINI_API_KEY`) or a Google account with a Google Cloud project (`GOOGLE_CLOUD_PROJECT`), while the Antigravity CLI uses your Antigravity sign-in and needs neither.
 
-An agent whose tools disallow both editing and shell (the Manager, for example) runs Codex in a `read-only` sandbox, Antigravity in `--mode plan` and Gemini with the write, shell and web tools excluded, regardless of its permission mode.
+An agent whose tools disallow both editing and shell (the Manager, for example) runs Codex in a `read-only` sandbox, Antigravity with the edit and shell tools denied by hooks, and Gemini with the write, shell and web tools excluded, regardless of its permission mode.
 
 ## Claude Code sessions as workers
 
@@ -212,7 +212,7 @@ Run `/agenticview-work` in a Claude Code session opened in the same project. If 
 
 ### When will agents ask for approval?
 
-Set tool allowances and the permission mode in the agent form. Claude API agents can show **Allow**/**Deny** prompts in the office; `auto-edit` accepts edits and `auto` bypasses permission prompts. Codex, Antigravity and Gemini do not support those interactive office prompts: `ask` uses Codex's read-only sandbox, Antigravity's default headless mode (edits allowed, commands rejected) or Gemini's restrictive headless mode. Claude Code session workers use their session's own permission prompts; the office setting does not change them. Check the [permission mapping](#providers-and-credentials) before choosing a mode, especially on Windows, where Codex `auto-edit` runs unsandboxed.
+Set tool allowances and the permission mode in the agent form. Claude API agents can show **Allow**/**Deny** prompts in the office; `auto-edit` accepts edits and `auto` bypasses permission prompts. Codex, Antigravity and Gemini do not support those interactive office prompts: `ask` uses Codex's read-only sandbox, a read-only Antigravity run (edit and shell tools blocked) or Gemini's restrictive headless mode. Claude Code session workers use their session's own permission prompts; the office setting does not change them. Check the [permission mapping](#providers-and-credentials) before choosing a mode, especially on Windows, where Codex `auto-edit` runs unsandboxed.
 
 ### Why will the office not open, or why is a provider unavailable?
 

@@ -13,8 +13,8 @@ describe("modeHint", () => {
     expect(modeHint("gemini", "ask")).toMatch(/default|reject/i);
     expect(modeHint("gemini", "auto-edit")).toMatch(/edits/i);
     expect(modeHint("gemini", "auto")).toMatch(/yolo|everything/i);
-    expect(modeHint("antigravity", "ask")).toMatch(/cannot prompt/i);
-    expect(modeHint("antigravity", "auto-edit")).toMatch(/accept-edits/);
-    expect(modeHint("antigravity", "auto")).toMatch(/skip-permissions/);
+    expect(modeHint("antigravity", "ask")).toMatch(/read-only/i);
+    expect(modeHint("antigravity", "auto-edit")).toMatch(/shell commands are blocked/i);
+    expect(modeHint("antigravity", "auto")).toMatch(/never asks/i);
   });
 });

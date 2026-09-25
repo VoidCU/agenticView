@@ -10,13 +10,22 @@ import { which as defaultWhich, type Which } from "./which.js";
 /**
  * Google Antigravity CLI (`agy`) runtime.
  *
- * Runs `agy -p <prompt> --output-format stream-json` headless. The CLI uses the user's Antigravity
- * sign-in (no API key). Bridge tools (delegate, report, ...) reach agy as a *workspace plugin*:
- * agy loads every `<cwd>/.agents/plugins/<name>/` that holds a `plugin.json`, and starts the MCP
- * servers in that plugin's `mcp_config.json`. Each run writes its own `agenticview-<runId>` plugin
- * and removes it afterwards, so the user's global `~/.gemini/config/mcp_config.json` is never
- * touched. agy caches tool schemas under `~/.gemini/antigravity-cli/mcp/<plugin>_<server>/`; that
- * cache directory is removed with the plugin.
+ * Runs `agy -p <prompt> --output-format stream-json` headless on the user's Antigravity sign-in
+ * (no API key). Everything below was verified against agy 1.2.11.
+ *
+ * Per-run workspace plugin. agy only has a *global* MCP config (~/.gemini/config/mcp_config.json),
+ * but it also loads every `<cwd>/.agents/plugins/<name>/` that holds a `plugin.json`, starting the
+ * MCP servers in its `mcp_config.json` and the hooks in its `hooks.json`. Each run that needs it
+ * writes `agenticview-<runId>` there and deletes it afterwards (plus agy's schema cache for the
+ * server under ~/.gemini/antigravity-cli/mcp/), so the global config is never touched.
+ *
+ * Permissions. Headless agy denies anything that would need approval: default mode and
+ * `--mode accept-edits` allow workspace edits but deny shell commands *and MCP tool calls*; hooks
+ * returning "allow" cannot lift that. Only `--dangerously-skip-permissions` lets bridge tools run.
+ * PreToolUse hooks returning "deny" *are* honoured in every mode, and a hook that fails blocks the
+ * tool. So a run with bridge tools uses skip-permissions and enforces the agent's limits with
+ * deny hooks; a run without bridge tools uses the native mode (default / accept-edits / skip) and
+ * the same deny hooks on top.
  */
 
 export interface AntigravityRuntimeOptions {
@@ -56,20 +65,59 @@ export interface AgyArgsInput {
   sessionId?: string;
   permissionMode: PermissionMode;
   tools: ToolAllowance;
+  /** Whether the run exposes bridge tools over MCP (forces skip-permissions, see above). */
+  bridge?: boolean;
 }
 
+export const AGY_EDIT_TOOLS = ["write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"] as const;
+export const AGY_SHELL_TOOLS = ["run_command", "send_command_input", "notebook_execution"] as const;
+export const AGY_WEB_TOOLS = [
+  "search_web",
+  "read_url_content",
+  "open_browser_url",
+  "read_browser_page",
+  "list_browser_pages",
+  "browser_subagent",
+  "browser_click_element",
+  "browser_drag_pixel_to_pixel",
+  "browser_get_dom",
+  "browser_get_network_request",
+  "browser_input",
+  "browser_list_network_requests",
+  "browser_mouse_down",
+  "browser_mouse_up",
+  "browser_move_mouse",
+  "browser_press_key",
+  "browser_refresh_page",
+  "browser_resize_window",
+  "browser_scroll",
+  "browser_scroll_dom",
+  "browser_select_option",
+  "capture_browser_console_logs",
+  "capture_browser_screenshot",
+  "click_browser_pixel",
+  "execute_browser_javascript",
+] as const;
+
 /**
- * Permission handling (verified against agy 1.2.11 in headless `-p` mode):
- * - default mode auto-approves file edits inside the workspace and denies shell commands;
- * - `--mode accept-edits` behaves the same headless (edits yes, commands denied);
- * - `--mode plan` makes the agent plan first and denies commands (it can still write files when told to);
- * - `--dangerously-skip-permissions` approves everything.
- * So: ask -> default, auto-edit -> accept-edits, auto -> skip permissions (unless the agent may not use
- * the shell, then accept-edits), and read-only agents (no edit, no shell) -> plan.
+ * What an agent may do on agy: `ask` cannot prompt headless, so like Codex it is read-only;
+ * `auto-edit` edits without asking but runs no commands; `auto` does everything its allowances permit.
  */
-export function modeArgs(mode: PermissionMode, tools: ToolAllowance): string[] {
-  if (!tools.edit && !tools.shell) return ["--mode", "plan"];
-  if (mode === "auto") return tools.shell ? ["--dangerously-skip-permissions"] : ["--mode", "accept-edits"];
+export function effectiveAllowance(mode: PermissionMode, tools: ToolAllowance): { edit: boolean; shell: boolean; web: boolean } {
+  if (mode === "ask") return { edit: false, shell: false, web: tools.web };
+  if (mode === "auto-edit") return { edit: tools.edit, shell: false, web: tools.web };
+  return { edit: tools.edit, shell: tools.shell, web: tools.web };
+}
+
+/** agy tool names a run must block with deny hooks. */
+export function deniedTools(mode: PermissionMode, tools: ToolAllowance): string[] {
+  const a = effectiveAllowance(mode, tools);
+  return [...(a.edit ? [] : AGY_EDIT_TOOLS), ...(a.shell ? [] : AGY_SHELL_TOOLS), ...(a.web ? [] : AGY_WEB_TOOLS)];
+}
+
+/** Permission flags: skip-permissions when bridge tools must work or the mode is `auto`, else agy's native mode. */
+export function modeArgs(mode: PermissionMode, bridge = false): string[] {
+  if (bridge || mode === "auto") return ["--dangerously-skip-permissions"];
   if (mode === "auto-edit") return ["--mode", "accept-edits"];
   return [];
 }
@@ -79,18 +127,20 @@ export function buildAgyArgs(input: AgyArgsInput): string[] {
   if (input.model) args.push("--model", input.model);
   if (input.effort && AGY_EFFORTS.has(input.effort)) args.push("--effort", input.effort);
   if (input.sessionId) args.push("--conversation", input.sessionId);
-  args.push(...modeArgs(input.permissionMode, input.tools));
+  args.push(...modeArgs(input.permissionMode, input.bridge));
   return args;
 }
 
-/** Plain-language limits for allowances agy has no flag for; appended to the prompt. */
-export function allowanceNotes(tools: ToolAllowance): string[] {
+/** Tells the model up front which tool groups are blocked, so it does not waste turns on them. */
+export function allowanceNotes(mode: PermissionMode, tools: ToolAllowance): string[] {
+  const a = effectiveAllowance(mode, tools);
   const out: string[] = [];
-  if (!tools.edit) out.push("Do not create, edit or delete files.");
-  if (!tools.shell) out.push("Do not run shell commands.");
-  if (!tools.web) out.push("Do not search the web or fetch URLs.");
+  if (!a.edit) out.push("You may not create, edit or delete files: file-writing tools are blocked.");
+  if (!a.shell) out.push("You may not run shell commands: command tools are blocked.");
+  if (!a.web) out.push("You may not search the web, fetch URLs or use the browser: those tools are blocked.");
   return out;
 }
+
 
 /* ------------------------------------------------------------------------------------------ */
 /* Event mapping                                                                               */
@@ -249,20 +299,51 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+export interface RunPluginSpec {
+  /** Bridge MCP server; omitted when the run has no bridge tools. */
+  server?: { command: string; args: string[]; env: Record<string, string> };
+  /** agy tool names to block with PreToolUse deny hooks. */
+  deny: readonly string[];
+}
+
+const DENY_JSON = JSON.stringify({ decision: "deny", reason: "AgenticView: this agent is not allowed to use this tool." });
+
 /**
- * Write `<cwd>/.agents/plugins/agenticview-<runId>/` (plugin.json + mcp_config.json). Returns a
- * function that removes it again, plus `.agents/plugins` and `.agents` when this run created them
- * and they are empty, plus agy's tool-schema cache for the server.
+ * The shell command agy runs for a deny hook. agy runs hook commands through `cmd /c` on Windows and
+ * escapes any `"` in them, which breaks both quoted paths and inline JSON; so on Windows the JSON
+ * lives in `deny.cmd` and the command is quote-free (`cd /d` takes paths with spaces unquoted, and
+ * the `.\` prefix is needed because agy's environment stops cmd searching the current directory).
+ * If the command ever fails, agy blocks the tool anyway.
  */
-export async function installBridgePlugin(cwd: string, runId: string, server: { command: string; args: string[]; env: Record<string, string> }, home: string = homedir()): Promise<() => Promise<void>> {
+export function denyHookCommand(dir: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return `cd /d ${dir} && .\\deny.cmd`;
+  return `printf '%s\\n' '${DENY_JSON}'`;
+}
+
+export function hooksConfig(dir: string, deny: readonly string[], platform: NodeJS.Platform = process.platform): Record<string, unknown> {
+  const command = denyHookCommand(dir, platform);
+  return { "agenticview-guard": { PreToolUse: deny.map((matcher) => ({ matcher, hooks: [{ command }] })) } };
+}
+
+/**
+ * Write `<cwd>/.agents/plugins/agenticview-<runId>/` (plugin.json, plus mcp_config.json for the
+ * bridge and hooks.json + deny.cmd for blocked tools). Returns a function that removes it again,
+ * plus `.agents/plugins` and `.agents` when this run created them and they are empty, plus agy's
+ * tool-schema cache for the server.
+ */
+export async function installRunPlugin(cwd: string, runId: string, spec: RunPluginSpec, home: string = homedir(), platform: NodeJS.Platform = process.platform): Promise<() => Promise<void>> {
   const agentsDir = join(cwd, ".agents");
   const pluginsDir = join(agentsDir, "plugins");
   const dir = join(pluginsDir, pluginName(runId));
   const createdAgents = !(await exists(agentsDir));
   const createdPlugins = !(await exists(pluginsDir));
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "plugin.json"), JSON.stringify({ name: pluginName(runId), description: "AgenticView bridge tools for one run (removed when the run ends).", [PLUGIN_MARKER]: true }, null, 2), "utf8");
-  await writeFile(join(dir, "mcp_config.json"), JSON.stringify({ mcpServers: { [SERVER_NAME]: server } }, null, 2), "utf8");
+  await writeFile(join(dir, "plugin.json"), JSON.stringify({ name: pluginName(runId), description: "AgenticView tools and limits for one run (removed when the run ends).", [PLUGIN_MARKER]: true }, null, 2), "utf8");
+  if (spec.server) await writeFile(join(dir, "mcp_config.json"), JSON.stringify({ mcpServers: { [SERVER_NAME]: spec.server } }, null, 2), "utf8");
+  if (spec.deny.length > 0) {
+    if (platform === "win32") await writeFile(join(dir, "deny.cmd"), `@echo ${DENY_JSON}\r\n`, "utf8");
+    await writeFile(join(dir, "hooks.json"), JSON.stringify(hooksConfig(dir, spec.deny, platform), null, 2), "utf8");
+  }
   return async () => {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     if (createdPlugins) await rmdir(pluginsDir).catch(() => undefined);
@@ -410,21 +491,20 @@ export class AntigravityRuntime implements Runtime {
       if (child) killTree(child, this.platform, this.spawn);
     };
     try {
-      if (useBridge) {
-        restore = await installBridgePlugin(
-          req.cwd,
-          req.runId,
-          {
-            command: process.execPath,
-            args: [this.opts.bridgeEntry],
-            env: { AGENTICVIEW_BRIDGE_URL: this.opts.bridgeUrl(), AGENTICVIEW_RUN_ID: req.runId, AGENTICVIEW_BRIDGE_TOKEN: req.bridgeToken ?? "" },
-          },
-          this.home,
-        );
+      const deny = deniedTools(req.permissionMode, req.tools);
+      if (useBridge || deny.length > 0) {
+        const server = useBridge
+          ? {
+              command: process.execPath,
+              args: [this.opts.bridgeEntry],
+              env: { AGENTICVIEW_BRIDGE_URL: this.opts.bridgeUrl(), AGENTICVIEW_RUN_ID: req.runId, AGENTICVIEW_BRIDGE_TOKEN: req.bridgeToken ?? "" },
+            }
+          : undefined;
+        restore = await installRunPlugin(req.cwd, req.runId, { server, deny }, this.home, this.platform);
       }
       const textParts = req.prompt.filter((p) => p.type === "text").map((p) => (p.type === "text" ? p.text : ""));
       const images = req.prompt.filter((p) => p.type === "image").map((p) => (p.type === "image" ? p.path : ""));
-      const notes = allowanceNotes(req.tools);
+      const notes = allowanceNotes(req.permissionMode, req.tools);
       const bridgeNote = useBridge
         ? `Your AgenticView tools (${req.bridgeTools.map((t) => t.name).join(", ")}) are on the MCP server "${bridgeServerName(req.runId)}". Call them with call_mcp_tool; do not use MCP servers named agenticview-* other than that one.`
         : "";
@@ -442,7 +522,7 @@ export class AntigravityRuntime implements Runtime {
         await writeFile(promptFile, promptText, "utf8");
         promptText = `The full task is in the file ${promptFile}. Read that whole file first with view_file, then follow it exactly.`;
       }
-      const args = buildAgyArgs({ prompt: promptText, model: req.model, effort: req.effort, sessionId: req.sessionId, permissionMode: req.permissionMode, tools: req.tools });
+      const args = buildAgyArgs({ prompt: promptText, model: req.model, effort: req.effort, sessionId: req.sessionId, permissionMode: req.permissionMode, tools: req.tools, bridge: useBridge });
       const env: Record<string, string> = {};
       for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") env[k] = v;
 

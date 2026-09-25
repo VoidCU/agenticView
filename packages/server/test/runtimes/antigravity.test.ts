@@ -12,7 +12,9 @@ import {
   bridgeServerName,
   cleanupAntigravityPlugins,
   flushAgyText,
-  installBridgePlugin,
+  deniedTools,
+  denyHookCommand,
+  installRunPlugin,
   killTree,
   mapAgyLine,
   newAgyMapState,
@@ -99,14 +101,36 @@ describe("buildAgyArgs", () => {
     expect(buildAgyArgs({ ...base, model: "claude-sonnet-4-6", effort: "max", sessionId: "c1" })).toEqual([...buildAgyArgs(base), "--model", "claude-sonnet-4-6", "--effort", "max", "--conversation", "c1"]);
     expect(buildAgyArgs({ ...base, effort: "xhigh" })).not.toContain("--effort");
   });
-  it("maps permission modes", () => {
+  it("maps permission modes to agy's native modes without bridge tools", () => {
+    expect(buildAgyArgs(base)).not.toContain("--mode");
     expect(buildAgyArgs({ ...base, permissionMode: "auto-edit" }).slice(-2)).toEqual(["--mode", "accept-edits"]);
     expect(buildAgyArgs({ ...base, permissionMode: "auto" }).slice(-1)).toEqual(["--dangerously-skip-permissions"]);
-    expect(buildAgyArgs({ ...base, permissionMode: "auto", tools: { ...ALL, shell: false } }).slice(-2)).toEqual(["--mode", "accept-edits"]);
   });
-  it("runs read-only agents in plan mode whatever their permission mode", () => {
-    const ro = { ...ALL, edit: false, shell: false };
-    for (const m of ["ask", "auto-edit", "auto"] as const) expect(buildAgyArgs({ ...base, permissionMode: m, tools: ro }).slice(-2)).toEqual(["--mode", "plan"]);
+  it("skips agy's permission checks when bridge tools must be callable", () => {
+    for (const m of ["ask", "auto-edit", "auto"] as const) expect(buildAgyArgs({ ...base, permissionMode: m, bridge: true }).slice(-1)).toEqual(["--dangerously-skip-permissions"]);
+  });
+});
+
+describe("deniedTools", () => {
+  const has = (list: string[], names: string[]) => names.every((n) => list.includes(n));
+  it("blocks edits and commands for ask (read-only, like Codex)", () => {
+    const d = deniedTools("ask", ALL);
+    expect(has(d, ["write_to_file", "replace_file_content", "run_command"])).toBe(true);
+    expect(d).not.toContain("search_web");
+  });
+  it("blocks commands only for auto-edit, nothing for auto", () => {
+    const d = deniedTools("auto-edit", ALL);
+    expect(d).toContain("run_command");
+    expect(d).not.toContain("write_to_file");
+    expect(deniedTools("auto", ALL)).toEqual([]);
+  });
+  it("follows the agent's tool allowances", () => {
+    const d = deniedTools("auto", { ...ALL, edit: false, shell: false, web: false });
+    expect(has(d, ["write_to_file", "run_command", "search_web", "read_url_content", "open_browser_url"])).toBe(true);
+  });
+  it("builds quote-free deny hook commands on Windows", () => {
+    expect(denyHookCommand("C:\\My Project\\.agents\\plugins\\agenticview-r_1", "win32")).toBe("cd /d C:\\My Project\\.agents\\plugins\\agenticview-r_1 && .\\deny.cmd");
+    expect(denyHookCommand("/p", "linux")).toContain('"decision":"deny"');
   });
 });
 
@@ -123,14 +147,25 @@ const req = (over: Partial<RunRequest> = {}): RunRequest => ({
   ...over,
 });
 
-function fakeSpawn(mode = "ok", seen: { cmd?: string; args?: string[]; plugins?: string[]; config?: string }[] = []) {
+interface Seen {
+  cmd?: string;
+  args?: string[];
+  plugins?: string[];
+  config?: string;
+  hooks?: string;
+  files?: string[];
+}
+
+function fakeSpawn(mode = "ok", seen: Seen[] = []) {
   return ((cmd: string, args: string[], opts: Record<string, unknown>) => {
-    const entry: (typeof seen)[number] = { cmd, args };
+    const entry: Seen = { cmd, args };
     const dir = join(String(opts.cwd ?? cwd), ".agents", "plugins");
     if (existsSync(dir)) {
       entry.plugins = readdirSync(dir);
-      const p = join(dir, entry.plugins[0]!, "mcp_config.json");
-      if (existsSync(p)) entry.config = readFileSync(p, "utf8");
+      const pdir = join(dir, entry.plugins[0]!);
+      entry.files = readdirSync(pdir).sort();
+      if (existsSync(join(pdir, "mcp_config.json"))) entry.config = readFileSync(join(pdir, "mcp_config.json"), "utf8");
+      if (existsSync(join(pdir, "hooks.json"))) entry.hooks = readFileSync(join(pdir, "hooks.json"), "utf8");
     }
     seen.push(entry);
     return nodeSpawn(process.execPath, [fakeAgy, ...args], { ...opts, env: { ...(opts.env as Record<string, string>), FAKE_AGY_MODE: mode } });
@@ -176,32 +211,47 @@ describe("AntigravityRuntime.run", () => {
     expect(res.sessionId).toBe("c-hang");
   });
 
-  it("installs the bridge as a workspace plugin only for the run", async () => {
-    const seen: { args?: string[]; plugins?: string[]; config?: string }[] = [];
+  it("installs the bridge and deny hooks as a workspace plugin only for the run", async () => {
+    const seen: Seen[] = [];
     const tool = { name: "delegate", description: "", schema: {}, handler: async () => "ok" };
     await mkdir(join(home, ".gemini", "antigravity-cli", "mcp", bridgeServerName("r_B")), { recursive: true });
-    const res = await rt(fakeSpawn("ok", seen)).run(req({ runId: "r_B", bridgeTools: [tool] }), () => {}, new AbortController().signal);
+    const res = await rt(fakeSpawn("ok", seen), { platform: "win32" }).run(req({ runId: "r_B", bridgeTools: [tool], permissionMode: "ask" }), () => {}, new AbortController().signal);
     expect(res.stopReason).toBe("done");
     expect(seen[0]!.plugins).toEqual(["agenticview-r_B"]);
+    expect(seen[0]!.files).toEqual(["deny.cmd", "hooks.json", "mcp_config.json", "plugin.json"]);
     const cfg = JSON.parse(seen[0]!.config!);
     expect(cfg.mcpServers.agenticview).toMatchObject({ command: process.execPath, args: ["C:/bridge/stdioBridge.js"], env: { AGENTICVIEW_BRIDGE_URL: "http://127.0.0.1:4242", AGENTICVIEW_RUN_ID: "r_B", AGENTICVIEW_BRIDGE_TOKEN: "t0k" } });
-    expect(seen[0]!.args![1]).toContain('MCP server "agenticview-r_B_agenticview"');
+    const hooks = JSON.parse(seen[0]!.hooks!)["agenticview-guard"].PreToolUse as { matcher: string; hooks: { command: string }[] }[];
+    expect(hooks.map((h) => h.matcher)).toEqual(expect.arrayContaining(["write_to_file", "run_command"]));
+    expect(hooks[0]!.hooks[0]!.command).toMatch(/^cd \/d .*agenticview-r_B && \.\\deny\.cmd$/);
+    const args = seen[0]!.args!;
+    expect(args).toContain("--dangerously-skip-permissions");
+    expect(args[1]).toContain('MCP server "agenticview-r_B_agenticview"');
+    expect(args[1]).toContain("You may not create, edit or delete files");
     await expect(access(join(cwd, ".agents"))).rejects.toThrow();
     await expect(access(join(home, ".gemini", "antigravity-cli", "mcp", bridgeServerName("r_B")))).rejects.toThrow();
   });
 
+  it("writes no plugin when nothing needs blocking and there are no bridge tools", async () => {
+    const seen: Seen[] = [];
+    await rt(fakeSpawn("ok", seen)).run(req({ permissionMode: "auto", tools: ALL }), () => {}, new AbortController().signal);
+    expect(seen[0]!.plugins).toBeUndefined();
+    expect(seen[0]!.args).toContain("--dangerously-skip-permissions");
+  });
+
   it("keeps a user's existing .agents/plugins folder", async () => {
     await mkdir(join(cwd, ".agents", "plugins", "mine"), { recursive: true });
-    const restore = await installBridgePlugin(cwd, "r_1", { command: "node", args: [], env: {} }, home);
+    const restore = await installRunPlugin(cwd, "r_1", { server: { command: "node", args: [], env: {} }, deny: [] }, home);
     expect((await readdir(join(cwd, ".agents", "plugins"))).sort()).toEqual(["agenticview-r_1", "mine"]);
     await restore();
     expect(await readdir(join(cwd, ".agents", "plugins"))).toEqual(["mine"]);
   });
 
-  it("appends notes for allowances agy has no flag for", async () => {
-    const seen: { args?: string[] }[] = [];
+  it("tells the model which tools are blocked", async () => {
+    const seen: Seen[] = [];
     await rt(fakeSpawn("ok", seen)).run(req({ tools: { ...ALL, web: false } }), () => {}, new AbortController().signal);
-    expect(seen[0]!.args![1]).toContain("Do not search the web");
+    expect(seen[0]!.args![1]).toContain("You may not search the web");
+    expect(JSON.parse(seen[0]!.hooks!)["agenticview-guard"].PreToolUse.map((h: { matcher: string }) => h.matcher)).toContain("search_web");
   });
 });
 
