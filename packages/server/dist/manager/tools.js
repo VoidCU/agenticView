@@ -72,7 +72,7 @@ export function managerTools(ctx) {
                 name: z.string().min(1).max(40),
                 specialty: z.string().max(120),
                 description: z.string().max(2000).optional(),
-                provider: ProviderSchema.optional().describe("claude, codex or gemini; omit to use the world default"),
+                provider: ProviderSchema.optional().describe("claude (API key), claude-session (a Claude Code session running /agenticview-work), codex or gemini; omit to use the world default"),
                 model: z.string().optional(),
                 systemPrompt: z.string().max(20000).optional(),
                 tools: ToolAllowanceSchema.optional(),

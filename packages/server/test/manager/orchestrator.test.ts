@@ -315,3 +315,47 @@ describe("Orchestrator", () => {
     await expect(ctx.orch.handleUserMessage({ agentId: m.id, text: "x", projectPath: "C:/nope" })).rejects.toThrow(/not a known project/);
   });
 });
+
+describe("Automatic provider", () => {
+  const status = (provider: Provider, ok: boolean): Runtime => ({
+    provider,
+    check: async () => (ok ? { provider, ok } : { provider, ok, reason: "nope" }),
+    run: async () => ({ text: "", stopReason: "done" }),
+  });
+
+  it("picks the first available provider in order claude, claude-session, codex, gemini", async () => {
+    const runtimes = new Map<Provider, Runtime>([
+      ["claude", status("claude", false)],
+      ["claude-session", status("claude-session", false)],
+      ["codex", status("codex", true)],
+      ["gemini", status("gemini", true)],
+    ]);
+    const ctx = await setup(async function* () {}, { runtimes });
+    const a = await ctx.reg.create({ name: "A", specialty: "" });
+    expect(await ctx.orch.autoProvider()).toBe("codex");
+    expect((await ctx.orch.resolveProviderLive(a)).provider).toBe("codex");
+    expect((await ctx.world.snapshot()).autoProvider).toBe("codex");
+    runtimes.set("claude-session", status("claude-session", true));
+    expect(await ctx.orch.autoProvider()).toBe("claude-session");
+    runtimes.set("claude", status("claude", true));
+    expect(await ctx.orch.autoProvider()).toBe("claude");
+  });
+
+  it("an explicit default overrides Automatic, and no available provider is a clear problem", async () => {
+    const runtimes = new Map<Provider, Runtime>([["claude", status("claude", false)], ["gemini", status("gemini", true)]]);
+    const ctx = await setup(async function* () {}, { runtimes, settings: { defaultProvider: "claude" } });
+    const a = await ctx.reg.create({ name: "A", specialty: "" });
+    expect((await ctx.orch.resolveProviderLive(a)).provider).toBe("claude");
+    expect(await ctx.orch.providerProblem(a)).toMatch(/provider claude unavailable/);
+
+    const none = await setup(async function* () {}, { runtimes: new Map([["claude", status("claude", false)]]), settings: { defaultProvider: null } });
+    const b = await none.reg.create({ name: "B", specialty: "" });
+    expect(await none.orch.providerProblem(b)).toMatch(/no provider available/);
+  });
+
+  it("an agent on claude-session is never refused for lack of a worker (its task waits in the queue)", async () => {
+    const ctx = await setup(async function* () {}, { runtimes: new Map([["claude-session", status("claude-session", false)]]) });
+    const a = await ctx.reg.create({ name: "A", specialty: "", provider: "claude-session" });
+    expect(await ctx.orch.providerProblem(a)).toBeUndefined();
+  });
+});

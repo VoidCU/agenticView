@@ -1,8 +1,18 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { ProviderStatus } from "@agenticview/shared";
+import { PROVIDER_LABELS, type Provider, type ProviderStatus } from "@agenticview/shared";
 
-export const PROVIDER_LABEL: Record<string, string> = { claude: "Claude", codex: "Codex", gemini: "Gemini" };
+export const PROVIDER_LABEL: Record<string, string> = PROVIDER_LABELS;
+
+/** The provider an agent without its own provider runs on: the explicit default, else what Automatic resolved to. */
+export function defaultProviderOf(explicit: Provider | null | undefined, auto: Provider | null | undefined): Provider {
+  return explicit ?? auto ?? "claude";
+}
+
+/** "Automatic (Codex)", or "Automatic (none available)". */
+export function automaticLabel(auto: Provider | null | undefined): string {
+  return `Automatic (${auto ? providerLabel(auto) : "none available"})`;
+}
 
 export function providerLabel(p: string | null | undefined, fallback = "Default"): string {
   return p ? (PROVIDER_LABEL[p] ?? p) : fallback;

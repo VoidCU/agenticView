@@ -11,7 +11,7 @@ export interface ClaudeRuntimeOptions {
     apiKey?: string;
 }
 export declare const CLAUDE_CREDENTIAL_ENV: readonly ["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS"];
-export declare const CLAUDE_MISSING_KEY_REASON = "Set ANTHROPIC_API_KEY (or a cloud provider env). The Agent SDK does not use the Claude Code login.";
+export declare const CLAUDE_MISSING_KEY_REASON = "Claude (API) needs ANTHROPIC_API_KEY (or a cloud provider env); it does not use the Claude Code login. Max/Pro subscribers: use the \"Claude Code session\" provider by running /agenticview-work in Claude Code.";
 export type ClaudePermissionMode = "default" | "acceptEdits" | "bypassPermissions";
 export interface ClaudeOptionSubset {
     /** Which built-in tools exist for this run (availability). */

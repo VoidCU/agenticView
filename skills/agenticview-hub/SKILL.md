@@ -13,3 +13,4 @@ Run this exact command with the Bash tool, then tell the user the URL it prints 
 Notes:
 - If the command reports that the Hub is already running, just share that URL.
 - If `~/.agenticview/plugin-root` is missing, ask the user to restart Claude Code once so the plugin's SessionStart hook can record where the plugin lives. As a fallback, run `node "<plugin folder>/bin/agenticview.mjs" hub`, where the plugin folder is the one `/plugin` lists for agenticview (for a git clone, the clone itself).
+- Hub agents on the "Claude Code session" provider are served by a Claude Code session running `/agenticview-work` when no project office is running for that session's folder.

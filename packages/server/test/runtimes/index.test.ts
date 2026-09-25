@@ -22,7 +22,7 @@ describe("createRuntimes", () => {
   it("registers all three providers and caches check results", async () => {
     let calls = 0;
     const map = await createRuntimes({ bridgeUrl: () => "http://127.0.0.1:1", which: async () => { calls++; return undefined; } });
-    expect([...map.keys()].sort()).toEqual(["claude", "codex", "gemini"]);
+    expect([...map.keys()].sort()).toEqual(["claude", "claude-session", "codex", "gemini"]);
     const codex = map.get("codex")!;
     const a = await codex.check();
     const b = await codex.check();

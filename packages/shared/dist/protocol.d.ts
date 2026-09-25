@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { type Agent } from "./agent.js";
+import { type Agent, type Provider } from "./agent.js";
 import { type Task } from "./task.js";
 import { type ProjectSettings } from "./settings.js";
 import type { RunEvent } from "./runtime.js";
 export declare const ProviderStatusSchema: z.ZodObject<{
     provider: z.ZodEnum<{
         claude: "claude";
+        "claude-session": "claude-session";
         codex: "codex";
         gemini: "gemini";
     }>;
@@ -34,6 +35,7 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
     description: z.ZodOptional<z.ZodString>;
     provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
         claude: "claude";
+        "claude-session": "claude-session";
         codex: "codex";
         gemini: "gemini";
     }>>>;
@@ -91,6 +93,7 @@ export declare const AgentPatchSchema: z.ZodObject<{
     description: z.ZodOptional<z.ZodDefault<z.ZodString>>;
     provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
         claude: "claude";
+        "claude-session": "claude-session";
         codex: "codex";
         gemini: "gemini";
     }>>>;
@@ -114,6 +117,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         description: z.ZodOptional<z.ZodString>;
         provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
             claude: "claude";
+            "claude-session": "claude-session";
             codex: "codex";
             gemini: "gemini";
         }>>>;
@@ -173,6 +177,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         description: z.ZodOptional<z.ZodDefault<z.ZodString>>;
         provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
             claude: "claude";
+            "claude-session": "claude-session";
             codex: "codex";
             gemini: "gemini";
         }>>>;
@@ -201,6 +206,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     settings: z.ZodObject<{
         defaultProvider: z.ZodOptional<z.ZodDefault<z.ZodNullable<z.ZodEnum<{
             claude: "claude";
+            "claude-session": "claude-session";
             codex: "codex";
             gemini: "gemini";
         }>>>>;
@@ -231,6 +237,8 @@ export interface Snapshot {
     /** Tasks on the wire carry an empty `log`; the persisted task keeps the full log. */
     tasks: Task[];
     providers: ProviderStatus[];
+    /** What "Automatic" resolves to right now (first available provider), or null when none is. */
+    autoProvider?: Provider | null;
     settings: ProjectSettings;
     permissions: PendingPermissionInfo[];
     questions: PendingQuestionInfo[];
@@ -285,4 +293,8 @@ export type ServerMessage = ({
 } | {
     type: "opened";
     url: string;
+} | {
+    type: "providers.updated";
+    providers: ProviderStatus[];
+    autoProvider: Provider | null;
 };

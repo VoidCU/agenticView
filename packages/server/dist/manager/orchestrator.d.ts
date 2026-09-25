@@ -5,7 +5,7 @@ import type { BridgeTool, Runtime } from "../runtimes/types.js";
 import type { ToolRegistry } from "../bridge/toolRegistry.js";
 import type { EventBus } from "../events/bus.js";
 export interface ResolvedSettings extends ProjectSettings {
-    globalDefaultProvider: Provider;
+    globalDefaultProvider: Provider | null;
     globalDefaultModel: string | null;
     providerModels: Partial<Record<Provider, string | undefined>>;
 }
@@ -46,10 +46,23 @@ export declare class Orchestrator {
     private pumping;
     constructor(deps: WorldDeps);
     running(): number;
-    resolveProvider(agent: Agent): {
+    /**
+     * Provider and model for an agent. `auto` is what "Automatic" currently resolves to (see
+     * autoProvider()); without it an unset default falls back to Claude.
+     */
+    resolveProvider(agent: Agent, auto?: Provider | null): {
         provider: Provider;
         model?: string;
     };
+    /** True when no explicit provider applies to this agent, so "Automatic" decides. */
+    private isAutomatic;
+    /** "Automatic": the first provider in PROVIDER_ORDER whose check() is ok, or null when none is. */
+    autoProvider(): Promise<Provider | null>;
+    /** resolveProvider(), consulting the live provider checks when the agent is on Automatic. */
+    resolveProviderLive(agent: Agent): Promise<{
+        provider: Provider;
+        model?: string;
+    }>;
     /** Returns a human-readable problem when the agent's provider cannot run, else undefined. */
     providerProblem(agent: Agent): Promise<string | undefined>;
     emitAgent(agent: Agent): void;

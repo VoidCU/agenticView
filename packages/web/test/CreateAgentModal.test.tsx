@@ -22,7 +22,10 @@ describe("CreateAgentModal", () => {
     expect(codex).toBeDisabled();
     expect(codex).toHaveAttribute("title", "codex CLI not installed");
     expect((screen.getByRole("option", { name: "Claude" }) as HTMLOptionElement).disabled).toBe(false);
-    expect(select.options[0]?.textContent).toMatch(/default \(claude\)/i);
+    expect(select.options[0]?.textContent).toMatch(/automatic \(claude\)/i);
+    const session = screen.getByRole("option", { name: /claude code session/i }) as HTMLOptionElement;
+    expect(session.disabled).toBe(false);
+    expect(session.textContent).toMatch(/no worker yet/);
 
     await userEvent.type(screen.getByLabelText(/^name/i), "Nova");
     await userEvent.type(screen.getByLabelText(/specialty/i), "Backend APIs");

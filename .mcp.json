@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agenticview-worker": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/worker-mcp.mjs"]
+    }
+  }
+}

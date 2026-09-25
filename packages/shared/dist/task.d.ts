@@ -49,6 +49,7 @@ export declare const TaskSchema: z.ZodObject<{
     session: z.ZodOptional<z.ZodObject<{
         provider: z.ZodEnum<{
             claude: "claude";
+            "claude-session": "claude-session";
             codex: "codex";
             gemini: "gemini";
         }>;

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { newId } from "./ids.js";
-export const ProviderSchema = z.enum(["claude", "codex", "gemini"]);
+export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "gemini"]);
 export const RoleSchema = z.enum(["manager", "worker"]);
 export const ScopeSchema = z.enum(["project", "global"]);
 export const PermissionModeSchema = z.enum(["ask", "auto-edit", "auto"]);
@@ -67,4 +67,12 @@ export function defaultAgent(init) {
         agent.originId = init.originId;
     return agent;
 }
+/** Automatic provider resolution order: the first provider whose check() is ok wins. */
+export const PROVIDER_ORDER = ["claude", "claude-session", "codex", "gemini"];
+export const PROVIDER_LABELS = {
+    claude: "Claude",
+    "claude-session": "Claude Code session",
+    codex: "Codex",
+    gemini: "Gemini",
+};
 //# sourceMappingURL=agent.js.map

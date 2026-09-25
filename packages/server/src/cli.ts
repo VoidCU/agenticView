@@ -8,8 +8,9 @@
  *   agenticview record-plugin-root <path>
  */
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { instanceFile, liveInstance, type Instance } from "./instances.js";
+import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -29,33 +30,6 @@ Usage:
   agenticview record-plugin-root <path>                          remember where the plugin lives
   agenticview --help
 `;
-
-function globalRoot(): string {
-  return process.env.AGENTICVIEW_HOME ?? join(process.env.USERPROFILE ?? process.env.HOME ?? ".", ".agenticview");
-}
-
-interface Instance {
-  pid: number;
-  url: string;
-  token: string;
-  projectPath: string | null;
-  startedAt: string;
-}
-
-function instanceFile(projectPath: string | null): string {
-  const key = projectPath ? createHash("sha1").update(resolve(projectPath).toLowerCase()).digest("hex").slice(0, 16) : "hub";
-  return join(globalRoot(), "instances", `${key}.json`);
-}
-
-async function liveInstance(projectPath: string | null): Promise<Instance | undefined> {
-  try {
-    const inst = JSON.parse(await readFile(instanceFile(projectPath), "utf8")) as Instance;
-    const res = await fetch(`${inst.url}/healthz`, { signal: AbortSignal.timeout(700) });
-    return res.ok ? inst : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 export function openBrowser(url: string): void {
   try {
@@ -130,8 +104,9 @@ async function demoRuntimes() {
     await new Promise((r) => setTimeout(r, 400));
     yield { type: "text" as const, text: `${req.agent.name} (demo mode): received "${user.slice(0, 120)}". Set ANTHROPIC_API_KEY and start without AGENTICVIEW_FAKE to run real agents.` };
   };
-  return new Map<"claude" | "codex" | "gemini", InstanceType<typeof FakeRuntime>>([
+  return new Map<"claude" | "claude-session" | "codex" | "gemini", InstanceType<typeof FakeRuntime>>([
     ["claude", new FakeRuntime(script as never, "claude")],
+    ["claude-session", new FakeRuntime(script as never, "claude-session")],
     ["codex", new FakeRuntime(script as never, "codex")],
     ["gemini", new FakeRuntime(script as never, "gemini")],
   ]);

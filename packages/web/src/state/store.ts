@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Agent, ClientMessage, ProjectSettings, ProviderStatus, RunEvent, ServerMessage, Task, WorldInfo } from "@agenticview/shared";
+import type { Agent, ClientMessage, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Task, WorldInfo } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
 export type Bubble = { text: string; until: number };
@@ -25,6 +25,8 @@ export interface Store {
   agents: Record<string, Agent>;
   tasks: Record<string, Task>;
   providers: ProviderStatus[];
+  /** What "Automatic" resolves to on the server right now. */
+  autoProvider: Provider | null;
   settings?: ProjectSettings;
   feed: Record<string, FeedItem[]>;
   bubbles: Record<string, Bubble>;
@@ -88,6 +90,7 @@ const initial = () => ({
   agents: {} as Record<string, Agent>,
   tasks: {} as Record<string, Task>,
   providers: [] as ProviderStatus[],
+  autoProvider: null as Provider | null,
   settings: undefined as ProjectSettings | undefined,
   feed: {} as Record<string, FeedItem[]>,
   bubbles: {} as Record<string, Bubble>,
@@ -118,6 +121,7 @@ export const useStore = create<Store>()((set, get) => ({
           agents,
           tasks,
           providers: msg.providers,
+          autoProvider: msg.autoProvider ?? null,
           settings: msg.settings,
           // The server is the source of truth for prompts still waiting on the user (reload / reconnect).
           permissions: (msg.permissions ?? []).map((p) => ({ id: p.id, agentId: p.agentId, taskId: p.taskId, tool: p.tool, input: p.input })),
@@ -125,6 +129,9 @@ export const useStore = create<Store>()((set, get) => ({
         });
         return;
       }
+      case "providers.updated":
+        set({ providers: msg.providers, autoProvider: msg.autoProvider });
+        return;
       case "agent.updated":
         set((s) => ({ agents: { ...s.agents, [msg.agent.id]: msg.agent } }));
         return;

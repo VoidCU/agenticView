@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { z } from "zod";
-import { isTerminal, newId, ProviderSchema, } from "@agenticview/shared";
+import { isTerminal, newId, ProviderSchema, PROVIDER_ORDER, } from "@agenticview/shared";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { buildRosterPreamble } from "./preamble.js";
 import { MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
@@ -22,21 +22,49 @@ export class Orchestrator {
     running() {
         return this.active.size;
     }
-    resolveProvider(agent) {
+    /**
+     * Provider and model for an agent. `auto` is what "Automatic" currently resolves to (see
+     * autoProvider()); without it an unset default falls back to Claude.
+     */
+    resolveProvider(agent, auto) {
         const s = this.deps.settings();
         if (agent.provider) {
             return { provider: agent.provider, model: agent.model ?? s.providerModels[agent.provider] ?? undefined };
         }
-        const provider = s.defaultProvider ?? s.globalDefaultProvider;
+        const provider = s.defaultProvider ?? s.globalDefaultProvider ?? auto ?? "claude";
         const model = agent.model ?? s.defaultModel ?? s.globalDefaultModel ?? s.providerModels[provider] ?? undefined;
         return { provider, model: model ?? undefined };
     }
+    /** True when no explicit provider applies to this agent, so "Automatic" decides. */
+    isAutomatic(agent) {
+        const s = this.deps.settings();
+        return !agent.provider && !s.defaultProvider && !s.globalDefaultProvider;
+    }
+    /** "Automatic": the first provider in PROVIDER_ORDER whose check() is ok, or null when none is. */
+    async autoProvider() {
+        for (const p of PROVIDER_ORDER) {
+            const rt = this.deps.runtimes.get(p);
+            if (rt && (await rt.check()).ok)
+                return p;
+        }
+        return null;
+    }
+    /** resolveProvider(), consulting the live provider checks when the agent is on Automatic. */
+    async resolveProviderLive(agent) {
+        return this.resolveProvider(agent, this.isAutomatic(agent) ? await this.autoProvider() : undefined);
+    }
     /** Returns a human-readable problem when the agent's provider cannot run, else undefined. */
     async providerProblem(agent) {
-        const { provider } = this.resolveProvider(agent);
+        if (this.isAutomatic(agent) && !(await this.autoProvider())) {
+            return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex or gemini CLI";
+        }
+        const { provider } = await this.resolveProviderLive(agent);
         const runtime = this.deps.runtimes.get(provider);
         if (!runtime)
             return `provider ${provider} unavailable: not configured`;
+        // Session runs wait in the queue until a worker connects instead of failing.
+        if (provider === "claude-session")
+            return undefined;
         const status = await runtime.check();
         if (!status.ok)
             return `provider ${provider} unavailable: ${status.reason ?? "unknown reason"}`;
@@ -324,7 +352,7 @@ export class Orchestrator {
                 final = await this.finish(task, "failed", { error: problem });
                 return;
             }
-            const { provider, model } = this.resolveProvider(agent);
+            const { provider, model } = await this.resolveProviderLive(agent);
             const runtime = this.deps.runtimes.get(provider);
             await tasks.transition(task.id, "running");
             const key = this.sessionKey(task, agent);

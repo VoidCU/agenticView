@@ -1,6 +1,7 @@
 import { z } from "zod";
 export declare const ProviderSchema: z.ZodEnum<{
     claude: "claude";
+    "claude-session": "claude-session";
     codex: "codex";
     gemini: "gemini";
 }>;
@@ -60,6 +61,7 @@ export declare const AgentSchema: z.ZodObject<{
     description: z.ZodDefault<z.ZodString>;
     provider: z.ZodNullable<z.ZodEnum<{
         claude: "claude";
+        "claude-session": "claude-session";
         codex: "codex";
         gemini: "gemini";
     }>>;
@@ -106,3 +108,6 @@ export type AgentInit = {
     specialty: string;
 } & Partial<Omit<Agent, "name" | "role" | "scope" | "specialty">>;
 export declare function defaultAgent(init: AgentInit): Agent;
+/** Automatic provider resolution order: the first provider whose check() is ok wins. */
+export declare const PROVIDER_ORDER: readonly Provider[];
+export declare const PROVIDER_LABELS: Record<Provider, string>;

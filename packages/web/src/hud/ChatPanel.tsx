@@ -3,7 +3,7 @@ import type { Agent, RunEvent } from "@agenticview/shared";
 import { useStore, useAgentStatus, type FeedItem } from "../state/store";
 import { uploadImage } from "../net/ws";
 import { AgentMenu } from "./AgentMenu";
-import { ImageIcon, SendIcon, basename, prettyInput, providerLabel, xpProgress } from "./ui";
+import { ImageIcon, SendIcon, basename, defaultProviderOf, prettyInput, providerLabel, xpProgress } from "./ui";
 
 interface Attachment {
   name: string;
@@ -82,7 +82,8 @@ function Header({ agent }: { agent: Agent }) {
   const status = useAgentStatus(agent.id);
   const providers = useStore((s) => s.providers);
   const settings = useStore((s) => s.settings);
-  const provider = agent.provider ?? settings?.defaultProvider ?? "claude";
+  const autoProvider = useStore((s) => s.autoProvider);
+  const provider = agent.provider ?? defaultProviderOf(settings?.defaultProvider, autoProvider);
   const pstat = providers.find((p) => p.provider === provider);
   const { pct, next } = xpProgress(agent.stats.xp, agent.stats.level);
   return (

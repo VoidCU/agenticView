@@ -8,8 +8,9 @@
  *   agenticview record-plugin-root <path>
  */
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { instanceFile, liveInstance } from "./instances.js";
+import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -27,23 +28,6 @@ Usage:
   agenticview record-plugin-root <path>                          remember where the plugin lives
   agenticview --help
 `;
-function globalRoot() {
-    return process.env.AGENTICVIEW_HOME ?? join(process.env.USERPROFILE ?? process.env.HOME ?? ".", ".agenticview");
-}
-function instanceFile(projectPath) {
-    const key = projectPath ? createHash("sha1").update(resolve(projectPath).toLowerCase()).digest("hex").slice(0, 16) : "hub";
-    return join(globalRoot(), "instances", `${key}.json`);
-}
-async function liveInstance(projectPath) {
-    try {
-        const inst = JSON.parse(await readFile(instanceFile(projectPath), "utf8"));
-        const res = await fetch(`${inst.url}/healthz`, { signal: AbortSignal.timeout(700) });
-        return res.ok ? inst : undefined;
-    }
-    catch {
-        return undefined;
-    }
-}
 export function openBrowser(url) {
     try {
         const child = process.platform === "win32"
@@ -120,6 +104,7 @@ async function demoRuntimes() {
     };
     return new Map([
         ["claude", new FakeRuntime(script, "claude")],
+        ["claude-session", new FakeRuntime(script, "claude-session")],
         ["codex", new FakeRuntime(script, "codex")],
         ["gemini", new FakeRuntime(script, "gemini")],
     ]);

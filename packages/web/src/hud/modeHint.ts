@@ -7,6 +7,10 @@ export function modeHint(provider: Provider, mode: PermissionMode): string {
       if (mode === "ask") return "Claude asks you before every edit and command: an Allow/Deny bubble appears over the robot.";
       if (mode === "auto-edit") return "Claude makes file edits without asking; shell and web commands still ask you.";
       return "Claude never asks. Best for trusted, sandboxed work.";
+    case "claude-session":
+      if (mode === "ask") return "Runs in your own Claude Code session (/agenticview-work); that session's permission prompts apply there, not in the office.";
+      if (mode === "auto-edit") return "Runs in your own Claude Code session (/agenticview-work); edits follow that session's permission settings.";
+      return "Runs in your own Claude Code session (/agenticview-work) under its permission settings.";
     case "codex":
       if (mode === "ask") return "Codex cannot prompt: runs in a read-only sandbox (no edits, no commands).";
       if (mode === "auto-edit") return "Codex writes inside the workspace sandbox without asking. On Windows the sandbox cannot write, so it runs with full access.";

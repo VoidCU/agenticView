@@ -1,5 +1,5 @@
 import { basename, join } from "node:path";
-import { GlobalConfigSchema, ProjectSettingsSchema, } from "@agenticview/shared";
+import { GlobalConfigSchema, PROVIDER_ORDER, ProjectSettingsSchema, } from "@agenticview/shared";
 import { AgentRegistry } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { Orchestrator } from "./manager/orchestrator.js";
@@ -79,7 +79,7 @@ export async function createWorld(ref, opts) {
     const orchestrator = new Orchestrator(deps);
     const providerStatuses = async () => {
         const out = [];
-        for (const p of ["claude", "codex", "gemini"]) {
+        for (const p of PROVIDER_ORDER) {
             const rt = opts.runtimes.get(p);
             out.push(rt ? await rt.check() : { provider: p, ok: false, reason: "not configured" });
         }
@@ -96,6 +96,9 @@ export async function createWorld(ref, opts) {
         settings,
         info,
         providerStatuses,
+        emitProviders: async () => {
+            opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
+        },
         updateSettings: async (patch) => {
             projectSettings = ProjectSettingsSchema.parse({ ...projectSettings, ...patch });
             if (ref.kind === "project")
@@ -104,7 +107,7 @@ export async function createWorld(ref, opts) {
                 const cfg = await readGlobalConfig();
                 if (patch.maxConcurrentRuns)
                     cfg.maxConcurrentRuns = patch.maxConcurrentRuns;
-                if (patch.defaultProvider)
+                if (patch.defaultProvider !== undefined)
                     cfg.defaultProvider = patch.defaultProvider;
                 if (patch.defaultModel !== undefined)
                     cfg.defaultModel = patch.defaultModel;
@@ -118,6 +121,7 @@ export async function createWorld(ref, opts) {
             agents: await registry.list(),
             tasks: (await tasks.list()).map(toWire),
             providers: await providerStatuses(),
+            autoProvider: await orchestrator.autoProvider(),
             settings: projectSettings,
             ...orchestrator.pending(),
         }),

@@ -2,6 +2,7 @@ import { z } from "zod";
 export declare const ProjectSettingsSchema: z.ZodObject<{
     defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodEnum<{
         claude: "claude";
+        "claude-session": "claude-session";
         codex: "codex";
         gemini: "gemini";
     }>>>;
@@ -16,11 +17,12 @@ export declare const KnownProjectSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type KnownProject = z.infer<typeof KnownProjectSchema>;
 export declare const GlobalConfigSchema: z.ZodObject<{
-    defaultProvider: z.ZodDefault<z.ZodEnum<{
+    defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodEnum<{
         claude: "claude";
+        "claude-session": "claude-session";
         codex: "codex";
         gemini: "gemini";
-    }>>;
+    }>>>;
     defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     maxConcurrentRuns: z.ZodDefault<z.ZodNumber>;
     providers: z.ZodPrefault<z.ZodObject<{

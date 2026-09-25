@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { PALETTE, type Agent, type ClientMessage, type PermissionMode, type Provider, type Scope, type ToolAllowance } from "@agenticview/shared";
 import { useStore } from "../state/store";
-import { Modal, providerLabel } from "./ui";
+import { Modal, automaticLabel, defaultProviderOf, providerLabel } from "./ui";
 import { modeHint } from "./modeHint";
 
 const TOOL_LABELS: { key: keyof ToolAllowance; label: string; hint: string }[] = [
@@ -27,6 +27,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
   const send = useStore((s) => s.send);
   const providers = useStore((s) => s.providers);
   const settings = useStore((s) => s.settings);
+  const autoProvider = useStore((s) => s.autoProvider);
   const world = useStore((s) => s.world);
   const agents = useStore((s) => s.agents);
   const errors = useStore((s) => s.errors);
@@ -46,7 +47,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
   const [submittedAt, setSubmittedAt] = useState<number | undefined>();
   const idsAtSubmit = useRef<Set<string>>(new Set());
 
-  const defaultProvider = settings?.defaultProvider ?? "claude";
+  const defaultProvider = defaultProviderOf(settings?.defaultProvider, autoProvider);
   const effectiveProvider: Provider = provider || defaultProvider;
   const error = submittedAt ? errors.find((e) => e.ref === (edit ? "agent.update" : "agent.create") && e.ts >= submittedAt) : undefined;
 
@@ -100,11 +101,11 @@ export function CreateAgentModal({ onClose, edit }: Props) {
           <label className="field">
             <span>Provider</span>
             <select value={provider} onChange={(e) => setProvider(e.target.value as Provider | "")}>
-              <option value="">Default ({providerLabel(defaultProvider)})</option>
+              <option value="">{settings?.defaultProvider ? `Default (${providerLabel(defaultProvider)})` : automaticLabel(autoProvider)}</option>
               {providers.map((p) => (
-                <option key={p.provider} value={p.provider} disabled={!p.ok} title={p.ok ? undefined : p.reason ?? "Unavailable"}>
+                <option key={p.provider} value={p.provider} disabled={!p.ok && p.provider !== "claude-session"} title={p.ok ? undefined : p.reason ?? "Unavailable"}>
                   {providerLabel(p.provider)}
-                  {p.ok ? "" : " (unavailable)"}
+                  {p.ok ? "" : p.provider === "claude-session" ? " (no worker yet)" : " (unavailable)"}
                 </option>
               ))}
             </select>
