@@ -7,6 +7,7 @@ import { Orchestrator } from "./manager/orchestrator.js";
 import { readJsonFile, writeJsonFile } from "./store/jsonStore.js";
 import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.js";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
+import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
 export function globalConfigPath() {
     return join(globalRoot(), "config.json");
 }
@@ -40,6 +41,7 @@ export async function createWorld(ref, opts) {
         providerModels: {
             claude: globalConfig.providers.claude.model,
             codex: globalConfig.providers.codex.model,
+            antigravity: globalConfig.providers.antigravity.model,
             gemini: globalConfig.providers.gemini.model,
         },
     });
@@ -51,8 +53,10 @@ export async function createWorld(ref, opts) {
     });
     await tasks.recoverInterrupted();
     await registry.ensureManager();
-    if (ref.kind === "project")
+    if (ref.kind === "project") {
         await cleanupGeminiSettings(ref.projectPath);
+        await cleanupAntigravityPlugins(ref.projectPath);
+    }
     const info = async () => {
         const cfg = await readGlobalConfig();
         globalConfig = cfg;

@@ -15,6 +15,10 @@ export function modeHint(provider: Provider, mode: PermissionMode): string {
       if (mode === "ask") return "Codex cannot prompt: runs in a read-only sandbox (no edits, no commands).";
       if (mode === "auto-edit") return "Codex writes inside the workspace sandbox without asking. On Windows the sandbox cannot write, so it runs with full access.";
       return "Codex runs with full access and never asks.";
+    case "antigravity":
+      if (mode === "ask") return "Antigravity cannot prompt: runs in its default mode, which headless edits workspace files but rejects shell commands.";
+      if (mode === "auto-edit") return "Antigravity accepts file edits without asking (--mode accept-edits); shell commands are rejected.";
+      return "Antigravity approves everything (--dangerously-skip-permissions) and never asks.";
     case "gemini":
       if (mode === "ask") return "Gemini cannot prompt: runs in its default approval mode, where headless tool calls that would need approval are rejected.";
       if (mode === "auto-edit") return "Gemini auto-approves file edits; other tools follow its default policy.";

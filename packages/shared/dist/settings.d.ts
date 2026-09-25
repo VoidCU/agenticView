@@ -4,6 +4,7 @@ export declare const ProjectSettingsSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
     defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
@@ -21,6 +22,7 @@ export declare const GlobalConfigSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
     defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
@@ -31,6 +33,10 @@ export declare const GlobalConfigSchema: z.ZodObject<{
             model: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
         codex: z.ZodPrefault<z.ZodObject<{
+            apiKey: z.ZodOptional<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        antigravity: z.ZodPrefault<z.ZodObject<{
             apiKey: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;

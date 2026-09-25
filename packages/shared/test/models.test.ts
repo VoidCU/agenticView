@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { AgentSchema, AgentPatchSchema, EffortSchema, MODEL_CATALOGUE, ProviderSchema, defaultAgent, effectiveEffort, effortsFor, findModel, modelLabel } from "../src/index.js";
 
+describe("antigravity catalogue", () => {
+  it("hides effort for ids that encode it and offers low..max otherwise", () => {
+    expect(effortsFor("antigravity", "gemini-3.8-flash-high")).toEqual([]);
+    expect(effortsFor("antigravity", "gpt-oss-120b-medium")).toEqual([]);
+    expect(effortsFor("antigravity", "claude-opus-4-6-thinking")).toEqual(["low", "medium", "high", "max"]);
+    expect(effortsFor("antigravity", null)).toEqual(["low", "medium", "high", "max"]);
+    expect(effectiveEffort("antigravity", "claude-sonnet-4-6", "xhigh")).toBeNull();
+    expect(effectiveEffort("antigravity", "gemini-3.1-pro-low", "high")).toBeNull();
+  });
+});
+
 describe("model catalogue", () => {
   it("covers every provider with unique ids and valid efforts", () => {
     for (const p of ProviderSchema.options) {

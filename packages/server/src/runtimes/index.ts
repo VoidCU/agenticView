@@ -3,6 +3,7 @@ import type { Provider, ProviderStatus } from "@agenticview/shared";
 import type { Runtime } from "./types.js";
 import { ClaudeRuntime } from "./claude.js";
 import { CodexRuntime } from "./codex.js";
+import { AntigravityRuntime } from "./antigravity.js";
 import { GeminiRuntime } from "./gemini.js";
 import { SessionRuntime } from "./session.js";
 import { which as defaultWhich, type Which } from "./which.js";
@@ -47,6 +48,7 @@ export async function createRuntimes(opts: RuntimeFactoryOptions): Promise<Map<P
   // Not cached: availability is "a worker polled recently", which changes second to second.
   map.set("claude-session", new SessionRuntime({ onWorkersChanged: opts.onSessionWorkersChanged }));
   map.set("codex", withCheckCache(new CodexRuntime({ bridgeEntry, bridgeUrl: opts.bridgeUrl, apiKey: cfg.providers.codex.apiKey, which }), ttl));
+  map.set("antigravity", withCheckCache(new AntigravityRuntime({ bridgeEntry, bridgeUrl: opts.bridgeUrl, which }), ttl));
   map.set("gemini", withCheckCache(new GeminiRuntime({ bridgeEntry, bridgeUrl: opts.bridgeUrl, apiKey: cfg.providers.gemini.apiKey, which }), ttl));
   return map;
 }

@@ -3,7 +3,7 @@ import { newId } from "./ids.js";
 import { EffortSchema } from "./models.js";
 import { AgentSessionSchema } from "./session.js";
 
-export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "gemini"]);
+export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "antigravity", "gemini"]);
 export type Provider = z.infer<typeof ProviderSchema>;
 export const RoleSchema = z.enum(["manager", "worker"]);
 export type Role = z.infer<typeof RoleSchema>;
@@ -102,11 +102,12 @@ export function defaultAgent(init: AgentInit): Agent {
 }
 
 /** Automatic provider resolution order: the first provider whose check() is ok wins. */
-export const PROVIDER_ORDER: readonly Provider[] = ["claude", "claude-session", "codex", "gemini"];
+export const PROVIDER_ORDER: readonly Provider[] = ["claude", "claude-session", "codex", "antigravity", "gemini"];
 
 export const PROVIDER_LABELS: Record<Provider, string> = {
   claude: "Claude",
   "claude-session": "Claude Code session",
   codex: "Codex",
+  antigravity: "Antigravity",
   gemini: "Gemini",
 };
