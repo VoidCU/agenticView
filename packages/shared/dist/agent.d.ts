@@ -17,9 +17,9 @@ export declare const ScopeSchema: z.ZodEnum<{
 }>;
 export type Scope = z.infer<typeof ScopeSchema>;
 export declare const PermissionModeSchema: z.ZodEnum<{
+    auto: "auto";
     ask: "ask";
     "auto-edit": "auto-edit";
-    auto: "auto";
 }>;
 export type PermissionMode = z.infer<typeof PermissionModeSchema>;
 export declare const ToolAllowanceSchema: z.ZodObject<{
@@ -88,9 +88,9 @@ export declare const AgentSchema: z.ZodObject<{
         screenshot: z.ZodBoolean;
     }, z.core.$strip>;
     permissionMode: z.ZodEnum<{
+        auto: "auto";
         ask: "ask";
         "auto-edit": "auto-edit";
-        auto: "auto";
     }>;
     appearance: z.ZodObject<{
         color: z.ZodString;

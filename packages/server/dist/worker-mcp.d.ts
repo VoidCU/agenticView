@@ -38,11 +38,11 @@ export interface NextTaskArgs {
 export declare function nextTask(args: NextTaskArgs): Promise<ToolText>;
 declare const EventSchema: z.ZodObject<{
     type: z.ZodEnum<{
-        status: "status";
         text: "text";
         tool_start: "tool_start";
         tool_end: "tool_end";
         file_changed: "file_changed";
+        status: "status";
     }>;
     text: z.ZodOptional<z.ZodString>;
     name: z.ZodOptional<z.ZodString>;
@@ -51,9 +51,9 @@ declare const EventSchema: z.ZodObject<{
     summary: z.ZodOptional<z.ZodString>;
     path: z.ZodOptional<z.ZodString>;
     kind: z.ZodOptional<z.ZodEnum<{
-        delete: "delete";
         create: "create";
         modify: "modify";
+        delete: "delete";
     }>>;
 }, z.core.$strip>;
 export declare function report(args: {
