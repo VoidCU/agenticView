@@ -331,8 +331,10 @@ export class SessionRuntime {
     }
     /** Pick the run a session should take: its bound agents first, then any unbound agent's. */
     async choose(workerId) {
-        // One task per agent at a time in a session: its subagent carries one thread of work.
-        const busyAgents = new Set(this.held(workerId).map((p) => p.req.agent.id));
+        // One task per worker agent at a time in a session: its subagent carries one thread of work. A Manager is
+        // exempt: while one request waits on its workers, the next request must not queue behind it, so each
+        // Manager request runs in its own subagent instance.
+        const busyAgents = new Set(this.held(workerId).filter((p) => p.req.agent.role !== "manager").map((p) => p.req.agent.id));
         let unbound;
         for (const runId of this.queue) {
             const p = this.runs.get(runId);

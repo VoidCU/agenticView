@@ -12,6 +12,8 @@ export class Orchestrator {
     deps;
     aborts = new Map();
     active = new Set();
+    /** Agent+conversation keys a run is currently resuming (see execute). */
+    resuming = new Set();
     queue = [];
     waiters = new Map();
     pendingPermissions = new Map();
@@ -376,6 +378,7 @@ export class Orchestrator {
         this.aborts.set(task.id, ac);
         const runId = newId("r");
         let final;
+        let releaseConvo = () => { };
         try {
             const agent = await registry.get(task.assigneeId);
             if (!agent) {
@@ -391,7 +394,17 @@ export class Orchestrator {
             const runtime = this.deps.runtimes.get(provider);
             await tasks.transition(task.id, "running");
             const key = this.sessionKey(task, agent);
-            const sessionId = await this.loadSession(agent, key, provider);
+            // Managers take several requests at once. Only one run may resume a CLI conversation at a time, so a
+            // request that starts while another run holds that conversation begins a fresh one instead.
+            const convo = `${agent.id}\u0000${key}`;
+            const resumeBusy = this.resuming.has(convo);
+            const sessionId = resumeBusy ? undefined : await this.loadSession(agent, key, provider);
+            if (!resumeBusy)
+                this.resuming.add(convo);
+            releaseConvo = () => {
+                if (!resumeBusy)
+                    this.resuming.delete(convo);
+            };
             const cwd = task.projectPath || process.cwd();
             const bridgeTools = this.bridgeToolsFor(task, agent, runId);
             const { token: bridgeToken } = this.deps.toolRegistry.register(runId, bridgeTools);
@@ -426,7 +439,8 @@ export class Orchestrator {
             await chain;
             const usedSession = result.sessionId ?? sessionId;
             const session = usedSession ? { provider, sessionId: usedSession } : undefined;
-            if (usedSession)
+            // A side conversation (started while the main one was busy) does not replace the saved main one.
+            if (usedSession && !resumeBusy)
                 await this.saveSession(agent, key, provider, usedSession);
             if (result.stopReason === "aborted") {
                 final = await tasks.get(task.id);
@@ -445,6 +459,7 @@ export class Orchestrator {
             final = await this.finish(task, "failed", { error: e.message });
         }
         finally {
+            releaseConvo();
             this.aborts.delete(task.id);
             this.resolvePendingFor(task.id);
             const settled = final ?? (await tasks.get(task.id));

@@ -39,6 +39,8 @@ export declare class Orchestrator {
     private readonly deps;
     private readonly aborts;
     private readonly active;
+    /** Agent+conversation keys a run is currently resuming (see execute). */
+    private readonly resuming;
     private readonly queue;
     private readonly waiters;
     private readonly pendingPermissions;
