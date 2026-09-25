@@ -59,6 +59,12 @@ export class TaskService {
                 next.startedAt = now;
             if (isTerminal(to))
                 next.finishedAt = now;
+            else
+                delete next.finishedAt;
+            if ("error" in patch && patch.error === undefined)
+                delete next.error;
+            if ("result" in patch && patch.result === undefined)
+                delete next.result;
             await this.store.write(id, next);
             this.onChange(next, "state");
             return next;
@@ -98,12 +104,16 @@ export class TaskService {
             this.onChange(next, "log");
         });
     }
-    /** Called on boot: anything still running or waiting was interrupted by a server restart. */
+    /** Called on boot: tasks that were running or waiting are failed; tasks that were assigned but
+     *  not yet started are re-queued so they get picked up again. */
     async recoverInterrupted() {
         const out = [];
         for (const t of await this.list()) {
             if (t.status === "running" || t.status === "waiting") {
                 out.push(await this.transition(t.id, "failed", { error: "interrupted" }));
+            }
+            else if (t.status === "assigned") {
+                out.push(await this.transition(t.id, "queued"));
             }
         }
         return out;

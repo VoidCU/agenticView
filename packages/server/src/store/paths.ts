@@ -15,7 +15,7 @@ export function projectRoot(projectPath: string): string {
 const IGNORED = ["events.log", "sessions/", "uploads/", "tasks/", "worker-sessions.json"];
 
 /** Lines AgenticView keeps in the project's own `.gitignore`. */
-export const PROJECT_GITIGNORE_LINES = [".agenticview/", ".claude/agents/agenticview-*.md"] as const;
+export const PROJECT_GITIGNORE_LINES = [".agenticview/", ".claude/agents/agenticview-*.md", ".agents/plugins/agenticview-*"] as const;
 export const PROJECT_GITIGNORE_COMMENT = "# AgenticView";
 
 /** Canonical form of a gitignore pattern for "is it already there" checks (`/.agenticview` == `.agenticview/`). */
@@ -39,12 +39,17 @@ export async function ensureRootGitignore(projectPath: string): Promise<string[]
   }
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
   const lines = text.split(/\r?\n/);
-  // Our block is written once. After that the user owns it: a line they removed (for example to commit
-  // their agents) stays removed.
-  if (lines.some((l) => l.trim() === PROJECT_GITIGNORE_COMMENT)) return [];
   const have = new Set(lines.map(canon));
   const missing = PROJECT_GITIGNORE_LINES.filter((l) => !have.has(canon(l)));
   if (missing.length === 0) return [];
+  // Block already exists: append only the missing entries (picks up lines added in newer versions).
+  if (lines.some((l) => l.trim() === PROJECT_GITIGNORE_COMMENT)) {
+    let suffix = text;
+    if (suffix.length && !suffix.endsWith("\n")) suffix += eol;
+    await writeFile(file, suffix + missing.join(eol) + eol, "utf8");
+    return missing;
+  }
+  // First time: write the comment plus all entries as a single block.
   const block = [PROJECT_GITIGNORE_COMMENT, ...missing];
   let prefix = text;
   if (prefix.length && !prefix.endsWith("\n")) prefix += eol;

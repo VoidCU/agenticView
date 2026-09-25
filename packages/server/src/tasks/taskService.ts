@@ -96,6 +96,9 @@ export class TaskService {
       const next: Task = { ...cur, ...patch, status: to };
       if (to === "running" && !cur.startedAt) next.startedAt = now;
       if (isTerminal(to)) next.finishedAt = now;
+      else delete next.finishedAt;
+      if ("error" in patch && patch.error === undefined) delete next.error;
+      if ("result" in patch && patch.result === undefined) delete next.result;
       await this.store.write(id, next);
       this.onChange(next, "state");
       return next;
@@ -136,12 +139,15 @@ export class TaskService {
     });
   }
 
-  /** Called on boot: anything still running or waiting was interrupted by a server restart. */
+  /** Called on boot: tasks that were running or waiting are failed; tasks that were assigned but
+   *  not yet started are re-queued so they get picked up again. */
   async recoverInterrupted(): Promise<Task[]> {
     const out: Task[] = [];
     for (const t of await this.list()) {
       if (t.status === "running" || t.status === "waiting") {
         out.push(await this.transition(t.id, "failed", { error: "interrupted" }));
+      } else if (t.status === "assigned") {
+        out.push(await this.transition(t.id, "queued"));
       }
     }
     return out;

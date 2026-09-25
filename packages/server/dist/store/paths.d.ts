@@ -3,7 +3,7 @@ export declare function globalRoot(): string;
 /** Project state root: `<projectPath>/.agenticview`. */
 export declare function projectRoot(projectPath: string): string;
 /** Lines AgenticView keeps in the project's own `.gitignore`. */
-export declare const PROJECT_GITIGNORE_LINES: readonly [".agenticview/", ".claude/agents/agenticview-*.md"];
+export declare const PROJECT_GITIGNORE_LINES: readonly [".agenticview/", ".claude/agents/agenticview-*.md", ".agents/plugins/agenticview-*"];
 export declare const PROJECT_GITIGNORE_COMMENT = "# AgenticView";
 /**
  * Makes sure `<project>/.gitignore` ignores the office state (`.agenticview/`) and the generated

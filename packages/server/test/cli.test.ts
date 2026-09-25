@@ -33,9 +33,9 @@ afterEach(async () => {
   await rm(proj, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-function run(args: string[], stdin?: string) {
+function run(args: string[], stdin?: string, fromCwd?: string) {
   const started = Date.now();
-  const child = spawn(process.execPath, [cli, ...args], { env: { ...process.env, AGENTICVIEW_HOME: home }, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [cli, ...args], { env: { ...process.env, AGENTICVIEW_HOME: home }, stdio: ["pipe", "pipe", "pipe"], ...(fromCwd ? { cwd: fromCwd } : {}) });
   children.push(child);
   let out = "";
   let err = "";
@@ -98,20 +98,60 @@ describe("cli", () => {
     expect(again.out()).toContain("no office is running");
   }, 30000);
 
-  it("close --all stops every running office and tidies stale instance files", async () => {
+  it("close --all without --yes prints what would be closed and exits without closing", async () => {
+    const a = run(["open", "--project", proj, "--no-browser"]);
+    await a.line("AgenticView: ");
+    const dry = run(["close", "--all"]);
+    expect((await dry.exit).code).toBe(1);
+    expect(dry.out()).toContain("--all will close:");
+    expect(dry.out()).toContain(proj);
+    expect(dry.out()).toContain("--yes");
+    // Office is still running.
+    const still = run(["open", "--project", proj, "--no-browser"]);
+    await still.line("AgenticView: ");
+    expect((await still.exit).code).toBe(0);
+    a.child.kill();
+    await a.exit;
+  }, 30000);
+
+  it("close --all --yes stops every running office and tidies stale instance files", async () => {
     const a = run(["open", "--project", proj, "--no-browser"]);
     const h = run(["hub", "--no-browser"]);
     await a.line("AgenticView: ");
     await h.line("AgenticView: ");
     // A stale record from a crashed office (dead pid) is removed silently.
     await writeFile(join(home, "instances", "stale.json"), JSON.stringify({ pid: 2 ** 30, url: "http://127.0.0.1:1", token: "x", projectPath: "/gone", startedAt: "" }));
-    const closer = run(["close", "--all"]);
+    const closer = run(["close", "--all", "--yes"]);
     expect((await closer.exit).code).toBe(0);
     expect(closer.out()).toContain("closed hub");
     expect(closer.out()).toContain(`closed ${proj}`);
     expect(closer.out()).not.toContain("/gone");
     await Promise.all([a.exit, h.exit]);
     expect(await readdir(join(home, "instances"))).toEqual([]);
+  }, 30000);
+
+  it("close without --all only closes the office for the current folder, leaving other offices running", async () => {
+    // Start a project office and the hub concurrently.
+    const project = run(["open", "--project", proj, "--no-browser"]);
+    const hub = run(["hub", "--no-browser"]);
+    const projUrl = (await project.line("AgenticView: ")).slice("AgenticView: ".length).trim().split("/#")[0]!;
+    const hubUrl = (await hub.line("AgenticView: ")).slice("AgenticView: ".length).trim().split("/#")[0]!;
+
+    // close with cwd=proj (no --all, no --hub) must only close the project office.
+    const closer = run(["close"], undefined, proj);
+    expect((await closer.exit).code).toBe(0);
+    expect(closer.out()).toContain(`AgenticView: closed ${proj}`);
+
+    // Project office is gone.
+    await project.exit;
+    await expect(fetch(`${projUrl}/healthz`)).rejects.toThrow();
+
+    // Hub is still alive.
+    expect((await fetch(`${hubUrl}/healthz`)).status).toBe(200);
+
+    // Clean up.
+    hub.child.kill();
+    await hub.exit;
   }, 30000);
 
   it("rejects /api/shutdown without the token", async () => {

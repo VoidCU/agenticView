@@ -184,11 +184,33 @@ async function closeInstance(file: string): Promise<string | undefined> {
 }
 
 async function closeCommand(rest: string[]): Promise<number> {
-  const { values } = parseArgs({ args: rest, options: { project: { type: "string" }, hub: { type: "boolean" }, all: { type: "boolean" } }, strict: false });
+  const { values } = parseArgs({ args: rest, options: { project: { type: "string" }, hub: { type: "boolean" }, all: { type: "boolean" }, yes: { type: "boolean" } }, strict: false });
   let files: string[];
   if (values.all) {
     const dir = join(instancesRoot(), "instances");
     files = (await readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith(".json")).map((f) => join(dir, f));
+    if (!values.yes) {
+      // Dry-run: show what would be closed and require --yes to proceed.
+      const labels: string[] = [];
+      for (const f of files) {
+        let inst: Instance;
+        try {
+          inst = JSON.parse(await readFile(f, "utf8")) as Instance;
+        } catch {
+          continue;
+        }
+        if (!alive(inst.pid)) continue;
+        labels.push(inst.projectPath ?? "hub");
+      }
+      if (labels.length === 0) {
+        console.log("AgenticView: no offices are running.");
+      } else {
+        console.log("AgenticView: --all will close:");
+        for (const l of labels) console.log(`  ${l}`);
+        console.log("Re-run with --yes to confirm.");
+      }
+      return 1;
+    }
   } else if (values.hub) {
     files = [instanceFile(null)];
   } else {
