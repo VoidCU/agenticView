@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { mkdir, writeFile, stat, readFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
-import { newId } from "@agenticview/shared";
+import { newId, ProviderSchema, SwitchAgentPayloadSchema, SwitchProviderPayloadSchema } from "@agenticview/shared";
 import type { World } from "../world.js";
 import { mirrorRoutes } from "../hooks/mirror.js";
 
@@ -12,6 +12,68 @@ export function apiRoutes(world: World): Hono {
   const app = new Hono();
 
   app.get("/api/snapshot", async (c) => c.json(await world.snapshot()));
+
+  app.get("/api/limits", async (c) => c.json(await world.getLimits()));
+
+  app.get("/api/usage", async (c) => c.json(await world.getUsage()));
+
+  app.post("/api/agents/:id/switch", async (c) => {
+    const id = c.req.param("id");
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return c.json({ error: "JSON body expected" }, 400);
+    }
+    const parsed = SwitchAgentPayloadSchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: `Invalid body: ${parsed.error.issues.map((i) => i.message).join(", ")}` }, 400);
+    }
+    try {
+      const agent = await world.switchAgent(id, parsed.data);
+      return c.json({ ok: true, agent });
+    } catch (e) {
+      const msg = (e as Error).message;
+      const status = msg.includes("Unknown agent") ? 404 : 400;
+      return c.json({ error: msg }, status);
+    }
+  });
+
+  app.post("/api/providers/:provider/switch", async (c) => {
+    const providerParam = c.req.param("provider");
+    const provParsed = ProviderSchema.safeParse(providerParam);
+    if (!provParsed.success) {
+      return c.json({ error: `Invalid provider: ${providerParam}` }, 400);
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return c.json({ error: "JSON body expected" }, 400);
+    }
+    const parsed = SwitchProviderPayloadSchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: `Invalid body: ${parsed.error.issues.map((i) => i.message).join(", ")}` }, 400);
+    }
+    try {
+      const result = await world.switchProvider(provParsed.data, parsed.data);
+      return c.json({ ok: true, ...result });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  app.post("/api/tasks/:id/retry", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const task = await world.retryTask(id);
+      return c.json({ ok: true, task });
+    } catch (e) {
+      const msg = (e as Error).message;
+      const status = msg.includes("Unknown task") ? 404 : 400;
+      return c.json({ error: msg }, status);
+    }
+  });
 
   app.post("/api/upload", async (c) => {
     let body: Record<string, unknown>;

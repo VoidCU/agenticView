@@ -1,5 +1,6 @@
 import { basename, join } from "node:path";
 import { GlobalConfigSchema, SpaceNamesSchema, PROVIDER_ORDER, ProjectSettingsSchema, WorkerSessionFileSchema, } from "@agenticview/shared";
+import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { subagentNames, syncSubagents, writeSubagent } from "./agents/subagents.js";
 import { AgentRegistry } from "./agents/registry.js";
@@ -86,6 +87,9 @@ export async function createWorld(ref, opts) {
             knownProjects: cfg.knownProjects,
         };
     };
+    const usageTracker = new UsageTracker(root);
+    await usageTracker.init();
+    let emitProvidersFn = async () => undefined;
     const deps = {
         world: ref,
         root,
@@ -101,6 +105,8 @@ export async function createWorld(ref, opts) {
         workerTools: opts.workerTools,
         spaceNames: () => ({ ...spaceNames }),
         renameSpace,
+        usageTracker,
+        emitProviders: () => emitProvidersFn(),
     };
     const orchestrator = new Orchestrator(deps);
     // Claude Code sessions (claude-session workers): records persist next to the agents, and the
@@ -228,9 +234,17 @@ export async function createWorld(ref, opts) {
         const out = [];
         for (const p of PROVIDER_ORDER) {
             const rt = opts.runtimes.get(p);
-            out.push(rt ? await rt.check() : { provider: p, ok: false, reason: "not configured" });
+            const base = rt ? await rt.check() : { provider: p, ok: false, reason: "not configured" };
+            const lim = usageTracker.getProviderLimit(p);
+            if (lim && lim.limited) {
+                base.limit = lim;
+            }
+            out.push(base);
         }
         return out;
+    };
+    emitProvidersFn = async () => {
+        opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
     };
     return {
         ref,
@@ -246,9 +260,59 @@ export async function createWorld(ref, opts) {
         sessions,
         sessionRuntime,
         syncSubagents: syncProjectSubagents,
-        emitProviders: async () => {
-            opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
+        usageTracker,
+        emitProviders: emitProvidersFn,
+        switchAgent: async (id, patch) => {
+            const cur = await registry.get(id);
+            if (!cur)
+                throw new Error(`Unknown agent ${id}`);
+            const updatePatch = {};
+            if ("provider" in patch)
+                updatePatch.provider = patch.provider ?? null;
+            if ("model" in patch)
+                updatePatch.model = patch.model ?? null;
+            if ("effort" in patch)
+                updatePatch.effort = patch.effort ?? null;
+            updatePatch.limit = undefined;
+            const updated = await registry.update(id, updatePatch);
+            opts.bus.emit({ type: "agent.updated", agent: updated });
+            if (updated.provider === "claude-session" || cur.provider === "claude-session") {
+                await syncProjectSubagents();
+            }
+            return updated;
         },
+        switchProvider: async (fromProvider, patch) => {
+            const all = await registry.list();
+            const matching = all.filter((a) => a.provider === fromProvider);
+            const updatedAgents = [];
+            for (const a of matching) {
+                const next = await registry.update(a.id, {
+                    provider: patch.toProvider,
+                    model: patch.toModel ?? null,
+                    limit: undefined,
+                });
+                opts.bus.emit({ type: "agent.updated", agent: next });
+                updatedAgents.push(next);
+            }
+            usageTracker.clearProviderLimit(fromProvider);
+            await emitProvidersFn();
+            if (fromProvider === "claude-session" || patch.toProvider === "claude-session") {
+                await syncProjectSubagents();
+            }
+            return { count: updatedAgents.length, agents: updatedAgents };
+        },
+        retryTask: async (taskId) => {
+            const cur = await tasks.get(taskId);
+            if (!cur)
+                throw new Error(`Unknown task ${taskId}`);
+            if (cur.status !== "failed")
+                throw new Error(`Only failed tasks can be retried (status is ${cur.status})`);
+            const retried = await tasks.transition(taskId, "queued", { error: undefined, result: undefined });
+            orchestrator.startTask(taskId);
+            return retried;
+        },
+        getLimits: async () => usageTracker.getLimitsReport(),
+        getUsage: async () => usageTracker.getUsageReport(),
         updateSettings: async (patch) => {
             projectSettings = ProjectSettingsSchema.parse({ ...projectSettings, ...patch });
             if (ref.kind === "project")

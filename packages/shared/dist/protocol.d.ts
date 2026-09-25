@@ -15,6 +15,17 @@ export declare const ProviderStatusSchema: z.ZodObject<{
     ok: z.ZodBoolean;
     version: z.ZodOptional<z.ZodString>;
     reason: z.ZodOptional<z.ZodString>;
+    limit: z.ZodOptional<z.ZodObject<{
+        limited: z.ZodBoolean;
+        errorType: z.ZodOptional<z.ZodEnum<{
+            quota: "quota";
+            "rate-limit": "rate-limit";
+            auth: "auth";
+            crash: "crash";
+        }>>;
+        reason: z.ZodOptional<z.ZodString>;
+        resetAt: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 export type ProviderStatus = z.infer<typeof ProviderStatusSchema>;
 export declare const WorldInfoSchema: z.ZodObject<{
@@ -251,6 +262,43 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         systemPrompt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"agent.switch">;
+    id: z.ZodString;
+    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        antigravity: "antigravity";
+        gemini: "gemini";
+    }>>>;
+    model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    effort: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        minimal: "minimal";
+        low: "low";
+        medium: "medium";
+        high: "high";
+        xhigh: "xhigh";
+        max: "max";
+        ultra: "ultra";
+    }>>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"provider.switchAll">;
+    fromProvider: z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        antigravity: "antigravity";
+        gemini: "gemini";
+    }>;
+    toProvider: z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        antigravity: "antigravity";
+        gemini: "gemini";
+    }>;
+    toModel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"agent.copyToProject">;
     id: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
@@ -258,6 +306,9 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"task.cancel">;
+    id: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"task.retry">;
     id: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"permission.respond">;

@@ -12,7 +12,11 @@ import {
   type WorldInfo,
   type WorkerSessionInfo,
   WorkerSessionFileSchema,
+  type Effort,
+  type LimitsReport,
+  type UsageReport,
 } from "@agenticview/shared";
+import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime, type RecentWork } from "./runtimes/session.js";
 import { subagentNames, syncSubagents, writeSubagent, type SyncResult } from "./agents/subagents.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
@@ -56,6 +60,13 @@ export interface World {
   sessionRuntime?: SessionRuntime;
   /** Push fresh provider availability (and the Automatic choice) to every client. */
   emitProviders: () => Promise<void>;
+  /** Tracker for token usage, rate limits, and provider limit states. */
+  usageTracker: UsageTracker;
+  switchAgent: (id: string, patch: { provider?: Provider | null; model?: string | null; effort?: Effort | null }) => Promise<Agent>;
+  switchProvider: (fromProvider: Provider, opts: { toProvider: Provider; toModel?: string | null }) => Promise<{ count: number; agents: Agent[] }>;
+  retryTask: (taskId: string) => Promise<Task>;
+  getLimits: () => Promise<LimitsReport>;
+  getUsage: () => Promise<UsageReport>;
 }
 
 export function globalConfigPath(): string {
@@ -138,6 +149,11 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     };
   };
 
+  const usageTracker = new UsageTracker(root);
+  await usageTracker.init();
+
+  let emitProvidersFn: () => Promise<void> = async () => undefined;
+
   const deps: WorldDeps = {
     world: ref,
     root,
@@ -153,6 +169,8 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     workerTools: opts.workerTools,
     spaceNames: () => ({ ...spaceNames }),
     renameSpace,
+    usageTracker,
+    emitProviders: () => emitProvidersFn(),
   };
   const orchestrator = new Orchestrator(deps);
 
@@ -284,9 +302,18 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     const out: ProviderStatus[] = [];
     for (const p of PROVIDER_ORDER) {
       const rt = opts.runtimes.get(p);
-      out.push(rt ? await rt.check() : { provider: p, ok: false, reason: "not configured" });
+      const base = rt ? await rt.check() : { provider: p, ok: false, reason: "not configured" };
+      const lim = usageTracker.getProviderLimit(p);
+      if (lim && lim.limited) {
+        base.limit = lim;
+      }
+      out.push(base);
     }
     return out;
+  };
+
+  emitProvidersFn = async () => {
+    opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
   };
 
   return {
@@ -303,9 +330,53 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     sessions,
     sessionRuntime,
     syncSubagents: syncProjectSubagents,
-    emitProviders: async () => {
-      opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
+    usageTracker,
+    emitProviders: emitProvidersFn,
+    switchAgent: async (id, patch) => {
+      const cur = await registry.get(id);
+      if (!cur) throw new Error(`Unknown agent ${id}`);
+      const updatePatch: Partial<Agent> = {};
+      if ("provider" in patch) updatePatch.provider = patch.provider ?? null;
+      if ("model" in patch) updatePatch.model = patch.model ?? null;
+      if ("effort" in patch) updatePatch.effort = patch.effort ?? null;
+      updatePatch.limit = undefined;
+      const updated = await registry.update(id, updatePatch);
+      opts.bus.emit({ type: "agent.updated", agent: updated });
+      if (updated.provider === "claude-session" || cur.provider === "claude-session") {
+        await syncProjectSubagents();
+      }
+      return updated;
     },
+    switchProvider: async (fromProvider, patch) => {
+      const all = await registry.list();
+      const matching = all.filter((a) => a.provider === fromProvider);
+      const updatedAgents: Agent[] = [];
+      for (const a of matching) {
+        const next = await registry.update(a.id, {
+          provider: patch.toProvider,
+          model: patch.toModel ?? null,
+          limit: undefined,
+        });
+        opts.bus.emit({ type: "agent.updated", agent: next });
+        updatedAgents.push(next);
+      }
+      usageTracker.clearProviderLimit(fromProvider);
+      await emitProvidersFn();
+      if (fromProvider === "claude-session" || patch.toProvider === "claude-session") {
+        await syncProjectSubagents();
+      }
+      return { count: updatedAgents.length, agents: updatedAgents };
+    },
+    retryTask: async (taskId) => {
+      const cur = await tasks.get(taskId);
+      if (!cur) throw new Error(`Unknown task ${taskId}`);
+      if (cur.status !== "failed") throw new Error(`Only failed tasks can be retried (status is ${cur.status})`);
+      const retried = await tasks.transition(taskId, "queued", { error: undefined, result: undefined });
+      orchestrator.startTask(taskId);
+      return retried;
+    },
+    getLimits: async () => usageTracker.getLimitsReport(),
+    getUsage: async () => usageTracker.getUsageReport(),
     updateSettings: async (patch) => {
       projectSettings = ProjectSettingsSchema.parse({ ...projectSettings, ...patch });
       if (ref.kind === "project") await writeJsonFile(settingsFile, projectSettings);

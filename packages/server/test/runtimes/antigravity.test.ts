@@ -199,7 +199,7 @@ describe("AntigravityRuntime.run", () => {
   it("reports a crash with stderr", async () => {
     const res = await rt(fakeSpawn("crash")).run(req(), () => {}, new AbortController().signal);
     expect(res.stopReason).toBe("error");
-    expect(res.error).toMatch(/exited with 2[\s\S]*boom/);
+    expect(res.error).toMatch(/exited with code 2[\s\S]*boom/);
   });
 
   it("aborts a hanging run", async () => {
@@ -272,6 +272,32 @@ describe("cleanupAntigravityPlugins", () => {
     expect(await readdir(plugins)).toEqual(["agenticview-custom"]);
     expect((await readdir(cache)).sort()).toEqual(["agenticview-r_new_agenticview", "other_server"]);
     await expect(cleanupAntigravityPlugins(join(cwd, "nowhere"), join(home, "nowhere"))).resolves.toBeUndefined();
+  });
+
+  it("removes .agents/plugins and .agents themselves when they become empty after cleanup", async () => {
+    const agentsDir = join(cwd, ".agents");
+    const plugins = join(agentsDir, "plugins");
+    // Only AgenticView-managed plugins — no user files anywhere under .agents.
+    await mkdir(join(plugins, "agenticview-r_crash"), { recursive: true });
+    await writeFile(join(plugins, "agenticview-r_crash", "plugin.json"), JSON.stringify({ name: "agenticview-r_crash", "agenticview-managed": true }));
+    await writeFile(join(plugins, "agenticview-r_crash", "hooks.json"), JSON.stringify({}));
+    await cleanupAntigravityPlugins(cwd, home);
+    // Both the plugins dir and .agents dir should be gone (they were only AgenticView content).
+    await expect(access(plugins)).rejects.toThrow();
+    await expect(access(agentsDir)).rejects.toThrow();
+  });
+
+  it("leaves .agents in place when it contains user-owned files alongside managed plugins", async () => {
+    const agentsDir = join(cwd, ".agents");
+    const plugins = join(agentsDir, "plugins");
+    await mkdir(join(plugins, "agenticview-r_stale"), { recursive: true });
+    await writeFile(join(plugins, "agenticview-r_stale", "plugin.json"), JSON.stringify({ name: "agenticview-r_stale", "agenticview-managed": true }));
+    // User has their own file directly under .agents.
+    await writeFile(join(agentsDir, "user-config.json"), "{}");
+    await cleanupAntigravityPlugins(cwd, home);
+    // plugins dir is gone (empty after removing managed plugin), but .agents stays.
+    await expect(access(plugins)).rejects.toThrow();
+    expect((await readdir(agentsDir))).toContain("user-config.json");
   });
 });
 

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
+import { extractCliError } from "./errors.js";
 export const CLAUDE_CREDENTIAL_ENV = [
     "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_USE_BEDROCK",
@@ -109,7 +110,8 @@ function resultOf(msg, text) {
     if (subtype === "error_max_turns")
         return { ...base, stopReason: "max_turns", error: "error_max_turns" };
     const errors = Array.isArray(msg.errors) ? msg.errors.map(String).join("; ") : "";
-    return { ...base, stopReason: "error", error: errors ? `${subtype}: ${errors}` : subtype };
+    const rawErr = errors ? `${subtype}: ${errors}` : subtype;
+    return { ...base, stopReason: "error", error: extractCliError(rawErr) };
 }
 async function imageBlock(path) {
     const data = (await readFile(path)).toString("base64");
@@ -214,7 +216,7 @@ export class ClaudeRuntime {
         catch (e) {
             if (signal.aborted)
                 return { text, stopReason: "aborted" };
-            return { text, stopReason: "error", error: e.message };
+            return { text, stopReason: "error", error: extractCliError(e.message) };
         }
     }
 }

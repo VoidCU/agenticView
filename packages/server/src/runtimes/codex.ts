@@ -2,6 +2,7 @@ import type { PermissionMode, ProviderStatus, RunEvent, RunResult, ToolAllowance
 import type { Codex as CodexClass, ThreadEvent, ThreadItem, UserInput, SandboxMode } from "@openai/codex-sdk";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 import { which as defaultWhich, type Which } from "./which.js";
+import { extractCliError } from "./errors.js";
 
 export interface CodexSdk {
   Codex: typeof CodexClass;
@@ -147,23 +148,40 @@ export class CodexRuntime implements Runtime {
       const started = new Set<string>();
       let failure: string | undefined;
       let usage: RunResult["usage"];
-      for await (const ev of events) {
-        if (signal.aborted) return { text, stopReason: "aborted", sessionId };
-        if (ev.type === "thread.started") sessionId = ev.thread_id;
-        else if (ev.type === "turn.completed") usage = { inputTokens: ev.usage?.input_tokens ?? 0, outputTokens: ev.usage?.output_tokens ?? 0 };
-        else if (ev.type === "turn.failed") failure = ev.error?.message ?? "turn failed";
-        else if (ev.type === "error") failure = ev.message;
-        for (const mapped of mapCodexEvent(ev, started)) {
-          if (mapped.type === "text") text += (text ? "\n\n" : "") + mapped.text;
-          sink(mapped);
+      let rateLimits: RunResult["rateLimits"];
+      try {
+        for await (const rawEv of events) {
+          const ev = rawEv as ThreadEvent & { rate_limits?: RunResult["rateLimits"] };
+          if (signal.aborted) return { text, stopReason: "aborted", sessionId };
+          if (ev.type === "thread.started") sessionId = ev.thread_id;
+          else if (ev.type === "turn.completed") {
+            usage = { inputTokens: ev.usage?.input_tokens ?? 0, outputTokens: ev.usage?.output_tokens ?? 0 };
+            if (ev.rate_limits) rateLimits = ev.rate_limits;
+          } else if (ev.type === "turn.failed") {
+            failure = extractCliError(ev.error?.message ?? "turn failed");
+            if (ev.rate_limits) rateLimits = ev.rate_limits;
+          } else if (ev.type === "error") {
+            failure = extractCliError(ev.message);
+            if (ev.rate_limits) rateLimits = ev.rate_limits;
+          } else if ((ev as { type: string }).type === "rate_limits" || ev.rate_limits) {
+            rateLimits = ev.rate_limits ?? (ev as unknown as RunResult["rateLimits"]);
+          }
+          for (const mapped of mapCodexEvent(ev, started)) {
+            if (mapped.type === "text") text += (text ? "\n\n" : "") + mapped.text;
+            sink(mapped);
+          }
+        }
+      } catch (streamErr) {
+        if (!failure) {
+          failure = extractCliError((streamErr as Error).message);
         }
       }
       sessionId = thread.id ?? sessionId;
-      if (failure) return { text, stopReason: "error", error: failure, sessionId, usage };
-      return { text, stopReason: "done", sessionId, usage };
+      if (failure) return { text, stopReason: "error", error: failure, sessionId, usage, rateLimits };
+      return { text, stopReason: "done", sessionId, usage, rateLimits };
     } catch (e) {
       if (signal.aborted) return { text, stopReason: "aborted", sessionId };
-      return { text, stopReason: "error", error: (e as Error).message, sessionId };
+      return { text, stopReason: "error", error: extractCliError((e as Error).message), sessionId };
     }
   }
 }

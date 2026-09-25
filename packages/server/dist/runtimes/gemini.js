@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { which as defaultWhich } from "./which.js";
+import { extractCliError } from "./errors.js";
 export const GEMINI_MISSING_REASON = "Install the Gemini CLI (npm i -g @google/gemini-cli) and sign in, or set GEMINI_API_KEY.";
 /** `ask` cannot prompt through a headless CLI, so it gets the CLI's own most restrictive mode (`default`). */
 const APPROVAL = { auto: "yolo", "auto-edit": "auto_edit", ask: "default" };
@@ -323,16 +324,18 @@ export class GeminiRuntime {
                 return { text, stopReason: "aborted", sessionId };
             if (code === 53)
                 return { text, stopReason: "max_turns", error: "turn limit exceeded", sessionId };
-            if (code !== 0)
-                return { text, stopReason: "error", error: `gemini exited with ${code}: ${stderr.slice(-20).join("\n")}`, sessionId };
+            if (code !== 0) {
+                const raw = stderr.length ? stderr.slice(-20).join("\n") : `gemini exited with ${code}`;
+                return { text, stopReason: "error", error: extractCliError(raw), sessionId };
+            }
             if (final && !final.ok)
-                return { text, stopReason: "error", error: final.error, sessionId };
+                return { text, stopReason: "error", error: extractCliError(final.error ?? "gemini reported an error"), sessionId };
             return { text, stopReason: "done", sessionId };
         }
         catch (e) {
             if (signal.aborted)
                 return { text, stopReason: "aborted", sessionId };
-            return { text, stopReason: "error", error: e.message, sessionId };
+            return { text, stopReason: "error", error: extractCliError(e.message), sessionId };
         }
         finally {
             signal.removeEventListener("abort", onAbort);

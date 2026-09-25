@@ -4,11 +4,11 @@ export const TaskStatusSchema = z.enum(["queued", "assigned", "running", "waitin
 export const TaskKindSchema = z.enum(["request", "work", "chat"]);
 export const TRANSITIONS = {
     queued: ["assigned", "cancelled"],
-    assigned: ["running", "cancelled"],
+    assigned: ["running", "queued", "cancelled"],
     running: ["waiting", "done", "failed", "cancelled"],
     waiting: ["running", "failed", "cancelled"],
     done: [],
-    failed: [],
+    failed: ["queued"],
     cancelled: [],
 };
 export const TERMINAL_STATUSES = ["done", "failed", "cancelled"];
