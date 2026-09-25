@@ -36,6 +36,11 @@ export declare class AgentRegistry {
     update(id: string, patch: Partial<Agent>): Promise<Agent>;
     /** Clone a global agent into this project with fresh id and stats, remembering its origin. */
     copyToProject(id: string): Promise<Agent>;
+    /**
+     * Persist the resolved desk of every worker that has none yet (their auto-seat depends on who else
+     * is seated, so it would shift when someone moves). Returns the agents that changed.
+     */
+    pinPlacements(): Promise<Agent[]>;
     remove(id: string): Promise<void>;
     ensureManager(): Promise<Agent>;
     managerId(): Promise<string>;

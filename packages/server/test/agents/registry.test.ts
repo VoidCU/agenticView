@@ -30,6 +30,19 @@ describe("AgentRegistry", () => {
     expect((await r.list()).filter((a) => a.role === "manager")).toHaveLength(1);
   });
 
+  it("seats each new worker at the next free desk, and pins auto-seated workers on demand", async () => {
+    const r = new AgentRegistry({ kind: "project", projectPath: proj });
+    await r.ensureManager();
+    const a = await r.create({ name: "Nova", specialty: "frontend" });
+    const b = await r.create({ name: "Bolt", specialty: "tests" });
+    expect(a.placement).toEqual({ space: "pod-a", seat: 0 });
+    expect(b.placement).toEqual({ space: "pod-a", seat: 1 });
+    expect((await r.get(b.id))!.placement).toEqual({ space: "pod-a", seat: 1 });
+    await r.update(a.id, { placement: undefined });
+    expect((await r.pinPlacements()).map((x) => x.name)).toEqual(["Nova"]);
+    expect(await r.pinPlacements()).toEqual([]);
+  });
+
   it("project world lists project + global workers; hub lists only global", async () => {
     const p = new AgentRegistry({ kind: "project", projectPath: proj });
     const h = new AgentRegistry({ kind: "hub" });

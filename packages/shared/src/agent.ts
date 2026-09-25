@@ -34,6 +34,13 @@ export const AppearanceSchema = z.object({
 });
 export type Appearance = z.infer<typeof AppearanceSchema>;
 
+export const PlacementSchema = z.object({
+  /** Space id from the office honeycomb, e.g. "pod-a", "meeting". */
+  space: z.string().min(1).max(40),
+  seat: z.number().int().min(0).max(31),
+});
+export type Placement = z.infer<typeof PlacementSchema>;
+
 export const AgentSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(40),
@@ -50,6 +57,8 @@ export const AgentSchema = z.object({
   appearance: AppearanceSchema,
   stats: AgentStatsSchema,
   originId: z.string().optional(),
+  /** Which space and desk a worker sits at in the office. */
+  placement: PlacementSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

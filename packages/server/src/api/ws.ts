@@ -40,6 +40,8 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
       return;
     }
     case "agent.update": {
+      // Reseating someone must not reshuffle workers who were only auto-seated: pin them first.
+      if (msg.patch.placement) for (const pinned of await registry.pinPlacements()) bus.emit({ type: "agent.updated", agent: pinned });
       const agent = await registry.update(msg.id, msg.patch);
       bus.emit({ type: "agent.updated", agent });
       return;

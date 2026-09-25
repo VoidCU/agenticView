@@ -57,9 +57,9 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
         screenshot: z.ZodBoolean;
     }, z.core.$strip>>;
     permissionMode: z.ZodOptional<z.ZodEnum<{
+        auto: "auto";
         ask: "ask";
         "auto-edit": "auto-edit";
-        auto: "auto";
     }>>;
     scope: z.ZodOptional<z.ZodEnum<{
         project: "project";
@@ -77,24 +77,6 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type CreateAgentPayload = z.infer<typeof CreateAgentPayloadSchema>;
 export declare const AgentPatchSchema: z.ZodObject<{
-    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-        claude: "claude";
-        "claude-session": "claude-session";
-        codex: "codex";
-        gemini: "gemini";
-    }>>>;
-    name: z.ZodOptional<z.ZodString>;
-    specialty: z.ZodOptional<z.ZodString>;
-    model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-    effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-        minimal: "minimal";
-        low: "low";
-        medium: "medium";
-        high: "high";
-        xhigh: "xhigh";
-        max: "max";
-        ultra: "ultra";
-    }>>>>;
     tools: z.ZodOptional<z.ZodObject<{
         edit: z.ZodBoolean;
         shell: z.ZodBoolean;
@@ -102,9 +84,9 @@ export declare const AgentPatchSchema: z.ZodObject<{
         screenshot: z.ZodBoolean;
     }, z.core.$strip>>;
     permissionMode: z.ZodOptional<z.ZodEnum<{
+        auto: "auto";
         ask: "ask";
         "auto-edit": "auto-edit";
-        auto: "auto";
     }>>;
     appearance: z.ZodOptional<z.ZodObject<{
         color: z.ZodString;
@@ -115,6 +97,28 @@ export declare const AgentPatchSchema: z.ZodObject<{
             dots: "dots";
         }>;
     }, z.core.$strip>>;
+    name: z.ZodOptional<z.ZodString>;
+    specialty: z.ZodOptional<z.ZodString>;
+    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        gemini: "gemini";
+    }>>>;
+    model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        minimal: "minimal";
+        low: "low";
+        medium: "medium";
+        high: "high";
+        xhigh: "xhigh";
+        max: "max";
+        ultra: "ultra";
+    }>>>>;
+    placement: z.ZodOptional<z.ZodOptional<z.ZodObject<{
+        space: z.ZodString;
+        seat: z.ZodNumber;
+    }, z.core.$strip>>>;
     description: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -157,9 +161,9 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             screenshot: z.ZodBoolean;
         }, z.core.$strip>>;
         permissionMode: z.ZodOptional<z.ZodEnum<{
+            auto: "auto";
             ask: "ask";
             "auto-edit": "auto-edit";
-            auto: "auto";
         }>>;
         scope: z.ZodOptional<z.ZodEnum<{
             project: "project";
@@ -179,24 +183,6 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"agent.update">;
     id: z.ZodString;
     patch: z.ZodObject<{
-        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-            claude: "claude";
-            "claude-session": "claude-session";
-            codex: "codex";
-            gemini: "gemini";
-        }>>>;
-        name: z.ZodOptional<z.ZodString>;
-        specialty: z.ZodOptional<z.ZodString>;
-        model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-            minimal: "minimal";
-            low: "low";
-            medium: "medium";
-            high: "high";
-            xhigh: "xhigh";
-            max: "max";
-            ultra: "ultra";
-        }>>>>;
         tools: z.ZodOptional<z.ZodObject<{
             edit: z.ZodBoolean;
             shell: z.ZodBoolean;
@@ -204,9 +190,9 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             screenshot: z.ZodBoolean;
         }, z.core.$strip>>;
         permissionMode: z.ZodOptional<z.ZodEnum<{
+            auto: "auto";
             ask: "ask";
             "auto-edit": "auto-edit";
-            auto: "auto";
         }>>;
         appearance: z.ZodOptional<z.ZodObject<{
             color: z.ZodString;
@@ -217,6 +203,28 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 dots: "dots";
             }>;
         }, z.core.$strip>>;
+        name: z.ZodOptional<z.ZodString>;
+        specialty: z.ZodOptional<z.ZodString>;
+        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            gemini: "gemini";
+        }>>>;
+        model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            minimal: "minimal";
+            low: "low";
+            medium: "medium";
+            high: "high";
+            xhigh: "xhigh";
+            max: "max";
+            ultra: "ultra";
+        }>>>>;
+        placement: z.ZodOptional<z.ZodOptional<z.ZodObject<{
+            space: z.ZodString;
+            seat: z.ZodNumber;
+        }, z.core.$strip>>>;
         description: z.ZodOptional<z.ZodString>;
         systemPrompt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;

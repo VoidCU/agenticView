@@ -17,9 +17,9 @@ export declare const ScopeSchema: z.ZodEnum<{
 }>;
 export type Scope = z.infer<typeof ScopeSchema>;
 export declare const PermissionModeSchema: z.ZodEnum<{
+    auto: "auto";
     ask: "ask";
     "auto-edit": "auto-edit";
-    auto: "auto";
 }>;
 export type PermissionMode = z.infer<typeof PermissionModeSchema>;
 export declare const ToolAllowanceSchema: z.ZodObject<{
@@ -46,6 +46,11 @@ export declare const AppearanceSchema: z.ZodObject<{
     }>;
 }, z.core.$strip>;
 export type Appearance = z.infer<typeof AppearanceSchema>;
+export declare const PlacementSchema: z.ZodObject<{
+    space: z.ZodString;
+    seat: z.ZodNumber;
+}, z.core.$strip>;
+export type Placement = z.infer<typeof PlacementSchema>;
 export declare const AgentSchema: z.ZodObject<{
     id: z.ZodString;
     name: z.ZodString;
@@ -83,9 +88,9 @@ export declare const AgentSchema: z.ZodObject<{
         screenshot: z.ZodBoolean;
     }, z.core.$strip>;
     permissionMode: z.ZodEnum<{
+        auto: "auto";
         ask: "ask";
         "auto-edit": "auto-edit";
-        auto: "auto";
     }>;
     appearance: z.ZodObject<{
         color: z.ZodString;
@@ -103,6 +108,10 @@ export declare const AgentSchema: z.ZodObject<{
         tasksFailed: z.ZodNumber;
     }, z.core.$strip>;
     originId: z.ZodOptional<z.ZodString>;
+    placement: z.ZodOptional<z.ZodObject<{
+        space: z.ZodString;
+        seat: z.ZodNumber;
+    }, z.core.$strip>>;
     createdAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
