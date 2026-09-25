@@ -61,6 +61,15 @@ describe("paths", () => {
     const gi = await readFile(join(dir, ".agenticview", ".gitignore"), "utf8");
     expect(gi).toBe("events.log\nsessions/\nuploads/\ntasks/\nworker-sessions.json\n");
   });
+  it("adds newer entries to a gitignore written by an older version, keeping the user's lines", async () => {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(dir, ".agenticview"), { recursive: true });
+    await writeFile(join(dir, ".agenticview", ".gitignore"), "events.log\nsessions/\nuploads/\ntasks/\nmine.txt");
+    await ensureProjectGitignore(dir);
+    await ensureProjectGitignore(dir);
+    const gi = await readFile(join(dir, ".agenticview", ".gitignore"), "utf8");
+    expect(gi).toBe("events.log\nsessions/\nuploads/\ntasks/\nmine.txt\nworker-sessions.json\n");
+  });
 });
 
 describe("writeJsonFile under concurrent readers", () => {

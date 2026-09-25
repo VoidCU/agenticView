@@ -25,6 +25,13 @@ export async function createServer(opts) {
     app.route("/", bridgeRoutes(toolRegistry));
     app.use("/api/*", requireToken(opts.token));
     app.use("/hooks", requireToken(opts.token));
+    // Graceful stop for `agenticview close`: answer first, then let the owner tear down (signals are unreliable on Windows).
+    app.post("/api/shutdown", (c) => {
+        if (!opts.onShutdown)
+            return c.json({ error: "shutdown not supported" }, 501);
+        setTimeout(() => opts.onShutdown?.(), 50);
+        return c.json({ ok: true });
+    });
     const session = runtimes.get("claude-session");
     if (session instanceof SessionRuntime) {
         session.onWorkersChanged = () => void world.emitProviders().catch(() => undefined);

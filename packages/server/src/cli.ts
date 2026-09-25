@@ -4,13 +4,14 @@
  *
  *   agenticview open --project <path> [--no-browser] [--port N]
  *   agenticview hub [--no-browser] [--port N]
- *   agenticview hook                         (stdin: Claude Code hook JSON)
+ *   agenticview close [--project <path> | --hub | --all]
+ *   agenticview hook                        (stdin: Claude Code hook JSON)
  *   agenticview record-plugin-root <path>
  */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { instanceFile, liveInstance, type Instance } from "./instances.js";
-import { mkdir, stat, unlink, writeFile } from "node:fs/promises";
+import { instanceFile, instancesRoot, liveInstance, type Instance } from "./instances.js";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -26,6 +27,7 @@ export const USAGE = `AgenticView — a 3D office for your coding agents
 Usage:
   agenticview open --project <path> [--no-browser] [--port N]   open the office for a project
   agenticview hub [--no-browser] [--port N]                      open the global hub
+  agenticview close [--project <path> | --hub | --all]           close a running office (default: this folder's)
   agenticview hook                                               (used by plugin hooks; reads stdin)
   agenticview record-plugin-root <path>                          remember where the plugin lives
   agenticview --help
@@ -67,7 +69,9 @@ async function startWorld(projectPath: string | null, opts: { browser: boolean; 
   }
   const { createServer } = await import("./server.js");
   const token = randomBytes(16).toString("hex");
+  let shutdown: () => Promise<void> = async () => undefined;
   const server = await createServer({
+    onShutdown: () => void shutdown(),
     world: projectPath ? { kind: "project", projectPath } : { kind: "hub" },
     token,
     port: opts.port,
@@ -83,7 +87,9 @@ async function startWorld(projectPath: string | null, opts: { browser: boolean; 
   console.log(`AgenticView: ${launchUrl(inst)}`);
   if (opts.browser) openBrowser(launchUrl(inst));
 
-  const shutdown = async () => {
+  shutdown = async () => {
+    // Open browser tabs keep sockets alive; never let a slow close keep the process around.
+    setTimeout(() => process.exit(0), 3000).unref();
     await unlink(file).catch(() => undefined);
     await server.close().catch(() => undefined);
     process.exit(0);
@@ -135,6 +141,71 @@ async function openProjectDetached(projectPath: string): Promise<string> {
   throw new Error(`Timed out starting AgenticView for ${projectPath}`);
 }
 
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Stop one recorded office: ask it to shut down over its token-guarded API, fall back to killing its pid. */
+async function closeInstance(file: string): Promise<string | undefined> {
+  let inst: Instance;
+  try {
+    inst = JSON.parse(await readFile(file, "utf8")) as Instance;
+  } catch {
+    return undefined;
+  }
+  const label = inst.projectPath ?? "hub";
+  if (!alive(inst.pid)) {
+    // Left behind by a crash: tidy it up, nothing to close.
+    await unlink(file).catch(() => undefined);
+    return undefined;
+  }
+  try {
+    await fetch(`${inst.url}/api/shutdown`, { method: "POST", headers: { "x-agenticview-token": inst.token }, signal: AbortSignal.timeout(2000) });
+  } catch {
+    // Not answering: stale file or a hung server; the pid check below decides.
+  }
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && alive(inst.pid)) await new Promise((r) => setTimeout(r, 150));
+  if (alive(inst.pid)) {
+    try {
+      process.kill(inst.pid);
+    } catch {
+      // Already gone.
+    }
+  }
+  await unlink(file).catch(() => undefined);
+  return label;
+}
+
+async function closeCommand(rest: string[]): Promise<number> {
+  const { values } = parseArgs({ args: rest, options: { project: { type: "string" }, hub: { type: "boolean" }, all: { type: "boolean" } }, strict: false });
+  let files: string[];
+  if (values.all) {
+    const dir = join(instancesRoot(), "instances");
+    files = (await readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith(".json")).map((f) => join(dir, f));
+  } else if (values.hub) {
+    files = [instanceFile(null)];
+  } else {
+    files = [instanceFile(typeof values.project === "string" && values.project ? resolve(values.project) : process.cwd())];
+  }
+  const closed: string[] = [];
+  for (const f of files) {
+    const label = await closeInstance(f);
+    if (label) closed.push(label);
+  }
+  if (closed.length === 0) {
+    console.log(values.all ? "AgenticView: no offices are running." : "AgenticView: no office is running for that folder.");
+    return 0;
+  }
+  for (const c of closed) console.log(`AgenticView: closed ${c}`);
+  return 0;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "--help" || cmd === "-h" || cmd === "help") {
@@ -149,6 +220,7 @@ export async function main(argv: string[]): Promise<number> {
     const { runHook } = (await import(pathToFileURL(hookScript).href)) as { runHook: (a: string[]) => Promise<number> };
     return runHook(["record-root", rest[0] ?? ""]);
   }
+  if (cmd === "close") return closeCommand(rest);
   if (cmd === "open" || cmd === "hub") {
     const { values } = parseArgs({
       args: rest,

@@ -13,6 +13,8 @@ export interface ServerOptions {
     staticDir?: string;
     openProject?: (path: string) => Promise<string>;
     workerTools?: (agent: Agent, task: Task) => BridgeTool[];
+    /** Called after an authenticated POST /api/shutdown has been answered (the CLI's `close`). */
+    onShutdown?: () => void;
 }
 export interface RunningServer {
     url: string;
