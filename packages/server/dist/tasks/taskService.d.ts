@@ -1,4 +1,4 @@
-import { type Task, type TaskKind, type TaskLogEntry, type TaskStatus } from "@agenticview/shared";
+import { type Task, type TaskKind, type TaskLogEntry, type TaskStatus, type TaskWorker } from "@agenticview/shared";
 import type { AgentRegistry } from "../agents/registry.js";
 export interface CreateTaskInput {
     kind: TaskKind;
@@ -26,6 +26,8 @@ export declare class TaskService {
     children(id: string): Promise<Task[]>;
     transition(id: string, to: TaskStatus, patch?: TaskPatch): Promise<Task>;
     log(id: string, type: string, text: string): Promise<void>;
+    /** Merge who worked on a task (claude-session attribution) without changing its status. */
+    setWorker(id: string, worker: TaskWorker): Promise<Task | undefined>;
     /** Replace the most recent log entry (used to coalesce streamed text). No-op when the log is empty. */
     replaceLastLog(id: string, entry: TaskLogEntry): Promise<void>;
     /** Called on boot: anything still running or waiting was interrupted by a server restart. */

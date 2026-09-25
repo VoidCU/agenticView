@@ -39,7 +39,7 @@ Close and reopen Claude Code (or start a new session with `claude`). On start, t
 
 Pick one:
 
-- **Claude Max or Pro plan (no API key):** use the **Claude Code session** provider. Open the office, then in a Claude Code session for the same project run `/agenticview-work`. That session becomes a worker: it pulls queued tasks from the office and does them with its own tools. AgenticView never launches `claude` itself for this provider, so your subscription is only used by Claude Code. One session handles one task at a time; open more sessions for more parallel workers.
+- **Claude Max or Pro plan (no API key):** use the **Claude Code session** provider. Open the office, then in a Claude Code session for the same project run `/agenticview-work`. That session becomes a coordinator: it pulls queued tasks from the office and runs each one in the agent's own Claude Code subagent, several agents at once. AgenticView never launches `claude` itself for this provider, so your subscription is only used by Claude Code. A session runs up to 4 tasks at once by default (set per session in the office); open more sessions for more.
 - **Claude via API key (provider `claude`):** set `ANTHROPIC_API_KEY` in your shell environment (get one at platform.claude.com). The Agent SDK does **not** reuse your Claude Code login. Alternatively put the key in `~/.agenticview/config.json`:
 
   ```json
@@ -125,7 +125,7 @@ Inside the office:
 | Provider | How agents run | What you need |
 |---|---|---|
 | **claude** | Claude Agent SDK (Claude Code as a library) | `ANTHROPIC_API_KEY` in your environment, or a cloud provider env such as `CLAUDE_CODE_USE_BEDROCK`. The Agent SDK does not reuse the Claude Code login. You can also put the key in `~/.agenticview/config.json` under `providers.claude.apiKey`. |
-| **claude-session** ("Claude Code session") | Your own Claude Code session running `/agenticview-work` pulls tasks from the office queue over the plugin's `agenticview-worker` MCP server and does them with its own tools. AgenticView never spawns `claude` for it. | A Claude Code login (Max/Pro works). Run `/agenticview-work` in a session for the project; it shows as available while at least one session is polling. Tasks wait in the queue until a session picks them up. |
+| **claude-session** ("Claude Code session") | Your own Claude Code session running `/agenticview-work` pulls tasks from the office queue over the plugin's `agenticview-worker` MCP server and runs each in the agent's own background subagent (`.claude/agents/agenticview-<name>.md`). AgenticView never spawns `claude` for it. | A Claude Code login (Max/Pro works). Run `/agenticview-work` in a session for the project; it shows as available while at least one session is polling. Tasks wait in the queue until a session picks them up. |
 | **codex** | `@openai/codex-sdk` driving the installed `codex` CLI | `npm i -g @openai/codex`, then sign in (`codex login`) or set `CODEX_API_KEY`. |
 | **gemini** | The installed `gemini` CLI in headless streaming mode | `npm i -g @google/gemini-cli`, then sign in or set `GEMINI_API_KEY`. |
 
@@ -133,7 +133,7 @@ The settings panel in the office shows each provider's status and the reason whe
 
 With the default provider on **Automatic**, agents without their own provider run on the first available provider in the order claude, claude-session, codex, gemini. The settings panel shows the current choice, e.g. *Automatic (Codex)*.
 
-Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; Gemini offers its model aliases and has no effort control. A *Claude Code session* worker keeps its own model (the office shows it and hints at `/model` when it differs from the one picked, see below) and treats the effort as a hint for how thorough to be. *Custom…* accepts any model id.
+Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; Gemini offers its model aliases and has no effort control. A *Claude Code session* agent's model is written into its subagent file, so it really runs on that model; without one it inherits the session's model. The effort is a hint for how thorough to be. *Custom…* accepts any model id.
 
 Only Claude supports interactive permission prompts. For Codex and Gemini, the `ask` mode maps to the most restrictive non-interactive setting each CLI offers, and the office says so:
 
@@ -151,12 +151,14 @@ An agent whose tools disallow both editing and shell (the Manager, for example) 
 
 The *Claude Code session* provider uses sessions you start yourself; AgenticView never launches `claude` or the Agent SDK for it. Run `/agenticview:agenticview-work` (or `/agenticview-work`) in a Claude Code session for the project, optionally with an agent name: `/agenticview:agenticview-work Nova`.
 
+- **Agents are subagents.** For every Claude Code session agent the office writes a Claude Code subagent into the project, `.claude/agents/agenticview-<name>.md` (its description, model, allowed tools and system prompt plus the worker protocol). It is rewritten when you edit the agent and on every task, and deleted when the agent is deleted or moves to another provider. Files without the office's `agenticview:generated` marker line are never touched, so you can take one over by deleting that line. The session running `/agenticview-work` is a coordinator: it claims several tasks at once and launches each in its agent's subagent in the background, keeps polling while they work, and completes a run itself if a subagent forgets. A freshly created agent's subagent is picked up by sessions started afterwards (a running session falls back to a general-purpose subagent with the same instructions).
 - **Which session serves which agent.** Each session identifies itself with its Claude Code session id and reports the model it runs on. A session takes tasks of agents bound to it first. A task of an agent with no session goes to any free session, and that session becomes the agent's session from then on. Naming an agent in the command binds it to that session. The office shows the bound session, its online state and its model in the chat header and on the robot's name tag.
-- **Several sessions.** Open more sessions for more parallel workers: one task per session at a time. Give each agent its own session to keep their contexts apart.
-- **Persistence.** Sessions (`.agenticview/worker-sessions.json`, not committed) and bindings (on each agent) survive closing the office and the session. When you resume the session (`claude --resume <id>`, or **Open session** in the office) and run the command again, it picks up its agents' tasks. While an agent's session is offline its tasks wait, and the chat shows *Waiting for session …* with **Open session**, **Use any session**, or a pick of another session.
-- **Managing sessions in the office.** **Sessions** in the top bar lists every known session (online dot, model, agents it serves, current task, last seen) with Rename, Forget and Open session, plus **New session**, which opens a new Claude Code tab in VS Code with the command typed in. Press Enter in that tab to connect it: the prompt is never sent automatically. The agent form has a **Session** picker (Any free session, a known session, or Open a new session…), and creating a Claude Code session agent offers to open a session for it. The links use the Claude Code VS Code extension (`vscode://anthropic.claude-code/open`); without it the office shows the command to run in a terminal instead.
-- **Models.** A session runs on the model it was started with; only you can switch it, with `/model` in that session. The model picked for the agent in the office is a request: when the session reports a different one, the office shows *Session X is on Y; run /model Z in that session to switch*, and the session says so in its first report on each task.
-- **Managers on a session.** A Manager's `await_tasks` over a session returns about every 4 minutes with the tasks still running, and the session calls it again, so long waits are never cut off by a timeout. A Manager cannot wait on a worker bound to the same session that runs the Manager (it would wait forever): `assign_task` and `await_tasks` refuse with a message, and the office shows it. Open another session for that worker.
+- **Several tasks, several sessions.** Each session runs up to its capacity of tasks at once (default 4, editable in **Sessions**), one task per agent at a time. Every call about a task carries its `run_id`, so the office always knows which agent did what. Open more sessions for more parallel work, or to keep agents in separate contexts.
+- **Continuity.** Each task handed to a subagent includes *Your recent work*: the agent's last five tasks with their results, changed files and the subagent id that did them. The office records per task which session and subagent served it; the agent's chat shows a **Work log** and the header shows the session and subagent serving it right now. A session may continue a still-running subagent with SendMessage instead of starting a new one.
+- **Persistence.** Sessions and their capacity (`.agenticview/worker-sessions.json`) and bindings (on each agent) survive closing the office and the session. When you resume the session (`claude --resume <id>`, or **Open session** in the office) and run the command again, it picks up its agents' tasks. While an agent's session is offline its tasks wait, and the chat shows *Waiting for session …* with **Open session**, **Use any session**, or a pick of another session.
+- **Managing sessions in the office.** **Sessions** in the top bar lists every known session (online dot, model, capacity, agents it serves, the tasks running in it with their subagents, last seen) with Rename, Forget and Open session, plus **New session**, which opens a new Claude Code tab in VS Code with the command typed in. Press Enter in that tab to connect it: the prompt is never sent automatically. The agent form has a **Session** picker (Any free session, a known session, or Open a new session…), and creating a Claude Code session agent offers to open a session for it. The links use the Claude Code VS Code extension (`vscode://anthropic.claude-code/open`); without it the office shows the command to run in a terminal instead.
+- **Models.** A subagent runs on its own model setting, so the model picked for the agent in the office (opus, sonnet, haiku, fable) applies. An agent without a model inherits the session's model, which only you can switch with `/model` in that session; when a picked model cannot apply (no subagent), the office shows *Session X is on Y; run /model Z in that session to switch*.
+- **Managers on a session.** A Manager's `await_tasks` over a session returns about every 4 minutes with the tasks still running, and the session calls it again, so long waits are never cut off by a timeout. A Manager and its workers can share one session: the workers run in their own subagents next to the Manager's. Only when every slot of that session is held by the waiting Manager (capacity 1) do `assign_task` and `await_tasks` refuse with a message, since the worker could never start; raise the capacity, or open another session for that worker.
 
 ## Scopes and where data lives
 
@@ -166,7 +168,15 @@ The *Claude Code session* provider uses sessions you start yourself; AgenticView
 | Appear in | that project's office | every office (in the Lobby) and the Hub |
 | Can work in | that project only | any known project |
 
-`<project>/.agenticview/` also holds tasks and settings. It gets its own `.gitignore` so agent definitions and settings are committable while tasks (which carry logs), sessions, and uploads are not. `~/.agenticview/config.json` holds global defaults, provider settings, and the list of known projects.
+`<project>/.agenticview/` also holds tasks, settings and the Claude Code session records. Every project keeps its own folder, and the office adds it to the project's `.gitignore` when it opens (creating the file if needed), together with the generated subagents:
+
+```gitignore
+# AgenticView
+.agenticview/
+.claude/agents/agenticview-*.md
+```
+
+Only missing lines are added, once, and your own lines and line endings are kept. To commit your agents (and settings), delete the `.agenticview/` line (and the subagent line to commit those too): the office does not add a line back once its `# AgenticView` block exists. Inside, `.agenticview/.gitignore` still keeps tasks (which carry logs), sessions and uploads out of Git. `~/.agenticview/config.json` holds global defaults, provider settings, and the list of known projects.
 
 ## Security
 
@@ -201,7 +211,7 @@ Use the bottom command bar to send work to Atlas, or a worker's chat to send it 
 
 ### Why is a Claude Code session task waiting for a worker or session?
 
-Run `/agenticview-work` in a Claude Code session opened in the same project. If the agent is bound to an offline session, use **Open session**, **Use any session**, or choose another session in the office. One session handles one task at a time: a session-backed Manager and its worker need separate sessions. If the worker tools are missing after installation or an update, restart Claude Code so the plugin's MCP server loads. See [Claude Code sessions as workers](#claude-code-sessions-as-workers).
+Run `/agenticview-work` in a Claude Code session opened in the same project. If the agent is bound to an offline session, use **Open session**, **Use any session**, or choose another session in the office. A session runs several tasks at once (its capacity, default 4), so a session-backed Manager and its workers can share it; with capacity 1 they need separate sessions. If the worker tools are missing after installation or an update, restart Claude Code so the plugin's MCP server loads. See [Claude Code sessions as workers](#claude-code-sessions-as-workers).
 
 ### When will agents ask for approval?
 

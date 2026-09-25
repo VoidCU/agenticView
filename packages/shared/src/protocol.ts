@@ -4,7 +4,7 @@ import { type Task } from "./task.js";
 import { EffortSchema } from "./models.js";
 import { ProjectSettingsSchema, KnownProjectSchema, type ProjectSettings } from "./settings.js";
 import type { RunEvent } from "./runtime.js";
-import { AgentSessionSchema, type WorkerSessionInfo } from "./session.js";
+import { AgentSessionSchema, MAX_SESSION_CAPACITY, type WorkerSessionInfo } from "./session.js";
 
 export const ProviderStatusSchema = z.object({
   provider: ProviderSchema,
@@ -65,6 +65,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("project.open"), path: z.string() }),
   z.object({ type: z.literal("session.rename"), id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) }),
   z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),
+  z.object({ type: z.literal("session.capacity"), id: z.string().min(1).max(64), capacity: z.number().int().min(1).max(MAX_SESSION_CAPACITY) }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 

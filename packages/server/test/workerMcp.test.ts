@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { defaultAgent } from "@agenticview/shared";
-import { discoverOffice, formatTask } from "../src/worker-mcp.js";
+import { discoverOffice, formatDispatch, formatTask } from "../src/worker-mcp.js";
 import { instanceFile } from "../src/instances.js";
 import { createServer, type RunningServer } from "../src/server.js";
 import { SessionRuntime } from "../src/runtimes/session.js";
@@ -62,5 +62,37 @@ describe("worker MCP", () => {
     expect(text).toContain("Requested model: opus");
     expect(text).toContain("Requested effort: max");
     expect(text).toContain("/tmp/a.png");
+  });
+
+  it("names the run_id and subagent, digests recent work, and only flags a model mismatch the subagent cannot fix", () => {
+    const base = {
+      runId: "r_9",
+      taskId: "t_9",
+      agent: { id: "w_1", name: "Nova", role: "worker", specialty: "" },
+      cwd: "/proj",
+      systemPrompt: "",
+      prompt: "Next step",
+      images: [],
+      tools: { edit: true, shell: true, web: false, screenshot: false },
+      permissionMode: "auto" as const,
+      model: "opus",
+      bridgeTools: [],
+      session: { id: "s", name: "Main", model: "claude-sonnet-5" },
+    };
+    const withSub = formatTask({
+      ...base,
+      subagent: "agenticview-nova",
+      recentWork: [{ taskId: "t_1", title: "Header", status: "done", summary: "Built it", files: ["a.tsx"], finishedAt: "2026-09-25T10:00:00.000Z", subagentId: "ag-1", sessionName: "Main" }],
+    });
+    expect(withSub).toContain("run_id: r_9");
+    expect(withSub).toContain('agenticview_complete {run_id: "r_9", result}');
+    expect(withSub).toContain("the agenticview-nova subagent runs on opus");
+    expect(withSub).not.toContain("MODEL MISMATCH");
+    expect(withSub).toContain('- [done] "Header" (task t_1 2026-09-25 10:00) (subagent id ag-1 in "Main"): Built it [files: a.tsx]');
+    const noSub = formatTask({ ...base, subagent: null });
+    expect(noSub).toContain("MODEL MISMATCH");
+    expect(noSub).toContain("(none yet: this is the agent's first task here)");
+    expect(formatDispatch({ ...base, subagent: "agenticview-nova" }, 0, 2)).toMatch(/^=== Task 1 of 2: Nova, run_id r_9 ===\nLaunch the `agenticview-nova` subagent IN THE BACKGROUND/);
+    expect(formatDispatch({ ...base, subagent: null }, 1, 2)).toContain("do this task yourself in the main thread");
   });
 });

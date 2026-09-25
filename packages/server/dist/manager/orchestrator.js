@@ -286,9 +286,10 @@ export class Orchestrator {
         return [{ type: "text", text }, ...task.images.map((path) => ({ type: "image", path }))];
     }
     /**
-     * claude-session deadlock guard for a Manager run `runId`: the target agent's task could only be
-     * picked up by the very session that is running the Manager (bound to it), which is busy until the
-     * Manager finishes.
+     * claude-session deadlock guard for a Manager run `runId`. A session runs several tasks at once (one
+     * subagent each), so a worker bound to the Manager's own session is fine as long as that session has
+     * a slot the waiting Manager does not occupy. It is a deadlock only when the target's task could be
+     * picked up by nothing but that session and every slot of it is held by a waiting Manager.
      */
     async sessionConflict(runId, target) {
         const rt = this.deps.runtimes.get("claude-session");
@@ -302,8 +303,11 @@ export class Orchestrator {
             return undefined;
         if (fresh.session?.id !== mine)
             return undefined;
+        if (rt.spareSlotsBeside(mine, [runId]) > 0)
+            return undefined;
         const name = rt.session(mine)?.name ?? fresh.session.name ?? mine;
-        return `${fresh.name} is bound to Claude Code session "${name}", the same session that is running you (the Manager), so its task could never start while you wait. Ask the user to open another Claude Code session for ${fresh.name} (Sessions panel > New session, or run ${WORK_COMMAND} ${fresh.name} in a new session), or to switch ${fresh.name} to "Any free session" or another session in the office, then assign again.`;
+        const cap = rt.capacityOf(mine);
+        return `${fresh.name} is bound to Claude Code session "${name}", the same session that is running you (the Manager), and that session runs only ${cap} task${cap === 1 ? "" : "s"} at once, all taken by you, so ${fresh.name}'s task could never start while you wait. Ask the user to raise that session's capacity in the office (Sessions panel), to open another Claude Code session for ${fresh.name} (Sessions panel > New session, or run ${WORK_COMMAND} ${fresh.name} in a new session), or to switch ${fresh.name} to "Any free session" or another session, then assign again.`;
     }
     bridgeToolsFor(task, agent, runId) {
         if (agent.role === "manager") {

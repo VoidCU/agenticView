@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import {
+  DEFAULT_SESSION_CAPACITY,
+  MAX_SESSION_CAPACITY,
   defaultSessionName,
   type Effort,
   type PermissionMode,
@@ -8,6 +10,7 @@ import {
   type ProviderStatus,
   type RunEvent,
   type RunResult,
+  type SessionRunInfo,
   type ToolAllowance,
   type WorkerSession,
 } from "@agenticview/shared";
@@ -18,14 +21,32 @@ import type { EventSink, Runtime, RunRequest } from "./types.js";
  * /agenticview-work. This runtime NEVER launches `claude` or the Agent SDK; it only queues runs
  * for sessions that pull them over HTTP (see api/worker.ts) and relays what they report.
  *
+ * A session is a coordinator: it claims several runs at once (up to its capacity) and runs each in a
+ * background subagent of the agent's own type (`.claude/agents/agenticview-<slug>.md`). Every call
+ * about a run names its run id, so the office tells the concurrent runs apart.
+ *
  * Sessions are identified by Claude Code's own session id, so the office recognises a session
  * again after it is closed and resumed. Agents are bound to a session ("affinity"):
  * - a session claims tasks of agents bound to it first;
- * - a task of an unbound agent goes to any free session, which then becomes the agent's session;
- * - a task of an agent bound to another known session waits for that session.
+ * - a task of an unbound agent goes to any session with a free slot, which then becomes the agent's session;
+ * - a task of an agent bound to another known session waits for that session;
+ * - one agent runs one task at a time in a session (its subagent continues its own thread of work).
  */
 
 export const SESSION_WORKER_HINT = "Run /agenticview-work in a Claude Code session to connect it.";
+
+/** One earlier task of the agent, for the "Your recent work" digest. */
+export interface RecentWork {
+  taskId: string;
+  title: string;
+  status: string;
+  /** Short result or error. */
+  summary: string;
+  files: string[];
+  finishedAt?: string;
+  subagentId?: string;
+  sessionName?: string;
+}
 
 /** What a worker receives when it claims a run. */
 export interface SessionTask {
@@ -37,7 +58,7 @@ export interface SessionTask {
   systemPrompt: string;
   prompt: string;
   images: string[];
-  /** Model requested in the office (informational: only the user can switch a session's model). */
+  /** Model requested in the office (a subagent with a Claude model alias really runs on it). */
   model?: string;
   /** Requested reasoning effort; the session cannot change it, so it scales thoroughness instead. */
   effort?: Effort;
@@ -46,6 +67,10 @@ export interface SessionTask {
   bridgeTools: { name: string; description: string; inputSchema: Record<string, unknown> }[];
   /** The claiming session as the office knows it (its reported model drives the mismatch note). */
   session?: { id: string; name: string; model: string | null };
+  /** Claude Code subagent type to launch for this run (null: no file, do it in the main thread). */
+  subagent?: string | null;
+  /** The agent's previous tasks, newest first. */
+  recentWork?: RecentWork[];
   /** True when the office hands back a task this session already claimed (e.g. after a reconnect). */
   redelivered?: boolean;
 }
@@ -67,13 +92,56 @@ export interface ClaimInfo {
   agent?: string;
 }
 
+export interface ClaimOptions {
+  /** Most new runs to hand out (default: every free slot). */
+  max?: number;
+  waitMs?: number;
+  signal?: AbortSignal;
+  info?: ClaimInfo;
+  /**
+   * Run ids the worker still tracks. Held runs missing from it are handed back (redelivered), and ids in
+   * it that are no longer live for this session come back in `cancelled`. Omitted: legacy one-run worker.
+   */
+  holding?: string[];
+}
+
+export interface ClaimResult {
+  tasks: SessionTask[];
+  /** Run ids from `holding` that were cancelled in the office: stop their subagents. */
+  cancelled: string[];
+  /** Run ids from `holding` that are finished or unknown (completed elsewhere, office restarted): forget them. */
+  gone: string[];
+  capacity: number;
+  /** Runs this session holds after the claim. */
+  held: number;
+}
+
+/** What the office records about a run as it is claimed, reported on and finished. */
+export interface RunAttribution {
+  runId: string;
+  taskId?: string;
+  agentId: string;
+  sessionId: string;
+  sessionName: string;
+  subagent?: string;
+  subagentId?: string;
+  files?: string[];
+}
+
 /** Where bindings and session records live (the world's agent registry and store). */
 export interface SessionHooks {
   bindingOf(agentId: string): Promise<string | null | undefined>;
   bind(agentId: string, session: { id: string; name: string } | null): Promise<void>;
   findAgent(ref: string): Promise<{ id: string; name: string } | undefined>;
-  save(sessions: WorkerSession[]): Promise<void>;
+  save(sessions: WorkerSessionRecord[]): Promise<void>;
+  /** Before a run is handed out: make sure its subagent file exists and collect the agent's recent work. */
+  prepare?(req: RunRequest): Promise<{ subagent: string | null; recentWork: RecentWork[] }>;
+  /** A run was claimed, or its subagent id / changed files became known. */
+  attribute?(info: RunAttribution): void | Promise<void>;
 }
+
+/** Session record as persisted (capacity may be missing in files written by older versions). */
+export type WorkerSessionRecord = WorkerSession;
 
 /** In-memory hooks (tests, and before a world attaches its own). */
 export function memoryHooks(): SessionHooks & { bindings: Map<string, string | null>; agents: Map<string, string> } {
@@ -97,6 +165,11 @@ interface Pending {
   sink: EventSink;
   text: string;
   workerId?: string;
+  claimedAt?: string;
+  subagent?: string | null;
+  subagentId?: string;
+  recentWork?: RecentWork[];
+  files: Set<string>;
   settle: (r: RunResult) => void;
   settled: boolean;
 }
@@ -115,7 +188,7 @@ export interface SessionRuntimeOptions {
   hooks?: SessionHooks;
 }
 
-const CANCELLED_MSG = "This task was cancelled in the office. Stop working on it and call agenticview_next_task.";
+const CANCELLED_MSG = "This task was cancelled in the office. Stop working on it (stop its subagent).";
 /** lastSeen is persisted at most this often while a session only polls. */
 const SEEN_PERSIST_MS = 30_000;
 
@@ -156,7 +229,7 @@ export class SessionRuntime implements Runtime {
   /** Attach the world's persistence and load the sessions it remembers. */
   attach(hooks: SessionHooks, sessions: WorkerSession[] = []): void {
     this.hooks = hooks;
-    for (const s of sessions) if (!this.sessions.has(s.id)) this.sessions.set(s.id, s);
+    for (const s of sessions) if (!this.sessions.has(s.id)) this.sessions.set(s.id, { ...s, capacity: clampCapacity(s.capacity) });
     this.notifySessions();
   }
 
@@ -171,15 +244,46 @@ export class SessionRuntime implements Runtime {
   isOnline(id: string): boolean {
     const at = this.seen.get(id);
     if (at !== undefined && at >= this.now() - this.liveMs) return true;
-    return this.waiters.some((w) => w.workerId === id) || [...this.runs.values()].some((p) => p.workerId === id);
+    return this.waiters.some((w) => w.workerId === id) || this.held(id).length > 0;
+  }
+
+  /** Live runs a session holds, oldest claim first. */
+  private held(id: string): Pending[] {
+    return [...this.runs.values()].filter((p) => p.workerId === id && !p.settled);
+  }
+
+  /** How many runs a session may hold at once. */
+  capacityOf(id: string): number {
+    return clampCapacity(this.sessions.get(id)?.capacity);
+  }
+
+  /** Free slots of a session right now. */
+  freeSlots(id: string): number {
+    return Math.max(0, this.capacityOf(id) - this.held(id).length);
   }
 
   /** Every known session with live state. */
-  sessionList(): (WorkerSession & { online: boolean; currentRunId: string | null; currentAgentId: string | null; currentTaskId: string | null })[] {
+  sessionList(): (WorkerSession & { online: boolean; currentRunId: string | null; currentAgentId: string | null; currentTaskId: string | null; runs: SessionRunInfo[] })[] {
     return [...this.sessions.values()]
       .map((s) => {
-        const run = [...this.runs.values()].find((p) => p.workerId === s.id);
-        return { ...s, online: this.isOnline(s.id), currentRunId: run?.req.runId ?? null, currentAgentId: run?.req.agent.id ?? null, currentTaskId: run?.req.taskId ?? null };
+        const runs: SessionRunInfo[] = this.held(s.id).map((p) => ({
+          runId: p.req.runId,
+          taskId: p.req.taskId ?? null,
+          agentId: p.req.agent.id,
+          subagent: p.subagent ?? null,
+          subagentId: p.subagentId ?? null,
+          startedAt: p.claimedAt ?? new Date(this.now()).toISOString(),
+        }));
+        const first = runs[0];
+        return {
+          ...s,
+          capacity: clampCapacity(s.capacity),
+          online: this.isOnline(s.id),
+          currentRunId: first?.runId ?? null,
+          currentAgentId: first?.agentId ?? null,
+          currentTaskId: first?.taskId ?? null,
+          runs,
+        };
       })
       .sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeen.localeCompare(a.lastSeen));
   }
@@ -193,6 +297,15 @@ export class SessionRuntime implements Runtime {
     return this.runs.get(runId)?.workerId;
   }
 
+  /**
+   * Slots of `sessionId` that could ever run another task while the runs in `waitingRunIds` (Managers
+   * blocked on their workers) keep theirs: capacity minus those held, waiting runs.
+   */
+  spareSlotsBeside(sessionId: string, waitingRunIds: string[]): number {
+    const blocked = this.held(sessionId).filter((p) => waitingRunIds.includes(p.req.runId) || p.req.agent.role === "manager").length;
+    return this.capacityOf(sessionId) - blocked;
+  }
+
   async rename(id: string, name: string): Promise<WorkerSession | undefined> {
     const s = this.sessions.get(id);
     if (!s) return undefined;
@@ -200,6 +313,17 @@ export class SessionRuntime implements Runtime {
     s.named = true;
     await this.persist();
     this.notifySessions(true);
+    return s;
+  }
+
+  /** Change how many runs a session holds at once (persisted). */
+  async setCapacity(id: string, capacity: number): Promise<WorkerSession | undefined> {
+    const s = this.sessions.get(id);
+    if (!s) return undefined;
+    s.capacity = clampCapacity(capacity);
+    await this.persist();
+    this.notifySessions(true);
+    this.kick();
     return s;
   }
 
@@ -226,7 +350,16 @@ export class SessionRuntime implements Runtime {
     let s = this.sessions.get(workerId);
     let changed = false;
     if (!s) {
-      s = { id: workerId, name: defaultSessionName(workerId, info?.cwd), model: info?.model ?? null, cwd: info?.cwd ?? null, firstSeen: iso, lastSeen: iso, named: false };
+      s = {
+        id: workerId,
+        name: defaultSessionName(workerId, info?.cwd),
+        model: info?.model ?? null,
+        cwd: info?.cwd ?? null,
+        firstSeen: iso,
+        lastSeen: iso,
+        named: false,
+        capacity: DEFAULT_SESSION_CAPACITY,
+      };
       this.sessions.set(workerId, s);
       changed = true;
     } else {
@@ -262,7 +395,7 @@ export class SessionRuntime implements Runtime {
 
   private notifySessions(force = false): void {
     const sig = this.sessionList()
-      .map((s) => `${s.id}:${s.online}:${s.currentRunId}:${s.name}:${s.model}`)
+      .map((s) => `${s.id}:${s.online}:${s.runs.map((r) => `${r.runId}/${r.subagentId ?? ""}`).join(",")}:${s.name}:${s.model}:${s.capacity}`)
       .join("|");
     if (!force && sig === this.lastSignature) return;
     this.lastSignature = sig;
@@ -309,6 +442,7 @@ export class SessionRuntime implements Runtime {
         req,
         sink,
         text: "",
+        files: new Set(),
         settled: false,
         settle: (r) => {
           if (p.settled) return;
@@ -320,13 +454,18 @@ export class SessionRuntime implements Runtime {
           this.notifyCount();
           this.notifySessions();
           resolve(r);
+          // A slot freed up: waiting polls of this session may take more work.
+          this.kick();
         },
       };
       const onAbort = () => {
         this.cancelled.add(req.runId);
         // Keep the tombstone bounded.
         if (this.cancelled.size > 200) this.cancelled.delete(this.cancelled.values().next().value!);
+        const worker = p.workerId;
         p.settle({ text: p.text, stopReason: "aborted" });
+        // Wake the session's waiting poll so it hears about the cancellation now.
+        if (worker) for (const w of this.waiters.filter((x) => x.workerId === worker)) w.resolve(null);
       };
       if (signal.aborted) {
         resolve({ text: "", stopReason: "aborted" });
@@ -352,10 +491,12 @@ export class SessionRuntime implements Runtime {
 
   /** Pick the run a session should take: its bound agents first, then any unbound agent's. */
   private async choose(workerId: string): Promise<{ runId: string; bind: boolean } | undefined> {
+    // One task per agent at a time in a session: its subagent carries one thread of work.
+    const busyAgents = new Set(this.held(workerId).map((p) => p.req.agent.id));
     let unbound: string | undefined;
     for (const runId of this.queue) {
       const p = this.runs.get(runId);
-      if (!p || p.workerId) continue;
+      if (!p || p.workerId || busyAgents.has(p.req.agent.id)) continue;
       const b = await this.hooks.bindingOf(p.req.agent.id);
       if (b === workerId) return { runId, bind: false };
       // A binding to a session the office no longer knows (forgotten) counts as unbound.
@@ -364,22 +505,56 @@ export class SessionRuntime implements Runtime {
     return unbound ? { runId: unbound, bind: true } : undefined;
   }
 
-  /** Assign a run to a session (caller holds the lock). */
+  /** Assign a run to a session when it has a free slot (caller holds the lock). */
   private async take(workerId: string): Promise<SessionTask | undefined> {
+    if (this.freeSlots(workerId) <= 0) return undefined;
     const pick = await this.choose(workerId);
     if (!pick) return undefined;
     const p = this.runs.get(pick.runId);
     if (!p || p.workerId || p.settled) return undefined;
     p.workerId = workerId;
+    p.claimedAt = new Date(this.now()).toISOString();
     const qi = this.queue.indexOf(pick.runId);
     if (qi >= 0) this.queue.splice(qi, 1);
     const s = this.sessions.get(workerId);
     if (pick.bind && s) {
       await this.hooks.bind(p.req.agent.id, { id: s.id, name: s.name }).catch((e) => console.error("[agenticview] binding agent to session failed", e));
     }
-    p.sink({ type: "status", text: `Picked up by Claude Code session "${s?.name ?? workerId}"` });
+    if (this.hooks.prepare) {
+      try {
+        const prep = await this.hooks.prepare(p.req);
+        p.subagent = prep.subagent;
+        p.recentWork = prep.recentWork;
+      } catch (e) {
+        console.error("[agenticview] preparing the subagent failed", e);
+        p.subagent = null;
+      }
+    }
+    p.sink({ type: "status", text: `Picked up by Claude Code session "${s?.name ?? workerId}"${p.subagent ? ` (subagent ${p.subagent})` : ""}` });
+    this.attribute(p);
     this.notifySessions();
-    return toSessionTask(p.req, s);
+    return this.toTask(p, s);
+  }
+
+  private attribute(p: Pending): void {
+    if (!p.workerId || !this.hooks.attribute) return;
+    const s = this.sessions.get(p.workerId);
+    void Promise.resolve(
+      this.hooks.attribute({
+        runId: p.req.runId,
+        ...(p.req.taskId ? { taskId: p.req.taskId } : {}),
+        agentId: p.req.agent.id,
+        sessionId: p.workerId,
+        sessionName: s?.name ?? p.workerId,
+        ...(p.subagent ? { subagent: p.subagent } : {}),
+        ...(p.subagentId ? { subagentId: p.subagentId } : {}),
+        ...(p.files.size ? { files: [...p.files] } : {}),
+      }),
+    ).catch((e) => console.error("[agenticview] recording run attribution failed", e));
+  }
+
+  private toTask(p: Pending, s?: WorkerSession): SessionTask {
+    return toSessionTask(p.req, s, { subagent: p.subagent, recentWork: p.recentWork });
   }
 
   /** Hand queued runs to waiting sessions. */
@@ -406,40 +581,79 @@ export class SessionRuntime implements Runtime {
   }
 
   /**
-   * Long-poll for the next run for session `workerId`. Resolves null when nothing arrives within
+   * Legacy single-run long-poll (one task per session): resolves null when nothing arrives within
    * `waitMs`. A session that already holds a run (it reconnected mid-task) gets that run again.
    */
   async claim(workerId: string, waitMs = 25_000, signal?: AbortSignal, info?: ClaimInfo): Promise<SessionTask | null> {
+    const res = await this.claimMany(workerId, { max: 1, waitMs, signal, info });
+    return res.tasks[0] ?? null;
+  }
+
+  /**
+   * Long-poll for up to `max` runs for session `workerId` (never more than its free slots). Returns as
+   * soon as at least one run is available, a held run is cancelled, or `waitMs` passes.
+   */
+  async claimMany(workerId: string, opts: ClaimOptions = {}): Promise<ClaimResult> {
+    const { waitMs = 25_000, signal, info, holding } = opts;
     this.touch(workerId, info);
     if (info?.agent) await this.bindNamed(workerId, info.agent);
-    const held = [...this.runs.values()].find((p) => p.workerId === workerId && !p.settled);
-    if (held) return { ...toSessionTask(held.req, this.sessions.get(workerId)), redelivered: true };
-    const now = await this.serialize(() => this.take(workerId));
-    if (now) {
-      this.touch(workerId);
-      return now;
-    }
-    if (signal?.aborted) return null;
-    return new Promise((resolve) => {
-      const waiter: Waiter = {
-        workerId,
-        resolve: (t) => {
-          clearTimeout(timer);
-          signal?.removeEventListener("abort", drop);
-          this.touch(workerId);
-          resolve(t);
-        },
-      };
-      const drop = () => {
-        const i = this.waiters.indexOf(waiter);
-        if (i >= 0) this.waiters.splice(i, 1);
-        waiter.resolve(null);
-      };
-      const timer = setTimeout(drop, Math.max(0, waitMs));
-      signal?.addEventListener("abort", drop, { once: true });
-      this.waiters.push(waiter);
-      void this.dispatch();
+    const result = (tasks: SessionTask[]): ClaimResult => ({
+      tasks,
+      cancelled: holding ? holding.filter((id) => this.runs.get(id)?.workerId !== workerId && this.cancelled.has(id)) : [],
+      gone: holding ? holding.filter((id) => this.runs.get(id)?.workerId !== workerId && !this.cancelled.has(id)) : [],
+      capacity: this.capacityOf(workerId),
+      held: this.held(workerId).length,
     });
+
+    // Runs this session holds but the worker does not know about (it restarted): hand them back.
+    const held = this.held(workerId);
+    const lost = holding ? held.filter((p) => !holding.includes(p.req.runId)) : held.slice(0, 1);
+    if (lost.length) return result(lost.map((p) => ({ ...this.toTask(p, this.sessions.get(workerId)), redelivered: true })));
+
+    const early = result([]);
+    if (early.cancelled.length || early.gone.length || opts.max === 0) return early;
+    const want = Math.max(0, Math.min(opts.max ?? Infinity, this.freeSlots(workerId)));
+    const out: SessionTask[] = [];
+    const fill = () =>
+      this.serialize(async () => {
+        while (out.length < want) {
+          const t = await this.take(workerId);
+          if (!t) break;
+          out.push(t);
+        }
+      });
+    if (want > 0) await fill();
+    if (out.length === 0) {
+      // A held run may have been cancelled while we were filling: report it instead of waiting.
+      const now = result([]);
+      if (now.cancelled.length || now.gone.length) return now;
+    }
+    if (out.length === 0 && !signal?.aborted && waitMs > 0) {
+      const first = await new Promise<SessionTask | null>((resolve) => {
+        const waiter: Waiter = {
+          workerId,
+          resolve: (t) => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", drop);
+            const i = this.waiters.indexOf(waiter);
+            if (i >= 0) this.waiters.splice(i, 1);
+            resolve(t);
+          },
+        };
+        const drop = () => waiter.resolve(null);
+        const timer = setTimeout(drop, Math.max(0, waitMs));
+        signal?.addEventListener("abort", drop, { once: true });
+        this.waiters.push(waiter);
+        void this.dispatch();
+      });
+      this.touch(workerId);
+      if (first) {
+        out.push(first);
+        await fill();
+      }
+    }
+    if (out.length) this.touch(workerId);
+    return result(out);
   }
 
   /** `/agenticview-work <agent>`: bind that agent to this session (once per session and name). */
@@ -458,26 +672,43 @@ export class SessionRuntime implements Runtime {
     const p = this.runs.get(runId);
     if (!p) {
       if (this.cancelled.has(runId)) return { ok: false, cancelled: true, error: CANCELLED_MSG };
-      return { ok: false, error: `Unknown or finished run ${runId}. Call agenticview_next_task.` };
+      return { ok: false, error: `Unknown or finished run ${runId}. It may have been completed already.` };
     }
     return p;
   }
 
-  report(runId: string, events: WorkerReport[], workerId?: string): WorkerAck {
+  /** Remember the subagent instance a session reported for a run (shown in the office, kept on the task). */
+  private noteSubagent(p: Pending, subagentId?: string): boolean {
+    const id = typeof subagentId === "string" ? subagentId.trim().slice(0, 120) : "";
+    if (!id || id === p.subagentId) return false;
+    p.subagentId = id;
+    this.notifySessions();
+    return true;
+  }
+
+  report(runId: string, events: WorkerReport[], workerId?: string, subagentId?: string): WorkerAck {
     const p = this.active(runId, workerId);
     if (!("req" in p)) return p;
+    let changed = this.noteSubagent(p, subagentId);
     for (const ev of events) {
       const e = normalize(ev);
       if (!e) continue;
       if (e.type === "text") p.text += (p.text ? "\n" : "") + e.text;
+      if (e.type === "file_changed" && !p.files.has(e.path)) {
+        p.files.add(e.path);
+        changed = true;
+      }
       p.sink(e);
     }
+    if (changed) this.attribute(p);
     return { ok: true };
   }
 
-  complete(runId: string, outcome: { text?: string; error?: string }, workerId?: string): WorkerAck {
+  complete(runId: string, outcome: { text?: string; error?: string; subagentId?: string }, workerId?: string): WorkerAck {
     const p = this.active(runId, workerId);
     if (!("req" in p)) return p;
+    this.noteSubagent(p, outcome.subagentId);
+    this.attribute(p);
     const text = outcome.text ?? p.text;
     if (outcome.text) p.sink({ type: "text", text: outcome.text });
     if (outcome.error) p.settle({ text, stopReason: "error", error: outcome.error });
@@ -499,6 +730,11 @@ export class SessionRuntime implements Runtime {
   }
 }
 
+function clampCapacity(n: unknown): number {
+  const v = typeof n === "number" && Number.isFinite(n) ? Math.round(n) : DEFAULT_SESSION_CAPACITY;
+  return Math.min(MAX_SESSION_CAPACITY, Math.max(1, v));
+}
+
 function normalize(ev: WorkerReport): RunEvent | undefined {
   switch (ev?.type) {
     case "text":
@@ -516,7 +752,7 @@ function normalize(ev: WorkerReport): RunEvent | undefined {
   }
 }
 
-function toSessionTask(req: RunRequest, s?: WorkerSession): SessionTask {
+function toSessionTask(req: RunRequest, s?: WorkerSession, extra: { subagent?: string | null; recentWork?: RecentWork[] } = {}): SessionTask {
   return {
     runId: req.runId,
     ...(req.taskId ? { taskId: req.taskId } : {}),
@@ -535,5 +771,7 @@ function toSessionTask(req: RunRequest, s?: WorkerSession): SessionTask {
       inputSchema: z.toJSONSchema(z.object(t.schema)) as Record<string, unknown>,
     })),
     ...(s ? { session: { id: s.id, name: s.name, model: s.model } } : {}),
+    ...(extra.subagent !== undefined ? { subagent: extra.subagent } : {}),
+    ...(extra.recentWork ? { recentWork: extra.recentWork } : {}),
   };
 }

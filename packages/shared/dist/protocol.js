@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AgentSchema, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, ScopeSchema } from "./agent.js";
 import { EffortSchema } from "./models.js";
 import { ProjectSettingsSchema, KnownProjectSchema } from "./settings.js";
-import { AgentSessionSchema } from "./session.js";
+import { AgentSessionSchema, MAX_SESSION_CAPACITY } from "./session.js";
 export const ProviderStatusSchema = z.object({
     provider: ProviderSchema,
     ok: z.boolean(),
@@ -54,5 +54,6 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("project.open"), path: z.string() }),
     z.object({ type: z.literal("session.rename"), id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) }),
     z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),
+    z.object({ type: z.literal("session.capacity"), id: z.string().min(1).max(64), capacity: z.number().int().min(1).max(MAX_SESSION_CAPACITY) }),
 ]);
 //# sourceMappingURL=protocol.js.map

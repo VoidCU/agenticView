@@ -17,6 +17,8 @@ const sess = (over: Partial<WorkerSessionInfo> & { id: string }): WorkerSessionI
   named: false,
   online: true,
   currentTaskId: null,
+  capacity: 4,
+  runs: [],
   agentIds: [],
   ...over,
 });
@@ -40,7 +42,9 @@ describe("session helpers", () => {
     expect(sessionModelMatches("opus", "Opus 5.5")).toBe(true);
     expect(sessionModelMatches("opus", "claude-sonnet-5")).toBe(false);
     expect(sessionModelMatches(null, "claude-sonnet-5")).toBe(true);
-    expect(modelMismatchHint("opus", { name: "Main tab", model: "claude-sonnet-5" })).toBe('Session "Main tab" is on claude-sonnet-5; run /model opus in that session to switch.');
+    // A Claude alias runs in the agent's own subagent, so the session's model does not matter.
+    expect(modelMismatchHint("opus", { name: "Main tab", model: "claude-sonnet-5" })).toBeUndefined();
+    expect(modelMismatchHint("my-model", { name: "Main tab", model: "claude-sonnet-5" })).toBe('Session "Main tab" is on claude-sonnet-5; run /model my-model in that session to switch.');
     expect(modelMismatchHint("opus", { name: "Main tab", model: "claude-opus-5-5" })).toBeUndefined();
   });
 });
@@ -90,14 +94,14 @@ describe("Sessions panel", () => {
 });
 
 describe("agent modal session select", () => {
-  it("lists known sessions, binds the pick, and hints at a model mismatch", async () => {
+  it("lists known sessions and binds the pick; no model hint for a Claude alias (its subagent runs it)", async () => {
     const send = vi.fn();
     useStore.setState({ send, sessions: [sess({ id: "s-a", name: "Main tab", model: "claude-sonnet-5" }), sess({ id: "s-b", name: "Spare", online: false })] });
     render(<CreateAgentModal onClose={vi.fn()} edit={nova} />);
     const select = screen.getByLabelText(/^session$/i) as HTMLSelectElement;
     expect(select.value).toBe("s-a");
     expect([...select.options].map((o) => o.textContent)).toEqual(["Any free session", "Main tab (online, claude-sonnet-5)", "Spare (offline)", "Open a new session…"]);
-    expect(screen.getByTestId("model-mismatch").textContent).toMatch(/run \/model opus/);
+    expect(screen.queryByTestId("model-mismatch")).toBeNull();
     await userEvent.selectOptions(select, "s-b");
     expect(screen.queryByTestId("model-mismatch")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
@@ -137,11 +141,81 @@ describe("chat header for a claude-session agent", () => {
     render(<ChatPanel />);
     expect(screen.getByTestId("session-chip").textContent).toBe("Main tab · offline · claude-sonnet-5");
     expect(screen.getByText(/waiting for session/i).textContent).toContain("Main tab");
-    expect(screen.getByText(/run \/model opus in that session/i)).toBeTruthy();
+    expect(screen.queryByText(/run \/model/i)).toBeNull();
     expect(screen.getByRole("link", { name: "Open session" })).toHaveAttribute("href", resumeSessionUri("s-a"));
     await userEvent.click(screen.getByRole("button", { name: "Use any session" }));
     expect(send).toHaveBeenCalledWith({ type: "agent.update", id: nova.id, patch: { session: null } });
     await userEvent.selectOptions(screen.getByLabelText("Move to session"), "s-b");
     expect(send).toHaveBeenCalledWith({ type: "agent.update", id: nova.id, patch: { session: { id: "s-b", name: "Spare" } } });
+  });
+});
+
+describe("several agents in one session", () => {
+  const run = (agentId: string, runId: string, taskId: string, extra: Partial<WorkerSessionInfo["runs"][number]> = {}) => ({
+    runId,
+    taskId,
+    agentId,
+    subagent: `agenticview-${agentId.slice(2)}`,
+    subagentId: null,
+    startedAt: "2026-09-25T00:00:00.000Z",
+    ...extra,
+  });
+
+  it("Sessions panel shows capacity (editable) and the runs with agent names and subagents", async () => {
+    const send = vi.fn();
+    useStore.getState().apply({ type: "task.updated", task: task({ id: "t1", assigneeId: nova.id, status: "running", title: "Build header" }) });
+    useStore.getState().apply({ type: "task.updated", task: task({ id: "t2", assigneeId: worker.id, status: "running", title: "Add endpoint" }) });
+    useStore.setState({
+      send,
+      sessions: [sess({ id: "s-a", name: "Main tab", capacity: 4, runs: [run(nova.id, "r1", "t1", { subagentId: "abc123def456" }), run(worker.id, "r2", "t2")] })],
+    });
+    render(<SessionsModal onClose={vi.fn()} />);
+    const row = document.querySelector(".session-row")!;
+    expect(row.textContent).toContain("2 of 4 running");
+    const items = screen.getAllByRole("listitem").filter((li) => li.classList.contains("session-run"));
+    expect(items.map((li) => li.textContent)).toEqual([
+      expect.stringMatching(/^Nova“Build header”agenticview-nova #abc123de/),
+      expect.stringMatching(new RegExp(`^${worker.name}“Add endpoint”agenticview-${worker.id.slice(2)}`)),
+    ]);
+    await userEvent.selectOptions(screen.getByLabelText("Tasks at once in Main tab"), "2");
+    expect(send).toHaveBeenCalledWith({ type: "session.capacity", id: "s-a", capacity: 2 });
+  });
+
+  it("chat header shows the session and subagent serving the agent; the work log lists its tasks and opens one", async () => {
+    useStore.getState().apply({ type: "task.updated", task: task({ id: "t1", assigneeId: nova.id, status: "running", title: "Build header", startedAt: "2026-09-25T02:00:00.000Z" }) });
+    useStore.getState().apply({
+      type: "task.updated",
+      task: task({
+        id: "t0",
+        assigneeId: nova.id,
+        status: "done",
+        title: "Set up routes",
+        result: "Routes added and tested.",
+        startedAt: "2026-09-25T01:00:00.000Z",
+        finishedAt: "2026-09-25T01:10:00.000Z",
+        worker: { runId: "r0", sessionId: "s-a", sessionName: "Main tab", subagent: "agenticview-nova", subagentId: "sub-77", files: ["src/routes.ts"] },
+      }),
+    });
+    useStore.setState({ sessions: [sess({ id: "s-a", name: "Main tab", runs: [run(nova.id, "r1", "t1", { subagentId: "sub-99" })] })] });
+    useStore.getState().select(nova.id);
+    render(<ChatPanel />);
+    expect(screen.getByTestId("serving-chip").textContent).toBe("Main tab › agenticview-nova #sub-99");
+    const log = screen.getByTestId("work-log");
+    expect(log.querySelector("summary")!.textContent).toBe("Work log 2");
+    const entries = [...log.querySelectorAll(".worklog-item")];
+    expect(entries.map((e) => e.querySelector(".worklog-title")!.textContent)).toEqual(["Build header", "Set up routes"]);
+    await userEvent.click(screen.getByText("Set up routes"));
+    expect(entries[1]!.querySelector("details")!.open).toBe(true);
+    expect(entries[1]!.textContent).toContain("Routes added and tested.");
+    expect(entries[1]!.textContent).toContain("Served by session Main tab as agenticview-nova (id sub-77)");
+    expect(entries[1]!.textContent).toContain("src/routes.ts");
+  });
+
+  it("no serving chip when nothing of the agent is running", () => {
+    useStore.setState({ sessions: [sess({ id: "s-a", name: "Main tab" })] });
+    useStore.getState().select(nova.id);
+    render(<ChatPanel />);
+    expect(screen.queryByTestId("serving-chip")).toBeNull();
+    expect(screen.queryByTestId("work-log")).toBeNull();
   });
 });

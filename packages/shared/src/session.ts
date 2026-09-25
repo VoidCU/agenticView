@@ -1,9 +1,14 @@
 import { z } from "zod";
 
+/** Default number of tasks one Claude Code session runs at once (one subagent each). */
+export const DEFAULT_SESSION_CAPACITY = 4;
+export const MAX_SESSION_CAPACITY = 8;
+
 /**
  * A Claude Code session that has connected to the office with /agenticview-work (the
  * `claude-session` provider). Identified by Claude Code's own session id (`${CLAUDE_SESSION_ID}`),
- * so it is recognised again when the user reopens or resumes that session.
+ * so it is recognised again when the user reopens or resumes that session. The session is a
+ * coordinator: it runs each claimed task in a background subagent, several at once.
  */
 export const WorkerSessionSchema = z.object({
   id: z.string().min(1).max(64),
@@ -15,17 +20,33 @@ export const WorkerSessionSchema = z.object({
   lastSeen: z.string(),
   /** True once the user renamed it in the office (auto names never overwrite it). */
   named: z.boolean().default(false),
+  /** How many office tasks this session runs at once (each in its own background subagent). */
+  capacity: z.number().int().min(1).max(MAX_SESSION_CAPACITY).default(DEFAULT_SESSION_CAPACITY),
 });
 export type WorkerSession = z.infer<typeof WorkerSessionSchema>;
 
 export const WorkerSessionFileSchema = z.object({ sessions: z.array(WorkerSessionSchema).default([]) });
 
+/** A run a session is working on (one background subagent in that session). */
+export interface SessionRunInfo {
+  runId: string;
+  taskId: string | null;
+  agentId: string;
+  /** Claude Code subagent type that serves it ("agenticview-<slug>"), when one was generated. */
+  subagent: string | null;
+  /** The subagent instance id the session reported (lets the session continue it with SendMessage). */
+  subagentId: string | null;
+  startedAt: string;
+}
+
 /** Wire form: the persisted record plus live state. */
 export interface WorkerSessionInfo extends WorkerSession {
   /** Polled or worked within the liveness window. */
   online: boolean;
-  /** Office task the session is working on right now. */
+  /** Office task the session is working on right now (the first of `runs`, kept for older clients). */
   currentTaskId: string | null;
+  /** Every run the session holds right now, one subagent each. */
+  runs: SessionRunInfo[];
   /** Agents bound to this session. */
   agentIds: string[];
 }

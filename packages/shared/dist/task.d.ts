@@ -24,6 +24,15 @@ export declare const TaskLogEntrySchema: z.ZodObject<{
     text: z.ZodString;
 }, z.core.$strip>;
 export type TaskLogEntry = z.infer<typeof TaskLogEntrySchema>;
+export declare const TaskWorkerSchema: z.ZodObject<{
+    runId: z.ZodString;
+    sessionId: z.ZodString;
+    sessionName: z.ZodOptional<z.ZodString>;
+    subagent: z.ZodOptional<z.ZodString>;
+    subagentId: z.ZodOptional<z.ZodString>;
+    files: z.ZodOptional<z.ZodArray<z.ZodString>>;
+}, z.core.$strip>;
+export type TaskWorker = z.infer<typeof TaskWorkerSchema>;
 export declare const TaskSchema: z.ZodObject<{
     id: z.ZodString;
     kind: z.ZodEnum<{
@@ -54,6 +63,14 @@ export declare const TaskSchema: z.ZodObject<{
             gemini: "gemini";
         }>;
         sessionId: z.ZodString;
+    }, z.core.$strip>>;
+    worker: z.ZodOptional<z.ZodObject<{
+        runId: z.ZodString;
+        sessionId: z.ZodString;
+        sessionName: z.ZodOptional<z.ZodString>;
+        subagent: z.ZodOptional<z.ZodString>;
+        subagentId: z.ZodOptional<z.ZodString>;
+        files: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
     images: z.ZodArray<z.ZodString>;
     result: z.ZodOptional<z.ZodString>;

@@ -284,6 +284,10 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"session.forget">;
     id: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"session.capacity">;
+    id: z.ZodString;
+    capacity: z.ZodNumber;
 }, z.core.$strip>], "type">;
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export interface PendingPermissionInfo {

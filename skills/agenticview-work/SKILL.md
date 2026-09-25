@@ -1,52 +1,72 @@
 ---
 name: agenticview-work
-description: Turn this Claude Code session into an AgenticView worker that pulls tasks from the office queue (the "Claude Code session" provider) and does them with this session's own tools. Use when the user runs /agenticview-work or asks this session to work on AgenticView office tasks.
+description: Turn this Claude Code session into an AgenticView worker that pulls tasks from the office queue (the "Claude Code session" provider) and runs them in the agents' own subagents, several at once. Use when the user runs /agenticview-work or asks this session to work on AgenticView office tasks.
 argument-hint: "[agent name]"
 arguments: [agent]
 ---
 
-This session becomes a worker for the AgenticView office of the current project (or the Hub if no project office is running). Office agents set to the **Claude Code session** provider (`claude-session`) queue their tasks; you pick them up one at a time and do them here, with your own tools, on the user's own Claude Code plan. AgenticView never launches Claude itself for this provider: the user starts every session.
+This session becomes a worker for the AgenticView office of the current project (or the Hub if no project office is running). Office agents set to the **Claude Code session** provider (`claude-session`) queue their tasks here, on the user's own Claude Code plan. AgenticView never launches Claude itself for this provider: the user starts every session.
 
-The worker tools come from the plugin's `agenticview-worker` MCP server: `agenticview_next_task`, `agenticview_report`, `agenticview_complete`, `agenticview_bridge`.
+**You are the coordinator, not the worker.** Every office agent has its own Claude Code subagent in this project (`.claude/agents/agenticview-<name>.md`, written and kept up to date by the office). You claim tasks and launch each one in its agent's subagent **in the background**, so several agents work at once in this one session. You do not do the tasks yourself.
 
-## Identity (pass on every call)
+The worker tools come from the plugin's `agenticview-worker` MCP server: `agenticview_next_task` (coordinator only), `agenticview_report`, `agenticview_complete`, `agenticview_bridge` (used by the subagents).
+
+## Identity (pass on every agenticview_next_task call)
 
 - `session_id`: `${CLAUDE_SESSION_ID}` (exactly this value). The office uses it to recognise this session again after the user closes and resumes it, and to route each agent's tasks to its own session.
-- `model`: the model this session is running on right now, as your system prompt names it (for example `claude-opus-5-5[1m]` or `Opus 5.5`). Pass it to `agenticview_next_task`. The office shows it; you cannot change it.
-- `agent`: the agent to serve, from the command arguments: `$ARGUMENTS`. If that is empty, omit `agent`. If it names an agent (for example `/agenticview:agenticview-work Nova`), pass `agent: "Nova"` to `agenticview_next_task`: the office binds that agent to this session.
+- `model`: the model this session is running on right now, as your system prompt names it (for example `claude-opus-5-5[1m]` or `Opus 5.5`). The office shows it.
+- `agent`: the agent to serve, from the command arguments: `$ARGUMENTS`. If that is empty, omit `agent`. If it names an agent (for example `/agenticview:agenticview-work Nova`), pass `agent: "Nova"`: the office binds that agent to this session. The session still serves every other agent bound to it.
 
-## Loop
+## Dispatcher loop
 
-1. Call `agenticview_next_task` with `session_id`, `model` and (if given) `agent`. It waits (up to 10 minutes by default) for a task.
+Keep a list of the runs you launched: `run_id`, agent name, subagent, and the background agent's id.
+
+1. **Claim.** Call `agenticview_next_task` with `session_id`, `model`, `agent` (if given), and:
+   - `max_tasks`: your free slots (the office tells you "This session holds N of M task slots"; at the start just omit it and the office fills every free slot).
+   - `wait_seconds`: 600 when nothing is running; **20 to 30 while subagents are running**, so you return promptly to handle their completion notifications.
    - If it says no office is running, tell the user to open it with `/agenticview` and stop.
-   - If the tools are missing or the `agenticview-worker` server failed to connect, or a tool says it is still installing, tell the user to run `/mcp`, pick `agenticview-worker`, choose Reconnect (after a restart of Claude Code if it is not listed), then run `/agenticview-work` again, and stop.
-   - If it says no task arrived yet, call it again right away. Do not ask the user between polls.
-2. When a task arrives, work on it:
-   - Adopt the agent persona: follow the **Agent system prompt** in the task as your instructions for this task, and answer as that agent.
-   - Work in the task's **Working directory** (use absolute paths there; `cd` into it for shell commands).
-   - Respect **Allowed tools** strictly. If file edits are not allowed, do not use Edit, Write, MultiEdit, NotebookEdit or shell commands that change files. If shell is not allowed, do not use Bash. If web is not allowed, do not use WebFetch or WebSearch. Reading files is always fine.
-   - If the task shows **MODEL MISMATCH**, your first `agenticview_report` must say so, for example: "Session is on Sonnet 5; run /model opus in this session to switch." Then carry on with the current model. Never try to switch models yourself.
-   - If the task lists attached images, read those files.
-   - Report progress briefly with `agenticview_report` at meaningful steps (a one-line `text`, or `events` such as `{"type":"file_changed","path":"src/a.ts","kind":"modify"}` after editing a file). Keep it short; the office shows it in the agent's chat.
-   - Use `agenticview_bridge` with `{tool, args}` to call the office tools listed under **Office tools** (for example a Manager's `list_agents`, `create_agent`, `assign_task`, `await_tasks` and `ask_user`, or a worker's `take_screenshot`). Do not use your own subagents in place of office delegation when the task asks you to delegate.
-   - Long waits: `await_tasks` over the bridge returns after about 4 minutes with a `stillRunning` list when tasks are not done yet. Call it again with those ids until everything has finished. That is normal, not an error.
-   - If `assign_task` or `await_tasks` says waiting would deadlock (the worker is bound to this same session), do not wait: tell the user to open another Claude Code session for that agent (Sessions panel in the office > New session, or `/agenticview:agenticview-work <agent>` in a new session) or to switch the agent to another session, and report that in your result.
-3. Call `agenticview_complete` with `result` set to your final answer for the user (what you did, files changed, how you verified). If you could not do it, pass `error` with the reason instead.
-4. Go back to step 1 immediately.
+   - If the tools are missing, the `agenticview-worker` server failed to connect, or a tool says it is still installing: tell the user to run `/mcp`, pick `agenticview-worker`, choose Reconnect (after a restart of Claude Code if it is not listed), then run `/agenticview-work` again, and stop.
+   - If no task arrived yet, call it again right away. Do not ask the user between polls.
+2. **Launch.** For each task in the reply (`=== Task i of n: <agent>, run_id <id> ===`):
+   - Launch the named subagent with the Agent tool **in the background** (`subagent_type` = the subagent it names, e.g. `agenticview-nova`; `run_in_background: true`; description `"<agent>: <run_id>"`), passing the whole task text that follows the header **verbatim** as the prompt. It already contains the run_id, the protocol, the allowed tools, the agent's recent work and the task.
+   - Launch all tasks of one reply in the same message so they run concurrently. Do not wait for one before launching the next.
+   - Optional: once you know a subagent's agent id, call `agenticview_report {run_id, subagent_id}` so the office shows it and records it in the agent's work log.
+   - Only if a task says there is **no subagent file** (a Hub task with no project), do that one task yourself in the main thread, passing its `run_id` to every worker tool call.
+   - If the Agent tool rejects the subagent type (the file was just created and this session has not loaded it yet), launch a `general-purpose` subagent in the background with the same task text instead; it follows the protocol in the text. Mention once that a restart of the session loads the agents' own subagents.
+3. **Keep polling while they work.** Go back to step 1 with `max_tasks` = free slots and a short `wait_seconds`. Handle whatever arrives first:
+   - **New tasks**: launch them as in step 2.
+   - **A subagent finished** (background completion notification): make sure its run was completed. The subagent should have called `agenticview_complete {run_id, ...}` itself. If it did not (its final message does not say so, or you are unsure), call `agenticview_complete {run_id, result: <its final message>}` yourself, or `{run_id, error}` if it failed. An "Unknown or finished run" reply means it was already completed: that is fine.
+   - **CANCELLED: run_id ...**: stop that background subagent at once (TaskStop with its id) and forget the run. Do not complete it.
+4. Repeat until the user interrupts you.
 
-If any worker tool replies that the task was cancelled, stop working on it at once and go back to step 1.
+Never do the agents' work in the main thread yourself (except the no-subagent case above). The main thread stays free to claim, launch and supervise.
 
-Keep looping until the user interrupts you. One session handles one task at a time; to run tasks in parallel, open more Claude Code sessions in the project and run `/agenticview-work` in each.
+## What the subagents do (for reference)
+
+Each subagent follows the protocol in its definition and task text: work in the task's working directory, respect its allowed tools, report progress with `agenticview_report {run_id, text}`, use `agenticview_bridge {run_id, tool, args}` for office tools (a Manager's `list_agents`, `assign_task`, `await_tasks`, `ask_user`; a worker's `take_screenshot`), and finish with `agenticview_complete {run_id, result}` exactly once. `run_id` is required on every call while this session runs more than one task.
+
+- The Manager (Atlas) runs as a subagent too. It may assign work to agents bound to this same session: their tasks arrive at your next poll and run in parallel in their own subagents, as long as the session has a free slot. `await_tasks` returns after about 4 minutes with a `stillRunning` list; the Manager calls it again. That is normal, not an error.
+- If `assign_task` or `await_tasks` says waiting would deadlock, every slot of this session is taken by waiting Managers: tell the user to raise the session's capacity in the office (Sessions panel), open another Claude Code session for that agent, or move the agent to another session.
+
+## Continuity
+
+- Every task carries **Your recent work**: the agent's last tasks with their results, changed files, and the subagent id that did them. A fresh subagent reads it and continues the thread.
+- The office records, per task, which session and subagent did it (its Work log). If a finished subagent of that agent is still alive in this session, you may continue it with SendMessage instead of launching a new one (pass it the new task text); this is optional, and launching a new subagent is always fine.
+
+## Models
+
+- A subagent runs on its own model setting: the agent's model in the office (opus, sonnet, haiku, fable) is written into its subagent file, so per-agent models really apply. An agent without a model inherits this session's model.
+- A task shows **MODEL MISMATCH** only when that cannot apply (no subagent, or a model that is not a Claude alias). Then the first `agenticview_report` of that run must say so, for example: "Session is on Sonnet 5; run /model opus in this session to switch." Carry on with the current model. Never try to switch models yourself.
+- Scale effort to the task's **Requested effort** (low, medium, high, xhigh, max): the subagent does this; low means answer directly, high and above means investigate thoroughly and verify.
 
 ## How the office routes tasks
 
-- Each `claude-session` agent is bound to one session. This session gets the tasks of agents bound to it first.
-- A task of an agent with no session goes to any free session, and that session becomes the agent's session from then on (sticky).
+- Each `claude-session` agent is bound to one session. This session gets the tasks of agents bound to it first, several at once up to its capacity (default 4, set per session in the office's Sessions panel), and one task per agent at a time.
+- A task of an agent with no session goes to any session with a free slot, and that session becomes the agent's session from then on (sticky).
 - A task of an agent bound to another session waits for that session, even if it is closed. The office shows "waiting for session ..." with buttons to reopen it, use any session, or pick another one.
-- Bindings and session names persist: resuming this session later (`claude --resume`, or Open in the office) reconnects the same agents.
+- Bindings, capacity and session names persist: resuming this session later (`claude --resume`, or Open in the office) reconnects the same agents. After a reconnect the office hands back the runs this session still held (marked as already claimed): relaunch them.
 
 Notes:
-- The office shows the provider as available while this session is polling or working ("N workers"), and lists it in its Sessions panel.
-- Your permission prompts are this session's own: the office's per-agent permission mode does not change them.
-- Stay on this session's model: only the user can switch it (`/model`). A **Requested model** in the task is informational.
-- Scale effort to the task's **Requested effort** (low, medium, high, xhigh, max). Low: answer directly with the minimum reading and checking needed. Medium: normal care. High and above: investigate thoroughly, consider edge cases, and verify (tests, typecheck) before completing; at max, be exhaustive. With no requested effort, use your normal judgement.
+- The office shows the provider as available while this session is polling or working ("N workers"), and lists it with its running tasks in its Sessions panel.
+- Permission prompts are this session's own: the office's per-agent permission mode does not change them. Subagents run in the background, so tools they need should be allowed in this session's permission settings.
+- The subagent files and `.agenticview/` are git-ignored in the project by the office.

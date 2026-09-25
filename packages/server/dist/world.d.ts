@@ -1,12 +1,13 @@
 import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo } from "@agenticview/shared";
 import { SessionRuntime } from "./runtimes/session.js";
+import { type SyncResult } from "./agents/subagents.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { Orchestrator, type ResolvedSettings } from "./manager/orchestrator.js";
 import type { Runtime, BridgeTool } from "./runtimes/types.js";
 import type { ToolRegistry } from "./bridge/toolRegistry.js";
 import type { EventBus } from "./events/bus.js";
-import type { Agent, Task } from "@agenticview/shared";
+import { type Agent, type Task } from "@agenticview/shared";
 export interface WorldOptions {
     runtimes: Map<Provider, Runtime>;
     bus: EventBus;
@@ -29,6 +30,8 @@ export interface World {
     providerStatuses: () => Promise<ProviderStatus[]>;
     /** Claude Code sessions known to this world, with live state and the agents bound to each. */
     sessions: () => Promise<WorkerSessionInfo[]>;
+    /** Rewrite the project's claude-session subagent files (project worlds; no-op in the hub). */
+    syncSubagents: () => Promise<SyncResult | undefined>;
     /** The claude-session runtime, when configured. */
     sessionRuntime?: SessionRuntime;
     /** Push fresh provider availability (and the Automatic choice) to every client. */
