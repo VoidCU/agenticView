@@ -9,6 +9,7 @@ export interface CreateTaskInput {
     projectPath: string;
     parentId?: string;
     images?: string[];
+    readOnly?: boolean;
 }
 export type TaskPatch = Partial<Pick<Task, "result" | "error" | "session">>;
 /** `state`: status/result/session changed (worth broadcasting). `log`: only the log grew. */

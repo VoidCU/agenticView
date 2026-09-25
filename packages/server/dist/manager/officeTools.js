@@ -14,9 +14,10 @@ export async function describeSpaces(ctx) {
         if (p)
             who.set(`${p.space}#${p.seat}`, a);
     }
-    const rows = assignableSpaces(agents).map((s) => ({
+    const rows = plan.spaces.map((s) => ({
         id: s.id,
-        name: s.name,
+        name: ctx.spaceNames?.()[s.id] ?? s.name,
+        defaultName: s.name,
         kind: s.kind,
         seats: Array.from({ length: s.seats }, (_, seat) => {
             const a = who.get(`${s.id}#${seat}`);
@@ -35,7 +36,8 @@ export async function moveWorker(ctx, agentRef, spaceRef, seat) {
     if (!worker)
         return `ERROR: unknown worker ${agentRef} (use list_agents)`;
     const spaces = assignableSpaces(agents);
-    const space = findSpace(spaces, spaceRef);
+    const room = spaces.find(s => s.id === spaceRef) ?? spaces.find(s => ctx.spaceNames?.()[s.id]?.toLowerCase() === spaceRef.trim().toLowerCase()) ?? findSpace(spaces, spaceRef);
+    const space = room && { ...room, name: ctx.spaceNames?.()[room.id] ?? room.name };
     if (!space)
         return `ERROR: unknown space ${spaceRef}; pick one of: ${spaces.map((s) => s.id).join(", ")}`;
     const plan = planOffice(agents);
@@ -75,6 +77,25 @@ export function officeTools(ctx) {
             description: "Show the office floor plan: every space (pods, meeting room, lounge) with its seats and who sits in each.",
             schema: {},
             handler: async () => describeSpaces(ctx),
+        },
+        {
+            name: "rename_space",
+            description: "Name a room after its role. Empty name restores the default; use the id or current name.",
+            schema: { space: z.string().min(1), name: z.string().trim().max(40) },
+            handler: async (args) => {
+                const spaces = planOffice(await ctx.registry.list()).spaces;
+                const ref = String(args.space).trim();
+                const space = spaces.find(s => s.id === ref) ?? spaces.find(s => ctx.spaceNames?.()[s.id]?.toLowerCase() === ref.toLowerCase()) ?? findSpace(spaces, ref);
+                if (!space)
+                    return `ERROR: unknown space ${ref}`;
+                if (!ctx.renameSpace)
+                    return "ERROR: room naming unavailable";
+                const name = z.string().trim().max(40).parse(args.name);
+                if (name && spaces.some(s => s.id !== space.id && [s.id, s.name, ctx.spaceNames?.()[s.id]].some(n => n?.toLowerCase() === name.toLowerCase())))
+                    return "ERROR: room name already in use";
+                await ctx.renameSpace(space.id, name);
+                return JSON.stringify({ id: space.id, name: name || space.name, defaultName: space.name });
+            },
         },
         {
             name: "move_worker",

@@ -24,6 +24,7 @@ export interface CreateTaskInput {
   projectPath: string;
   parentId?: string;
   images?: string[];
+  readOnly?: boolean;
 }
 
 export type TaskPatch = Partial<Pick<Task, "result" | "error" | "session">>;
@@ -67,6 +68,7 @@ export class TaskService {
       log: [],
       createdAt: new Date().toISOString(),
     };
+    if (input.readOnly) task.readOnly = true;
     if (input.parentId) task.parentId = input.parentId;
     await this.store.write(task.id, task);
     this.onChange(task, "state");

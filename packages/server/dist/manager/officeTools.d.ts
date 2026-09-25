@@ -4,6 +4,8 @@ import type { AgentRegistry } from "../agents/registry.js";
 export interface OfficeToolContext {
     registry: Pick<AgentRegistry, "list" | "update"> & Partial<Pick<AgentRegistry, "pinPlacements">>;
     emitAgent: (agent: Agent) => void;
+    spaceNames?: () => Record<string, string>;
+    renameSpace?: (id: string, name: string) => Promise<void>;
 }
 /** Seat map of the office: every space with its free desks and who sits where. */
 export declare function describeSpaces(ctx: OfficeToolContext): Promise<string>;

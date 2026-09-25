@@ -56,4 +56,5 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),
     z.object({ type: z.literal("session.capacity"), id: z.string().min(1).max(64), capacity: z.number().int().min(1).max(MAX_SESSION_CAPACITY) }),
 ]);
+export const SpaceNamesSchema = z.record(z.string(), z.string().trim().min(1).max(40));
 //# sourceMappingURL=protocol.js.map

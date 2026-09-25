@@ -30,6 +30,8 @@ export class TaskService {
             log: [],
             createdAt: new Date().toISOString(),
         };
+        if (input.readOnly)
+            task.readOnly = true;
         if (input.parentId)
             task.parentId = input.parentId;
         await this.store.write(task.id, task);

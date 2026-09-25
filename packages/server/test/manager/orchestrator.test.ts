@@ -21,8 +21,8 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   process.env.AGENTICVIEW_HOME = savedHome;
-  await rm(home, { recursive: true, force: true });
-  await rm(proj, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await rm(proj, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 async function setup(script: FakeScript, opts: { runtimes?: Map<Provider, Runtime>; settings?: Record<string, unknown>; hub?: boolean } = {}) {
@@ -92,7 +92,7 @@ describe("Orchestrator", () => {
     expect(workerReq.systemPrompt).toContain("Nova");
     const managerReq = ctx.fake.runs.find((r) => r.agent.role === "manager")!;
     expect(managerReq.prompt.map((p) => (p.type === "text" ? p.text : ""))[0]).toContain("## Roster");
-    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["arrange_workers", "ask_user", "assign_task", "await_tasks", "create_agent", "list_agents", "list_spaces", "list_tasks", "move_worker", "update_agent"]);
+    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["arrange_workers", "ask_user", "assign_task", "await_tasks", "brainstorm", "create_agent", "list_agents", "list_spaces", "list_tasks", "move_worker", "rename_space", "update_agent"]);
     expect(ctx.orch.running()).toBe(0);
     const log = (await ctx.tasks.get(child.id))!.log;
     expect(log.some((l) => l.type === "file_changed")).toBe(true);
@@ -373,7 +373,7 @@ describe("Orchestrator", () => {
     const child = (await ctx.tasks.list()).find((x) => x.kind === "work")!;
     expect(child.projectPath).toBe(other);
     expect(child.result).toBe("worked in " + other);
-    await rm(other, { recursive: true, force: true });
+    await rm(other, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it("records the project as known and recovers interrupted tasks on boot", async () => {
@@ -443,4 +443,170 @@ describe("Automatic provider", () => {
     const a = await ctx.reg.create({ name: "A", specialty: "", provider: "claude-session" });
     expect(await ctx.orch.providerProblem(a)).toBeUndefined();
   });
+});
+
+it("persists room names per world, broadcasts updates, resolves renamed moves and resets", async () => {
+  const ctx = await setup(async function* (req) {
+    const call = (name: string, args: Record<string, unknown>) => req.bridgeTools.find(t => t.name === name)!.handler(args);
+    await call("rename_space", { space: "pod-b", name: "Backend" });
+    const rows = JSON.parse(await call("list_spaces", {}));
+    expect(rows.find((s: { id: string }) => s.id === "pod-b")).toMatchObject({ name: "Backend", defaultName: "Pod B" });
+    expect(await call("rename_space", { space: "pod-a", name: "Backend" })).toContain("already in use");
+    expect(await call("rename_space", { space: "roof", name: "QA" })).toContain("unknown space");
+    await call("move_worker", { agent: "Nova", space: "backend" });
+    expect((await ctx.reg.list()).find(a => a.name === "Nova")!.placement?.space).toBe("pod-b");
+    await call("arrange_workers", { moves: [{ agent: "Nova", space: "Backend", seat: 2 }] });
+    expect((await ctx.reg.list()).find(a => a.name === "Nova")!.placement?.seat).toBe(2);
+    await call("rename_space", { space: "Backend", name: "" });
+    expect((await ctx.world.snapshot()).spaceNames).toEqual({});
+    await call("rename_space", { space: "office", name: "Leadership" });
+    yield { type: "text", text: "done" };
+  });
+  await ctx.reg.create({ name: "Nova", specialty: "backend" });
+  const t = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "organize" });
+  expect((await ctx.orch.awaitTask(t.id)).status).toBe("done");
+  expect(ctx.msgs).toContainEqual({ type: "spaceNames.updated", spaceNames: { office: "Leadership" } });
+  const reload = await setup(async function* () {});
+  expect((await reload.world.snapshot()).spaceNames).toEqual({ office: "Leadership" });
+  const hub = await setup(async function* (req) {
+    await req.bridgeTools.find(t => t.name === "rename_space")!.handler({ space: "meeting", name: "Hub design" });
+  }, { hub: true });
+  expect((await hub.world.snapshot()).spaceNames).toEqual({});
+  const h = await hub.orch.handleUserMessage({ agentId: await hub.reg.managerId(), text: "rename" });
+  await hub.orch.awaitTask(h.id);
+  const hubReload = await setup(async function* () {}, { hub: true });
+  expect((await hubReload.world.snapshot()).spaceNames).toEqual({ meeting: "Hub design" });
+  expect((await reload.world.snapshot()).spaceNames).toEqual({ office: "Leadership" });
+});
+
+it("brainstorms in parallel with read-only tasks, skips busy workers and restores seats", async () => {
+  let started = 0;
+  const gate = deferred<void>();
+  const ctx = await setup(async function* (req) {
+    if (req.agent.role === "manager") {
+      const reply = await req.bridgeTools.find(t => t.name === "brainstorm")!.handler({ topic: "API design", participants: ["Busy", "missing"] });
+      yield { type: "text", text: reply };
+    } else {
+      started++;
+      if (started === 2) gate.resolve();
+      expect(req.tools).toEqual({ edit: false, shell: false, web: false, screenshot: false });
+      expect(req.bridgeTools).toEqual([]);
+      expect(req.sessionId).toBeUndefined();
+      expect((await ctx.reg.get(req.agent.id))!.placement?.space).toBe("meeting");
+      await gate.promise;
+      yield { type: "text", text: `- Advice from ${req.agent.name}` };
+    }
+  });
+  const a = await ctx.reg.create({ name: "Nova", specialty: "backend" });
+  const b = await ctx.reg.create({ name: "Pixel", specialty: "frontend" });
+  const busy = await ctx.reg.create({ name: "Busy", specialty: "QA" });
+  await ctx.tasks.create({ kind: "work", title: "Busy", description: "", assigneeId: busy.id, createdBy: "user", projectPath: proj });
+  await ctx.reg.pinPlacements();
+  const before = (await ctx.reg.list()).map(a => ({ id: a.id, placement: a.placement }));
+  const parent = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "design" });
+  const final = await ctx.orch.awaitTask(parent.id);
+  expect(final.status).toBe("done");
+  const result = JSON.parse(final.result!);
+  expect(result.complete).toBe(true);
+  expect(result.stillRunning).toEqual([]);
+  expect(result.answers.map((x: { name: string }) => x.name).sort()).toEqual(["Nova", "Pixel"]);
+  expect(result.answers.find((x: { name: string }) => x.name === "Nova")).toMatchObject({ specialty: "backend", answer: "- Advice from Nova" });
+  expect(result.skipped).toEqual(expect.arrayContaining([{ name: "Busy", reason: "busy" }, { name: "missing", reason: "unknown worker" }]));
+  expect((await ctx.tasks.children(parent.id))).toHaveLength(2);
+  expect((await ctx.tasks.children(parent.id)).every(t => t.readOnly && t.title === "Brainstorm: API design")).toBe(true);
+  for (const old of before) expect((await ctx.reg.get(old.id))!.placement).toEqual(old.placement);
+  expect((await ctx.reg.get(a.id))!.tools).toEqual(a.tools);
+  expect((await ctx.reg.get(b.id))!.tools).toEqual(b.tools);
+});
+
+it("brainstorm returns stillRunning and a follow-up collects the same tasks after restoration", async () => {
+  const gate = deferred<void>();
+  let first: { complete: boolean; stillRunning: { id: string }[] };
+  const ctx = await setup(async function* (req) {
+    if (req.agent.role === "manager") {
+      const tool = req.bridgeTools.find(t => t.name === "brainstorm")!;
+      first = JSON.parse(await tool.handler({ topic: "design", maxWaitSeconds: 1 }));
+      expect(first.complete).toBe(false);
+      expect(first.stillRunning).toHaveLength(1);
+      gate.resolve();
+      const reply = await tool.handler({ topic: "design", maxWaitSeconds: 1 });
+      yield { type: "text", text: reply };
+    } else {
+      await gate.promise;
+      yield { type: "text", text: "- Done" };
+    }
+  });
+  const worker = await ctx.reg.create({ name: "Nova", specialty: "backend" });
+  const parent = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "brainstorm" });
+  const final = await ctx.orch.awaitTask(parent.id);
+  expect(final.status).toBe("done");
+  expect(JSON.parse(final.result!)).toMatchObject({ complete: true, stillRunning: [] });
+  expect(await ctx.tasks.children(parent.id)).toHaveLength(1);
+  expect((await ctx.reg.get(worker.id))!.placement).toEqual({ space: "pod-a", seat: 0 });
+});
+
+it("brainstorm cancellation restores seats and cancels its children", async () => {
+  const parked = deferred<void>();
+  const ctx = await setup(async function* (req) {
+    if (req.agent.role === "manager") {
+      yield { type: "call", tool: "brainstorm", args: { topic: "cancel me" } };
+    } else {
+      await parked.promise;
+    }
+  });
+  const a = await ctx.reg.create({ name: "Nova", specialty: "backend" });
+  const parent = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "design" });
+  await waitFor(async () => (await ctx.reg.get(a.id))?.placement?.space === "meeting");
+  await ctx.orch.cancel(parent.id);
+  await waitFor(async () => (await ctx.reg.get(a.id))?.placement?.space === "pod-a");
+  expect((await ctx.tasks.children(parent.id)).every(t => t.status === "cancelled")).toBe(true);
+  parked.resolve();
+});
+
+it("brainstorm uses room-sized parallel batches for larger groups", async () => {
+  let count = 0;
+  const firstBatch = deferred<void>();
+  const ctx = await setup(async function* (req) {
+    if (req.agent.role === "manager") {
+      const reply = await req.bridgeTools.find(t => t.name === "brainstorm")!.handler({ topic: "large design" });
+      yield { type: "text", text: reply };
+    } else {
+      count++;
+      if (count === 6) firstBatch.resolve();
+      await firstBatch.promise;
+      expect((await ctx.reg.get(req.agent.id))!.placement?.space).toBe("meeting");
+      yield { type: "text", text: "- idea" };
+    }
+  }, { settings: { maxConcurrentRuns: 8 } });
+  for (let i = 0; i < 8; i++) await ctx.reg.create({ name: `Expert ${i}`, specialty: "design" });
+  const workers = (await ctx.reg.list()).filter(a => a.role === "worker");
+  for (let i = 0; i < 6; i++) await ctx.reg.update(workers[i]!.id, { placement: { space: "meeting", seat: i } });
+  await ctx.reg.pinPlacements();
+  const before = await ctx.reg.list();
+  const parent = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "design" });
+  const final = await ctx.orch.awaitTask(parent.id);
+  expect(final.status).toBe("done");
+  expect(JSON.parse(final.result!).answers).toHaveLength(8);
+  for (const a of before) expect((await ctx.reg.get(a.id))!.placement).toEqual(a.placement);
+});
+
+it("session brainstorms route to the generated read-only companion instead of the coordinator", async () => {
+  const { SessionRuntime } = await import("../../src/runtimes/session.js");
+  const session = new SessionRuntime();
+  const managerRuntime = new FakeRuntime(async function* (req) {
+    const result = await req.bridgeTools.find(t => t.name === "brainstorm")!.handler({ topic: "session design" });
+    yield { type: "text", text: result };
+  });
+  const ctx = await setup(async function* () {}, { runtimes: new Map<Provider, Runtime>([["claude", managerRuntime], ["claude-session", session]]) });
+  await ctx.reg.create({ name: "Nova", specialty: "backend", provider: "claude-session" });
+  const parent = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "design" });
+  const claimed = await session.claim("worker", 5000);
+  expect(claimed).not.toBeNull();
+  expect(claimed!.subagent).toBe("agenticview-nova-readonly");
+  expect(claimed!.tools).toEqual({ edit: false, shell: false, web: false, screenshot: false });
+  expect(claimed!.systemPrompt).toContain("Do not edit files or run commands");
+  session.complete(claimed!.runId, { text: "- Advice" }, "worker");
+  const final = await ctx.orch.awaitTask(parent.id);
+  expect(final.status).toBe("done");
+  expect(JSON.parse(final.result!).answers[0].answer).toBe("- Advice");
 });

@@ -84,7 +84,10 @@ export interface PendingQuestionInfo {
   question: string;
 }
 
+export const SpaceNamesSchema = z.record(z.string(), z.string().trim().min(1).max(40));
+
 export interface Snapshot {
+  spaceNames?: Record<string, string>;
   world: WorldInfo;
   agents: Agent[];
   /** Tasks on the wire carry an empty `log`; the persisted task keeps the full log. */
@@ -103,6 +106,7 @@ export type MirrorEvent = { kind: string; text: string; ts: string };
 
 export type ServerMessage =
   | ({ type: "snapshot" } & Snapshot)
+  | { type: "spaceNames.updated"; spaceNames: Record<string, string> }
   | { type: "agent.updated"; agent: Agent }
   | { type: "agent.removed"; id: string }
   | { type: "task.updated"; task: Task }

@@ -20,7 +20,7 @@ beforeEach(async () => {
   proj = await mkdtemp(join(tmpdir(), "av-sub-"));
 });
 afterEach(async () => {
-  await rm(proj, { recursive: true, force: true });
+  await rm(proj, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 const mk = (name: string, over: Partial<Agent> = {}): Agent => ({
@@ -96,20 +96,20 @@ describe("writing and syncing subagent files", () => {
     const res = await syncSubagents(proj, [mk("Nova")]);
     expect(res.userFiles).toEqual(["agenticview-nova"]);
     expect(await read("agenticview-nova")).toContain("My own prompt");
-    expect((await readdir(dir())).sort()).toEqual(["agenticview-nova.md", "agenticview-old.md", "reviewer.md"]);
+    expect((await readdir(dir())).sort()).toEqual(["agenticview-nova-readonly.md", "agenticview-nova.md", "agenticview-old.md", "reviewer.md"]);
   });
 
   it("removes files of agents that were deleted or left the provider, and old files after a rename", async () => {
     const nova = mk("Nova");
     const orion = mk("Orion");
     await syncSubagents(proj, [nova, orion]);
-    expect((await readdir(dir())).sort()).toEqual(["agenticview-nova.md", "agenticview-orion.md"]);
+    expect((await readdir(dir())).sort()).toEqual(["agenticview-nova-readonly.md", "agenticview-nova.md", "agenticview-orion-readonly.md", "agenticview-orion.md"]);
 
     // Orion switched provider (not in the set, keep() says no); Nova renamed.
     const res = await syncSubagents(proj, [{ ...nova, name: "Nova Two" }]);
-    expect(res.removed.sort()).toEqual(["agenticview-nova", "agenticview-orion"]);
-    expect(res.written).toEqual(["agenticview-nova-two"]);
-    expect(await readdir(dir())).toEqual(["agenticview-nova-two.md"]);
+    expect(res.removed.sort()).toEqual(["agenticview-nova", "agenticview-nova-readonly", "agenticview-orion", "agenticview-orion-readonly"]);
+    expect(res.written.sort()).toEqual(["agenticview-nova-two", "agenticview-nova-two-readonly"]);
+    expect((await readdir(dir())).sort()).toEqual(["agenticview-nova-two-readonly.md", "agenticview-nova-two.md"]);
   });
 
   it("keeps generated files of agents that keep() still claims (e.g. a hub agent working here)", async () => {
@@ -128,4 +128,40 @@ describe("writing and syncing subagent files", () => {
     expect(out).toEqual({ name: "agenticview-nova-000002", status: "written" });
     expect(generatedAgentId(await read("agenticview-nova"))).toBe(a.id);
   });
+});
+
+it("generates a strict read-only companion with the same model and lifecycle", async () => {
+  const a = mk("Nova", { model: "opus", tools: { edit: true, shell: true, web: true, screenshot: true } });
+  const res = await syncSubagents(proj, [a]);
+  expect(res.readOnlyNames.get(a.id)).toBe("agenticview-nova-readonly");
+  const text = await read("agenticview-nova-readonly");
+  expect(generatedAgentId(text)).toBe(a.id);
+  expect(text).toContain("model: opus");
+  expect(text.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual([
+    "Read", "Glob", "Grep",
+    "mcp__plugin_agenticview_agenticview-worker__agenticview_report",
+    "mcp__agenticview-worker__agenticview_report",
+    "mcp__plugin_agenticview_agenticview-worker__agenticview_complete",
+    "mcp__agenticview-worker__agenticview_complete",
+  ]);
+  expect(await read("agenticview-nova")).not.toMatch(/^tools:/m);
+  expect((await syncSubagents(proj, [a])).written).toEqual([]);
+  await syncSubagents(proj, [{ ...a, model: "haiku" }]);
+  expect(await read("agenticview-nova-readonly")).toContain("model: haiku");
+  await syncSubagents(proj, []);
+  expect(await readdir(dir())).toEqual([]);
+});
+
+it("preserves user-owned companions and reserves companion names against agent slug collisions", async () => {
+  const a = mk("Nova", { createdAt: "2026-01-01" });
+  const b = mk("Nova Readonly", { createdAt: "2026-01-02" });
+  const names = subagentNames([a, b]);
+  expect(names.get(b.id)).not.toBe(names.get(a.id) + "-readonly");
+  await mkdir(dir(), { recursive: true });
+  await writeFile(join(dir(), "agenticview-nova-readonly.md"), "user file");
+  const result = await syncSubagents(proj, [a]);
+  expect(result.userFiles).toContain("agenticview-nova-readonly");
+  expect(result.readOnlyNames.has(a.id)).toBe(false);
+  await syncSubagents(proj, []);
+  expect(await read("agenticview-nova-readonly")).toBe("user file");
 });

@@ -27,6 +27,8 @@ export interface WorldDeps {
     }[];
     /** Extra bridge tools for worker runs (e.g. take_screenshot). */
     workerTools?: (agent: Agent, task: Task) => BridgeTool[];
+    spaceNames?: () => Record<string, string>;
+    renameSpace?: (id: string, name: string) => Promise<void>;
 }
 export interface UserMessageInput {
     agentId: string;
