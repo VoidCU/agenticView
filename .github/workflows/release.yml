@@ -1,0 +1,94 @@
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release (e.g. v0.2.4)'
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Tag matches manifest versions
+        run: |
+          node --input-type=commonjs <<'NODE'
+          const { readFileSync } = require('node:fs');
+          const tag = process.env.TAG;
+          if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(tag)) {
+            console.error(`Invalid release tag "${tag}": expected vX.Y.Z (optionally with a prerelease or build suffix).`);
+            process.exit(1);
+          }
+          const version = tag.slice(1);
+          const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
+          const files = [
+            '.claude-plugin/plugin.json',
+            'package.json',
+            'packages/shared/package.json',
+            'packages/server/package.json',
+            'packages/web/package.json',
+          ];
+          const versions = files.map((file) => [file, read(file).version]);
+          versions.push([
+            '.claude-plugin/marketplace.json (agenticview entry)',
+            read('.claude-plugin/marketplace.json').plugins.find((plugin) => plugin.name === 'agenticview')?.version,
+          ]);
+          const mismatches = versions.filter(([, actual]) => actual !== version);
+          if (mismatches.length) {
+            for (const [file, actual] of mismatches) {
+              console.error(`Version mismatch: ${file} has ${JSON.stringify(actual)}, but tag ${tag} requires ${version}.`);
+            }
+            console.error('Align all manifest versions before tagging a release.');
+            process.exit(1);
+          }
+          console.log(`All manifest versions match ${tag}.`);
+          NODE
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Bundles are committed and current
+        run: |
+          status=$(git status --porcelain -- packages/shared/dist packages/server/dist packages/web/dist)
+          if [[ -n "$status" ]]; then
+            printf '%s\n' "$status"
+            echo '::error::Bundles are out of date. Run npm run build and commit rebuilt bundles before tagging a release.'
+            exit 1
+          fi
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          flags=()
+          if [[ "${TAG%%+*}" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$TAG" --generate-notes --verify-tag "${flags[@]}"
