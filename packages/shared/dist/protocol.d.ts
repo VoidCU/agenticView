@@ -309,7 +309,9 @@ export interface PendingQuestionInfo {
     taskId: string;
     question: string;
 }
+export declare const SpaceNamesSchema: z.ZodRecord<z.ZodString, z.ZodString>;
 export interface Snapshot {
+    spaceNames?: Record<string, string>;
     world: WorldInfo;
     agents: Agent[];
     /** Tasks on the wire carry an empty `log`; the persisted task keeps the full log. */
@@ -331,6 +333,9 @@ export type MirrorEvent = {
 export type ServerMessage = ({
     type: "snapshot";
 } & Snapshot) | {
+    type: "spaceNames.updated";
+    spaceNames: Record<string, string>;
+} | {
     type: "agent.updated";
     agent: Agent;
 } | {

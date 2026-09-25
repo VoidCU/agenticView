@@ -379,6 +379,10 @@ export class SessionRuntime {
                 p.subagent = null;
             }
         }
+        if (p.req.readOnly && !p.subagent) {
+            this.complete(p.req.runId, { error: "Read-only task requires a generated restricted subagent; preparation failed" }, workerId);
+            return undefined;
+        }
         p.sink({ type: "status", text: `Picked up by Claude Code session "${s?.name ?? workerId}"${p.subagent ? ` (subagent ${p.subagent})` : ""}` });
         this.attribute(p);
         this.notifySessions();

@@ -26,6 +26,7 @@ export interface PermissionRequest {
 }
 
 export interface RunRequest {
+  readOnly?: boolean;
   runId: string;
   /** Office task this run belongs to. */
   taskId?: string;

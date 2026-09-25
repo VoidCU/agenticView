@@ -1,6 +1,7 @@
 import { basename, join } from "node:path";
 import {
   GlobalConfigSchema,
+  SpaceNamesSchema,
   PROVIDER_ORDER,
   ProjectSettingsSchema,
   type GlobalConfig,
@@ -100,6 +101,20 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     },
   });
 
+  const officeFile = join(root, "office.json");
+  let spaceNames = await readJsonFile(officeFile, SpaceNamesSchema, {});
+  let nameWrites = Promise.resolve();
+  const renameSpace = (id: string, name: string): Promise<void> => {
+    const work = nameWrites.then(async () => {
+      const next = { ...spaceNames };
+      if (name) next[id] = name; else delete next[id];
+      await writeJsonFile(officeFile, next);
+      spaceNames = next;
+      opts.bus.emit({ type: "spaceNames.updated", spaceNames: { ...next } });
+    });
+    nameWrites = work.catch(() => undefined);
+    return work;
+  };
   const registry = new AgentRegistry(ref);
   // Only state changes go on the wire, and never with the log: the web feed is built from run.events.
   const tasks = new TaskService(ref.kind === "project" ? join(root, "tasks") : join(root, "hub-tasks"), (task, kind) => {
@@ -136,6 +151,8 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     bridgeUrl: opts.bridgeUrl,
     knownProjects: () => globalConfig.knownProjects,
     workerTools: opts.workerTools,
+    spaceNames: () => ({ ...spaceNames }),
+    renameSpace,
   };
   const orchestrator = new Orchestrator(deps);
 
@@ -218,15 +235,21 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
         save: (list) => writeJsonFile(sessionsFile, { sessions: list }),
         prepare: async (req) => {
           const task = req.taskId ? await tasks.get(req.taskId) : undefined;
+          // A brainstorm must not inherit the saved subagent's editing tools or instructions.
+          const readOnly = task?.readOnly === true;
           const target = task?.projectPath || (ref.kind === "project" ? ref.projectPath : "");
           const work = await recentWork(req.agent.id, req.taskId);
           // Hub runs without a target project: no folder to put a subagent in, the session does it itself.
-          if (!target) return { subagent: null, recentWork: work };
+          if (!target) {
+            if (readOnly) throw new Error("Read-only session tasks require a project for the restricted subagent");
+            return { subagent: null, recentWork: work };
+          }
           if (ref.kind === "project") await syncProjectSubagents();
           const agent = (await registry.get(req.agent.id)) ?? req.agent;
           const peers = ref.kind === "project" ? await sessionAgents() : [];
           const names = subagentNames(peers.some((p) => p.id === agent.id) ? peers : [...peers, agent]);
-          const out = await chained(() => writeSubagent(target, agent, names.get(agent.id)!));
+          const out = await chained(() => writeSubagent(target, agent, names.get(agent.id)!, readOnly));
+          if (readOnly && out.status === "user-file") throw new Error(`Cannot use user-authored read-only subagent ${out.name}`);
           return { subagent: out.name, recentWork: work };
         },
         attribute: async (info) => {
@@ -297,6 +320,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       return projectSettings;
     },
     snapshot: async () => ({
+      spaceNames: { ...spaceNames },
       world: await info(),
       agents: await registry.list(),
       tasks: (await tasks.list()).map(toWire),

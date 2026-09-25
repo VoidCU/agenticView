@@ -115,7 +115,7 @@ describe("ClaudeRuntime.run", () => {
     const content = (msgs[0] as { message: { content: unknown[] } }).message.content;
     expect(content[0]).toEqual({ type: "text", text: "look" });
     expect(content[1]).toEqual({ type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64") } });
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it("installs the permission handler for ask AND auto-edit, forwards to onPermission, and denies when nobody answers", async () => {

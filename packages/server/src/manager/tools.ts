@@ -3,6 +3,7 @@ import { EffortSchema, isTerminal, ProviderSchema, ToolAllowanceSchema, Permissi
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
+import { brainstormTool } from "./brainstorm.js";
 import { officeTools } from "./officeTools.js";
 
 export const MANAGER_SYSTEM_PROMPT = `You are the Manager of an AgenticView office: a team of AI coding agents ("workers") that edit a real software project.
@@ -15,6 +16,8 @@ Rules:
 - assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.
 - Use ask_user only when a decision truly needs the user.
 - The office is a honeycomb of rooms. list_spaces shows who sits where; move_worker / arrange_workers reseat workers (group a team in one pod, call people to the meeting room) when the user asks or when it clearly helps.
+- Group agents by role and name their rooms with rename_space. Move collaborators next to each other while they work on the same task.
+- Use brainstorm for design questions that need several experts; repeat the same topic after stillRunning until the summary is ready.
 - You never edit files yourself.
 - End with a short report for the user: what was done, by whom, and anything left open.`;
 
@@ -34,6 +37,8 @@ const MODEL_HINT = "Model id or alias for the agent's provider, e.g. claude: opu
 const EFFORT_HINT = "Reasoning effort: low | medium | high (claude also xhigh | max; codex also xhigh | max | ultra on supporting models; antigravity also max, ignored for its -high/-medium/-low model ids; ignored for gemini). Omit for the default.";
 
 export interface ManagerToolContext {
+  spaceNames?: () => Record<string, string>;
+  renameSpace?: (id: string, name: string) => Promise<void>;
   world: WorldRef;
   registry: AgentRegistry;
   tasks: TaskService;
@@ -41,6 +46,7 @@ export interface ManagerToolContext {
   managerId: string;
   knownProjects: () => { path: string; name: string }[];
   startTask: (taskId: string) => void;
+  cancelTask?: (taskId: string) => Promise<void>;
   awaitTask: (taskId: string) => Promise<Task>;
   askUser: (taskId: string, agentId: string, question: string) => Promise<string>;
   setWaiting: (taskId: string, waiting: boolean) => Promise<void>;
@@ -247,6 +253,7 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
       schema: { question: z.string().min(1) },
       handler: async (args) => ctx.askUser(ctx.requestTask.id, ctx.managerId, String(args.question)),
     },
-    ...officeTools({ registry: ctx.registry, emitAgent: ctx.emitAgent }),
+    brainstormTool(ctx),
+    ...officeTools(ctx),
   ];
 }

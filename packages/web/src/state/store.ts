@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Agent, ClientMessage, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
+import type { Agent, ClientMessage, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
 export type Bubble = { text: string; until: number };
@@ -36,6 +36,7 @@ export interface Store {
   permissions: PendingPermission[];
   questions: PendingQuestion[];
   mirror: MirrorItem[];
+  spaceNames: Record<string, string>;
   selectedAgentId?: string;
   celebrations: Celebration[];
   errors: UiError[];
@@ -101,6 +102,7 @@ const initial = () => ({
   permissions: [] as PendingPermission[],
   questions: [] as PendingQuestion[],
   mirror: [] as MirrorItem[],
+  spaceNames: {} as Record<string, string>,
   selectedAgentId: undefined as string | undefined,
   celebrations: [] as Celebration[],
   errors: [] as UiError[],
@@ -127,12 +129,16 @@ export const useStore = create<Store>()((set, get) => ({
           autoProvider: msg.autoProvider ?? null,
           settings: msg.settings,
           sessions: msg.sessions ?? [],
+          spaceNames: msg.spaceNames ?? {},
           // The server is the source of truth for prompts still waiting on the user (reload / reconnect).
           permissions: (msg.permissions ?? []).map((p) => ({ id: p.id, agentId: p.agentId, taskId: p.taskId, tool: p.tool, input: p.input })),
           questions: (msg.questions ?? []).map((q) => ({ id: q.id, agentId: q.agentId, taskId: q.taskId, question: q.question })),
         });
         return;
       }
+      case "spaceNames.updated":
+        set({ spaceNames: msg.spaceNames });
+        return;
       case "providers.updated":
         set({ providers: msg.providers, autoProvider: msg.autoProvider });
         return;
@@ -326,3 +332,12 @@ export function selectManager(s: Store): Agent | undefined {
 export function sortedAgents(agents: Record<string, Agent>): Agent[] {
   return Object.values(agents).sort((a, b) => (a.role === b.role ? a.createdAt.localeCompare(b.createdAt) : a.role === "manager" ? -1 : 1));
 }
+
+/** Return the custom name of a space if present in spaceNames, falling back to the default space name or id. */
+export function spaceNameOf(spaceNames: Record<string, string> | undefined, space: Space | string): string {
+  const id = typeof space === "string" ? space : space.id;
+  const custom = spaceNames?.[id]?.trim();
+  if (custom) return custom;
+  return typeof space === "string" ? space : space.name;
+}
+

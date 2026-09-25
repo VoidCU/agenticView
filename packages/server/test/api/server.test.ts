@@ -21,8 +21,8 @@ afterEach(async () => {
   await server?.close();
   server = undefined;
   process.env.AGENTICVIEW_HOME = savedHome;
-  await rm(home, { recursive: true, force: true });
-  await rm(proj, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await rm(proj, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 async function boot(opts: { staticDir?: string; runtimes?: Map<Provider, Runtime> } = {}) {
@@ -166,7 +166,7 @@ describe("server", () => {
     expect(await (await fetch(`${s.url}/assets/app.js`)).text()).toBe("console.log(1)");
     expect(await (await fetch(`${s.url}/some/route`)).text()).toBe("<html>index</html>");
     expect((await fetch(`${s.url}/api/nope?token=tok`)).status).toBe(404);
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 });
 

@@ -25,7 +25,7 @@ afterEach(async () => {
   process.env.AGENTICVIEW_HOME = saved.home;
   if (saved.project === undefined) delete process.env.AGENTICVIEW_PROJECT;
   else process.env.AGENTICVIEW_PROJECT = saved.project;
-  await rm(home, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   await rm(proj, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
@@ -94,7 +94,7 @@ describe("claude-session agents as subagents of one session", () => {
     await s.close();
     server = undefined;
     await boot();
-    expect(await readdir(agentsDir())).toEqual(["agenticview-orion.md"]);
+    expect((await readdir(agentsDir())).sort()).toEqual(["agenticview-orion-readonly.md", "agenticview-orion.md"]);
   });
 
   it("one session claims both agents' tasks, routes reports by run_id, records who did what, and digests earlier work", async () => {

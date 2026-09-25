@@ -23,8 +23,8 @@ afterEach(async () => {
   for (const c of children.splice(0)) c.kill();
   process.env.AGENTICVIEW_HOME = savedHome;
   await new Promise((r) => setTimeout(r, 100));
-  await rm(home, { recursive: true, force: true });
-  await rm(proj, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await rm(proj, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 function run(args: string[]) {

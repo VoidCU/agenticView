@@ -60,8 +60,11 @@ export function subagentNames(agents: Pick<Agent, "id" | "name" | "createdAt">[]
   const taken = new Set<string>();
   for (const a of [...agents].sort((x, y) => x.createdAt.localeCompare(y.createdAt) || x.id.localeCompare(y.id))) {
     const plain = `${SUBAGENT_PREFIX}${subagentSlug(a.name)}`;
-    const name = taken.has(plain) ? suffixed(a) : plain;
+    let name = plain;
+    if (taken.has(name) || taken.has(`${name}-readonly`)) name = suffixed(a);
+    while (taken.has(name) || taken.has(`${name}-readonly`)) name += "-agent";
     taken.add(name);
+    taken.add(`${name}-readonly`);
     out.set(a.id, name);
   }
   return out;
@@ -94,8 +97,8 @@ function description(agent: Agent): string {
 }
 
 /** Full file text of an agent's subagent. */
-export function renderSubagent(agent: Agent, name: string): string {
-  const tools = subagentTools(agent.tools);
+export function renderSubagent(agent: Agent, name: string, readOnly = false): string {
+  const tools = readOnly ? ["Read", "Glob", "Grep", ...WORKER_MCP_TOOLS.filter(t => !t.endsWith("__agenticview_bridge"))] : subagentTools(agent.tools);
   const front = [
     "---",
     `name: ${name}`,
@@ -107,7 +110,7 @@ export function renderSubagent(agent: Agent, name: string): string {
   const persona = [
     `You are ${agent.name}, ${agent.role === "manager" ? "the manager" : `a ${agent.specialty || "generalist"} engineer`} on an AgenticView team.`,
     agent.description ? `About you: ${agent.description}` : "",
-    agent.systemPrompt,
+    readOnly ? "This is a read-only task. Do not edit files, run commands, use web tools or call agenticview_bridge." : agent.systemPrompt,
   ].filter(Boolean);
   const body = [
     marker(agent.id),
@@ -153,20 +156,20 @@ async function readText(file: string): Promise<string | undefined> {
  * alone (status "user-file"); a generated file that belongs to another agent makes this agent fall back
  * to an id-suffixed name.
  */
-export async function writeSubagent(projectPath: string, agent: Agent, name: string): Promise<WriteOutcome> {
+export async function writeSubagent(projectPath: string, agent: Agent, name: string, readOnly = false): Promise<WriteOutcome> {
   const dir = subagentDir(projectPath);
-  let use = name;
+  let use = readOnly ? `${name}-readonly` : name;
   let existing = await readText(join(dir, `${use}.md`));
   if (existing !== undefined) {
     const owner = generatedAgentId(existing);
     if (!owner) return { name: use, status: "user-file" };
     if (owner !== agent.id) {
-      use = suffixed(agent);
+      use = suffixed(agent) + (readOnly ? "-readonly" : "");
       existing = await readText(join(dir, `${use}.md`));
       if (existing !== undefined && generatedAgentId(existing) !== agent.id) return { name: use, status: "user-file" };
     }
   }
-  const text = renderSubagent(agent, use);
+  const text = renderSubagent(agent, use, readOnly);
   if (existing === text) return { name: use, status: "unchanged" };
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, `${use}.md`), text, "utf8");
@@ -176,6 +179,7 @@ export async function writeSubagent(projectPath: string, agent: Agent, name: str
 export interface SyncResult {
   /** agent id -> subagent name actually used (only agents whose file exists and is ours). */
   names: Map<string, string>;
+  readOnlyNames: Map<string, string>;
   written: string[];
   removed: string[];
   /** Names skipped because the user owns a file with that name. */
@@ -188,9 +192,15 @@ export interface SyncResult {
  * agent still wants its file (e.g. a hub agent working in this project). User files are never touched.
  */
 export async function syncSubagents(projectPath: string, agents: Agent[], keep: (agentId: string) => Promise<boolean> = async () => false): Promise<SyncResult> {
-  const res: SyncResult = { names: new Map(), written: [], removed: [], userFiles: [] };
+  const res: SyncResult = { names: new Map(), readOnlyNames: new Map(), written: [], removed: [], userFiles: [] };
   const wanted = subagentNames(agents);
   for (const a of agents) {
+    const companion = await writeSubagent(projectPath, a, wanted.get(a.id)!, true);
+    if (companion.status === "user-file") res.userFiles.push(companion.name);
+    else {
+      res.readOnlyNames.set(a.id, companion.name);
+      if (companion.status === "written") res.written.push(companion.name);
+    }
     const out = await writeSubagent(projectPath, a, wanted.get(a.id)!);
     if (out.status === "user-file") res.userFiles.push(out.name);
     else {
@@ -205,7 +215,7 @@ export async function syncSubagents(projectPath: string, agents: Agent[], keep: 
   } catch {
     return res;
   }
-  const current = new Set(res.names.values());
+  const current = new Set([...res.names.values(), ...res.readOnlyNames.values()]);
   for (const f of files) {
     if (!f.startsWith(SUBAGENT_PREFIX) || !f.endsWith(".md")) continue;
     const name = f.slice(0, -3);
@@ -214,7 +224,7 @@ export async function syncSubagents(projectPath: string, agents: Agent[], keep: 
     const owner = text === undefined ? undefined : generatedAgentId(text);
     if (!owner) continue;
     // A renamed agent leaves its old file behind: it goes even though the agent stays.
-    if (!res.names.has(owner) && (await keep(owner))) continue;
+    if (!res.names.has(owner) && !res.readOnlyNames.has(owner) && (await keep(owner))) continue;
     await rm(join(dir, f), { force: true });
     res.removed.push(name);
   }

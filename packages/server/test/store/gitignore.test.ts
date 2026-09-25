@@ -9,7 +9,7 @@ beforeEach(async () => {
   proj = await mkdtemp(join(tmpdir(), "av-gi-"));
 });
 afterEach(async () => {
-  await rm(proj, { recursive: true, force: true });
+  await rm(proj, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 const gi = () => readFile(join(proj, ".gitignore"), "utf8");
 

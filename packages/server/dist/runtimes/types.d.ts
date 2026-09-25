@@ -13,6 +13,7 @@ export interface PermissionRequest {
     input: unknown;
 }
 export interface RunRequest {
+    readOnly?: boolean;
     runId: string;
     /** Office task this run belongs to. */
     taskId?: string;

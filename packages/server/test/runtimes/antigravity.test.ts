@@ -32,8 +32,8 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "av-agy-home-"));
 });
 afterEach(async () => {
-  await rm(cwd, { recursive: true, force: true });
-  await rm(home, { recursive: true, force: true });
+  await rm(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 function mapFixture(name: string) {

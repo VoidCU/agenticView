@@ -322,6 +322,8 @@ export class Orchestrator {
     bridgeToolsFor(task, agent, runId) {
         if (agent.role === "manager") {
             return managerTools({
+                spaceNames: this.deps.spaceNames,
+                renameSpace: this.deps.renameSpace,
                 world: this.deps.world,
                 registry: this.deps.registry,
                 tasks: this.deps.tasks,
@@ -329,6 +331,7 @@ export class Orchestrator {
                 managerId: agent.id,
                 knownProjects: () => this.deps.knownProjects(),
                 startTask: (id) => this.startTask(id),
+                cancelTask: (id) => this.cancel(id),
                 awaitTask: (id) => this.awaitTask(id),
                 askUser: (t, a, q) => this.askUser(t, a, q),
                 setWaiting: (t, w) => this.setWaiting(t, w),
@@ -338,7 +341,7 @@ export class Orchestrator {
                 notify: (text) => this.deps.bus.emit({ type: "run.event", taskId: task.id, agentId: agent.id, event: { type: "status", text } }),
             });
         }
-        return this.deps.workerTools?.(agent, task) ?? [];
+        return task.readOnly ? [] : this.deps.workerTools?.(agent, task) ?? [];
     }
     async appendLog(taskId, ev) {
         const cur = await this.deps.tasks.get(taskId);
@@ -380,7 +383,8 @@ export class Orchestrator {
         let final;
         let releaseConvo = () => { };
         try {
-            const agent = await registry.get(task.assigneeId);
+            const savedAgent = await registry.get(task.assigneeId);
+            const agent = savedAgent && task.readOnly ? { ...savedAgent, tools: { edit: false, shell: false, web: false, screenshot: false } } : savedAgent;
             if (!agent) {
                 final = await this.finish(task, "failed", { error: `unknown agent ${task.assigneeId}` });
                 return;
@@ -397,7 +401,7 @@ export class Orchestrator {
             // Managers take several requests at once. Only one run may resume a CLI conversation at a time, so a
             // request that starts while another run holds that conversation begins a fresh one instead.
             const convo = `${agent.id}\u0000${key}`;
-            const resumeBusy = this.resuming.has(convo);
+            const resumeBusy = Boolean(task.readOnly) || this.resuming.has(convo);
             const sessionId = resumeBusy ? undefined : await this.loadSession(agent, key, provider);
             if (!resumeBusy)
                 this.resuming.add(convo);
@@ -411,10 +415,11 @@ export class Orchestrator {
             const req = {
                 runId,
                 taskId: task.id,
+                readOnly: task.readOnly,
                 agent,
                 cwd,
                 prompt: await this.buildPrompt(task, agent),
-                systemPrompt: agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
+                systemPrompt: task.readOnly ? `You are ${agent.name}, an expert in ${agent.specialty || "general engineering"}. Give your expert view in 5-10 bullet points. Do not edit files or run commands.` : agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
                 sessionId,
                 tools: agent.tools,
                 bridgeTools,

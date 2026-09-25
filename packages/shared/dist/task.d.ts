@@ -54,6 +54,7 @@ export declare const TaskSchema: z.ZodObject<{
     createdBy: z.ZodString;
     assigneeId: z.ZodString;
     parentId: z.ZodOptional<z.ZodString>;
+    readOnly: z.ZodOptional<z.ZodBoolean>;
     projectPath: z.ZodString;
     session: z.ZodOptional<z.ZodObject<{
         provider: z.ZodEnum<{

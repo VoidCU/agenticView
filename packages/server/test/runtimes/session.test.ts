@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { defaultAgent, type RunEvent } from "@agenticview/shared";
-import { SessionRuntime, SESSION_WORKER_HINT } from "../../src/runtimes/session.js";
+import { SessionRuntime, SESSION_WORKER_HINT, memoryHooks } from "../../src/runtimes/session.js";
 import type { RunRequest } from "../../src/runtimes/types.js";
 
 const agent = defaultAgent({ name: "Nova", role: "worker", scope: "project", specialty: "tests" });
@@ -119,5 +119,80 @@ describe("SessionRuntime", () => {
     // The dropped waiter must not swallow the next run.
     void rt.run(req("z"), () => undefined, new AbortController().signal);
     expect((await rt.claim("w2", 0))?.runId).toBe("z");
+  });
+
+  describe("read-only task routing", () => {
+    it("routes readOnly tasks to the read-only subagent returned by the prepare hook", async () => {
+      const rt = new SessionRuntime({
+        hooks: {
+          ...memoryHooks(),
+          prepare: async (r) => ({
+            subagent: r.readOnly ? "agenticview-nova-readonly" : "agenticview-nova",
+            recentWork: [],
+          }),
+        },
+      });
+      const events: RunEvent[] = [];
+      const done = rt.run(req("ro1", { readOnly: true }), (e) => events.push(e), new AbortController().signal);
+      const task = await rt.claim("w1", 1000);
+      expect(task).not.toBeNull();
+      expect(task!.subagent).toBe("agenticview-nova-readonly");
+      rt.complete("ro1", { text: "brainstorm result" }, "w1");
+      const result = await done;
+      expect(result).toMatchObject({ text: "brainstorm result", stopReason: "done" });
+    });
+
+    it("fails readOnly tasks with a clear error when prepare throws (no fallback to main thread)", async () => {
+      const rt = new SessionRuntime({
+        hooks: {
+          ...memoryHooks(),
+          prepare: async (r) => {
+            if (r.readOnly) throw new Error("Cannot use user-authored read-only subagent agenticview-nova-readonly");
+            return { subagent: "agenticview-nova", recentWork: [] };
+          },
+        },
+      });
+      const events: RunEvent[] = [];
+      const done = rt.run(req("ro-fail", { readOnly: true }), (e) => events.push(e), new AbortController().signal);
+      // The claim returns null because the run was settled with an error during take().
+      const task = await rt.claim("w1", 100);
+      expect(task).toBeNull();
+      const result = await done;
+      expect(result.stopReason).toBe("error");
+      expect(result.error).toMatch(/Read-only task requires a generated restricted subagent/);
+    });
+
+    it("fails readOnly tasks when prepare returns null subagent (no fallback to main thread)", async () => {
+      const rt = new SessionRuntime({
+        hooks: {
+          ...memoryHooks(),
+          prepare: async () => ({ subagent: null, recentWork: [] }),
+        },
+      });
+      const events: RunEvent[] = [];
+      const done = rt.run(req("ro-null", { readOnly: true }), (e) => events.push(e), new AbortController().signal);
+      const task = await rt.claim("w1", 100);
+      expect(task).toBeNull();
+      const result = await done;
+      expect(result.stopReason).toBe("error");
+      expect(result.error).toMatch(/Read-only task requires a generated restricted subagent/);
+    });
+
+    it("still allows normal (non-readOnly) tasks to run without a subagent (inline fallback)", async () => {
+      const rt = new SessionRuntime({
+        hooks: {
+          ...memoryHooks(),
+          prepare: async () => ({ subagent: null, recentWork: [] }),
+        },
+      });
+      const events: RunEvent[] = [];
+      const done = rt.run(req("rw1"), (e) => events.push(e), new AbortController().signal);
+      const task = await rt.claim("w1", 1000);
+      expect(task).not.toBeNull();
+      expect(task!.subagent).toBeNull();
+      rt.complete("rw1", { text: "done editing" }, "w1");
+      const result = await done;
+      expect(result).toMatchObject({ text: "done editing", stopReason: "done" });
+    });
   });
 });

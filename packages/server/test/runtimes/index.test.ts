@@ -15,7 +15,7 @@ beforeEach(async () => {
 afterEach(async () => {
   process.env.AGENTICVIEW_HOME = savedHome;
   process.env.PATH = savedPath;
-  await rm(home, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 describe("createRuntimes", () => {

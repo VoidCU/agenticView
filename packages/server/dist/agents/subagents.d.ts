@@ -30,7 +30,7 @@ export declare function subagentTools(tools: Agent["tools"]): string[] | undefin
 /** Subagent `model`: the agent's Claude family alias (opus, sonnet, haiku, fable), else inherit the session's. */
 export declare function subagentModel(model: string | null | undefined): string;
 /** Full file text of an agent's subagent. */
-export declare function renderSubagent(agent: Agent, name: string): string;
+export declare function renderSubagent(agent: Agent, name: string, readOnly?: boolean): string;
 /** The agent id in a generated file, or undefined for a user-authored file. */
 export declare function generatedAgentId(text: string): string | undefined;
 export type WriteOutcome = {
@@ -45,10 +45,11 @@ export type WriteOutcome = {
  * alone (status "user-file"); a generated file that belongs to another agent makes this agent fall back
  * to an id-suffixed name.
  */
-export declare function writeSubagent(projectPath: string, agent: Agent, name: string): Promise<WriteOutcome>;
+export declare function writeSubagent(projectPath: string, agent: Agent, name: string, readOnly?: boolean): Promise<WriteOutcome>;
 export interface SyncResult {
     /** agent id -> subagent name actually used (only agents whose file exists and is ours). */
     names: Map<string, string>;
+    readOnlyNames: Map<string, string>;
     written: string[];
     removed: string[];
     /** Names skipped because the user owns a file with that name. */

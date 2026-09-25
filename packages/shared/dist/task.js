@@ -36,6 +36,8 @@ export const TaskSchema = z.object({
     createdBy: z.string(),
     assigneeId: z.string(),
     parentId: z.string().optional(),
+    /** Per-run restrictions; never changes the saved worker permissions. */
+    readOnly: z.boolean().optional(),
     projectPath: z.string(),
     session: z.object({ provider: ProviderSchema, sessionId: z.string() }).optional(),
     /** claude-session tasks: which Claude Code session and subagent did the work (continuity and the work log). */

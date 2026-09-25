@@ -505,8 +505,9 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const beams = useStore((s) => s.beams);
   const celebrations = useStore((s) => s.celebrations);
   const mirrorLatest = useStore((s) => s.mirror[0]);
+  const spaceNames = useStore((s) => s.spaceNames);
   const list = useMemo(() => sortedAgents(agents), [agents]);
-  const layout = useMemo(() => layoutFor(list), [list]);
+  const layout = useMemo(() => layoutFor(list, spaceNames), [list, spaceNames]);
   const { spaces } = layout;
   const office = spaces[0]!;
   const manager = list.find((a) => a.role === "manager");

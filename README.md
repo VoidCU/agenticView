@@ -248,6 +248,35 @@ The built bundles in `packages/server/dist` and `packages/web/dist` are committe
 
 One opt-in live test runs a real Claude worker in a temp directory: `AGENTICVIEW_LIVE=1 npm test`.
 
+### Releasing
+
+Prepare the release on `main`. Keep the version consistent across these seven files (the lockfile is refreshed by npm):
+
+- `.claude-plugin/plugin.json`
+- `.claude-plugin/marketplace.json` (the `agenticview` plugin entry)
+- `package.json`
+- `packages/shared/package.json`
+- `packages/server/package.json`
+- `packages/web/package.json`
+- `package-lock.json` (root and workspace versions)
+
+Bump the six manifest versions to `X.Y.Z`, run `npm install` to refresh the lockfile, then run `npm run build`. The shared and server builds use `tsc -b --force` so committed bundles match a clean build. Commit the version changes, lockfile, and rebuilt bundles in `packages/shared/dist`, `packages/server/dist`, and `packages/web/dist`, then publish the tag:
+
+```sh
+git tag vX.Y.Z && git push origin main --tags
+```
+
+The [release workflow](.github/workflows/release.yml) runs for tags matching `v*.*.*`, or manually through **Actions > release > Run workflow** with an existing tag as input. Its read-only verification job checks out that tag without persisting credentials, verifies its version against all six manifests, runs `npm ci`, typechecking, tests, and a full build on Ubuntu with Node 22, and rejects modified or untracked files in any of the three committed dist directories. Only after those checks pass does a separate job with release permissions create a GitHub release with generated notes. Tags with a prerelease suffix, such as `v1.2.3-beta.1`, are marked as prereleases.
+
+Users update from their terminal with:
+
+```sh
+claude plugin marketplace update agenticview
+claude plugin update agenticview@agenticview
+```
+
+Restart Claude Code after updating.
+
 ## License
 
 MIT
