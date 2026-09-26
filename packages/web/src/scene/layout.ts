@@ -61,7 +61,12 @@ export { solidsForLayout, type SolidBox, type SolidCircle, type SolidObstacle } 
  * the agent's current target is not its resting pose. Returns sorted "space#seat" keys joined with
  * "," (the manager's desk is "office#0") so callers can memoise furniture on a plain string.
  */
-export function awaySeatSignature(layout: Pick<OfficeLayout, "poses">, targets: Record<string, { x: number; z: number } | undefined>): string {
+export function awaySeatSignature(
+  layout: Pick<OfficeLayout, "poses">,
+  targets: Record<string, { x: number; z: number } | undefined>,
+  /** Live robot positions: an owner still walking back (target = seat, not there yet) is also away. */
+  live?: ReadonlyMap<string, { x: number; z: number }>,
+): string {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const [id, pose] of Object.entries(layout.poses)) {
@@ -69,7 +74,8 @@ export function awaySeatSignature(layout: Pick<OfficeLayout, "poses">, targets: 
     if (!key || seen.has(key)) continue;
     seen.add(key);
     const t = targets[id];
-    if (!t || Math.hypot(t.x - pose.x, t.z - pose.z) > 0.3) out.push(key);
+    const at = live?.get(id);
+    if (!t || Math.hypot(t.x - pose.x, t.z - pose.z) > 0.3 || (at && Math.hypot(at.x - pose.x, at.z - pose.z) > 0.3)) out.push(key);
   }
   return out.sort().join(",");
 }

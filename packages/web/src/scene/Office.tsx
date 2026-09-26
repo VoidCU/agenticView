@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls, PerformanceMonitor, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, loungeSpots, assignLoungeSpots, rpsFacing, type Agent, type Space, type Task } from "@agenticview/shared";
+import { HEX_R, managerHome, seatPose, spaceAt, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
 import { useLoungeBreaks, agentRevivePhase } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
@@ -26,7 +26,8 @@ import { AllDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
 import { LoungeScoreboard } from "./LoungeScoreboard";
 import { buildColliders } from "./colliders";
-import { usePositions, type AgentActivity } from "../state/positions";
+import { usePositions, type AgentActivity, type AgentPosition } from "../state/positions";
+import { computeTargets, nextVisitExpiry } from "./targets";
 
 const DEG = Math.PI / 180;
 
@@ -629,104 +630,36 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const mountedAt = useRef(Date.now());
   const prevLoungeAssign = useRef<Record<string, string>>({});
   const lastPublishRef = useRef(0);
-  const lastSnapshotRef = useRef<string>("");
+
+  // Re-evaluate targets when the earliest idle visit lapses (the server also clears it; this covers a slow link).
+  const [visitClock, setVisitClock] = useState(0);
+  useEffect(() => {
+    const at = nextVisitExpiry(list, Date.now());
+    if (at === undefined) return;
+    const t = setTimeout(() => setVisitClock((n) => n + 1), Math.min(at - Date.now() + 50, 600_000));
+    return () => clearTimeout(t);
+  }, [list, visitClock]);
 
   const targets = useMemo(() => {
-    const out: Record<string, RobotTarget> = {};
-    for (const [id, pose] of Object.entries(layout.poses)) out[id] = pose;
-
-    // Lounge: collect all agents going to the lounge, assign spots via loungeSpots().
-    if (lounge) {
-      // Build the full list of agents heading to the lounge (breaks, server-side lounging, fainted).
-      const loungeAgentIds: string[] = [];
-      for (const [id] of loungeBreaks) loungeAgentIds.push(id);
-      for (const a of list) {
-        if (loungeBreaks.has(a.id)) continue; // already included above
-        if (a.lounging && a.role === "worker") { loungeAgentIds.push(a.id); continue; }
-        const phase = agentRevivePhase(a);
-        if (phase === "fainted" || phase === "reviving") loungeAgentIds.push(a.id);
-      }
-
-      if (loungeAgentIds.length > 0) {
-        // Get a layout large enough for overflow agents (waiting spots outside door).
-        const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2));
-        // Stable assignment: agents keep their spot unless it's gone.
-        const assignment = assignLoungeSpots(loungeAgentIds, loungeLayout.spots, prevLoungeAssign.current);
-        prevLoungeAssign.current = assignment;
-
-        for (const agentId of loungeAgentIds) {
-          const spotId = assignment[agentId];
-          if (!spotId) continue;
-          const spot = loungeLayout.spots.find((sp) => sp.id === spotId);
-          if (!spot) continue;
-          out[agentId] = {
-            x: lounge.x + spot.x,
-            z: lounge.z + spot.z,
-            yaw: spot.yaw,
-            yOffset: spot.seatHeight,
-          };
-        }
-      }
-    }
-
-    // Manager walks to fainted agent when phase is 'reviving'
-    if (manager && lounge) {
-      const faintingAgent = list.find((a) => agentRevivePhase(a) === "reviving");
-      if (faintingAgent && !visiting) {
-        const agentPos = out[faintingAgent.id];
-        if (agentPos) {
-          const visitP = { x: agentPos.x + 0.6, z: agentPos.z };
-          out[manager.id] = { ...visitP, yaw: yawToward(visitP, agentPos) };
-        }
-      }
-    }
-
-    // Manager task visits (existing logic; overrides the faint walk when visiting is set)
-    if (manager && visiting) {
-      const p = layout.placements[visiting];
-      const s = p && spaces.find((o) => o.id === p.space);
-      if (s && p) out[manager.id] = visitPose(s, p.seat);
-    }
-
-    // RPS game.started: walk both players to the designated game spots and face each other.
-    // This overrides their lounge seat assignment while the match is active.
-    if (activeRpsMatch && lounge) {
-      const gameLayout = loungeSpots();
-      for (let i = 0; i < 2; i++) {
-        const playerId = activeRpsMatch.players[i]!;
-        const spotId = activeRpsMatch.spotIds[i]!;
-        // Search all game spot pairs for the matching id
-        for (const [gsa, gsb] of gameLayout.gameSpots) {
-          const gs = gsa.id === spotId ? gsa : gsb.id === spotId ? gsb : null;
-          if (gs) {
-            out[playerId] = {
-              x: lounge.x + gs.x,
-              z: lounge.z + gs.z,
-              yaw: gs.yaw,
-              yOffset: 0,
-            };
-            break;
-          }
-        }
-      }
-    }
-
-    // RPS game.result: after the match ends, make both players face each other for the badge (~3 s).
-    if (gameAnimation && Date.now() - gameAnimation.at < 3000) {
-      const [playerA, playerB] = gameAnimation.match.players;
-      const posA = out[playerA];
-      const posB = out[playerB];
-      if (posA && posB) {
-        const { yawA, yawB } = rpsFacing(posA, posB);
-        out[playerA] = { ...posA, yaw: yawA };
-        out[playerB] = { ...posB, yaw: yawB };
-      }
-    }
-
-    return out;
-  }, [layout, manager, visiting, spaces, loungeBreaks, lounge, list, gameAnimation, activeRpsMatch]);
+    const r = computeTargets({
+      layout, list, lounge, loungeBreaks, prevLoungeAssign: prevLoungeAssign.current,
+      managerId: manager?.id, managerVisit: visiting, activeRpsMatch, gameAnimation, now: Date.now(),
+    });
+    prevLoungeAssign.current = r.loungeAssign;
+    return r.targets as Record<string, RobotTarget>;
+    // visitClock: re-run when a visit expires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, manager, visiting, loungeBreaks, lounge, list, gameAnimation, activeRpsMatch, visitClock]);
   // Owners who stepped away leave their chair swivelled (plain string so furniture only rebuilds on change).
-  const awaySeats = useMemo(() => awaySeatSignature(layout, targets), [layout, targets]);
+  // Target-based part updates immediately; the 4 Hz publisher below adds owners still walking back.
+  const [liveAway, setLiveAway] = useState("");
+  const awaySeats = useMemo(() => {
+    const fromTargets = awaySeatSignature(layout, targets);
+    if (!liveAway) return fromTargets;
+    const merged = new Set(fromTargets ? fromTargets.split(",") : []);
+    for (const k of liveAway.split(",")) merged.add(k);
+    return [...merged].sort().join(",");
+  }, [layout, targets, liveAway]);
 
   const youPose = useMemo(() => {
     const a = 45 * DEG;
@@ -752,83 +685,78 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
 
   // Throttled position publisher: push to usePositions ~4 times per second, only on change.
   // Reads livePositions (updated by Robot.tsx every frame) and augments with activity/spaceId.
+  // Perf: compares against the last published map field by field (was JSON.stringify of the whole
+  // snapshot every 250 ms) and reuses the previous entry object when nothing moved, so the MiniMap
+  // (the only subscriber) re-renders only when a robot actually moved or changed activity.
   const layoutRef = useRef(layout);
-  const spacesRef = useRef(spaces);
   const listRef = useRef(list);
   const targetsRef = useRef(targets);
   const loungeBreaksRef = useRef(loungeBreaks);
+  const liveAwayRef = useRef("");
   layoutRef.current = layout;
-  spacesRef.current = spaces;
   listRef.current = list;
   targetsRef.current = targets;
   loungeBreaksRef.current = loungeBreaks;
 
-  useFrame(({ clock: _clock }) => {
+  useFrame(() => {
     const now = Date.now();
     if (now - lastPublishRef.current < 250) return; // ~4 Hz
     lastPublishRef.current = now;
 
     const curLayout = layoutRef.current;
-    const curSpaces = spacesRef.current;
+    const curSpaces = curLayout.spaces;
     const curList = listRef.current;
     const curLoungeBreaks = loungeBreaksRef.current;
     const curTargets = targetsRef.current;
-
-    // Build a lounge agent set for fast lookup.
-    const loungeAgentSet = new Set<string>();
-    for (const [id] of curLoungeBreaks) loungeAgentSet.add(id);
-    for (const a of curList) {
-      if (a.lounging && a.role === "worker") loungeAgentSet.add(a.id);
-      const phase = agentRevivePhase(a);
-      if (phase === "fainted" || phase === "reviving") loungeAgentSet.add(a.id);
-    }
-
-    // Determine waiting agents (those assigned to lounge overflow spots).
+    const prev = usePositions.getState().byAgent;
     const loungeSpace = curSpaces.find((s) => s.kind === "lounge");
 
-    const result: Record<string, import("../state/positions").AgentPosition> = {};
+    let changed = false;
+    let count = 0;
+    const result: Record<string, AgentPosition> = {};
     for (const a of curList) {
       const target = curTargets[a.id];
       if (!target) continue;
       const lp = livePositions.get(a.id);
       const x = lp?.x ?? target.x;
       const z = lp?.z ?? target.z;
+      const phase = agentRevivePhase(a);
+      const fainted = phase === "fainted" || phase === "reviving";
+      const inLounge = curLoungeBreaks.has(a.id) || (a.lounging === true && a.role === "worker") || fainted;
 
-      // Determine activity from the live path and current room, with lounge/faint state taking precedence.
+      // Activity from the live path and current room, with lounge/faint state taking precedence.
       const liveSpace = spaceAt(curSpaces, x, z) ?? spaceAt(curSpaces, target.x, target.z);
       let activity: AgentActivity;
-      if (loungeAgentSet.has(a.id)) {
-        const phase = agentRevivePhase(a);
-        if (phase === "fainted" || phase === "reviving") {
-          activity = "fainted";
-        } else if (lp?.walking) {
-          activity = "walking";
-        } else if (curLoungeBreaks.has(a.id)) {
-          activity = "break";
-        } else if (liveSpace?.kind !== "lounge") {
-          activity = "waiting";
-        } else {
-          activity = "lounge";
-        }
-      } else {
-        if (lp?.walking) activity = "walking";
-        else if (liveSpace?.kind === "meeting") activity = "meeting";
-        else if (lp?.waiting) activity = "waiting";
-        else activity = "desk";
-      }
+      if (inLounge) {
+        if (fainted) activity = "fainted";
+        else if (lp?.walking) activity = "walking";
+        else if (curLoungeBreaks.has(a.id)) activity = "break";
+        else if (liveSpace?.kind !== "lounge") activity = "waiting";
+        else activity = "lounge";
+      } else if (lp?.walking) activity = "walking";
+      else if (liveSpace?.kind === "meeting") activity = "meeting";
+      else if (lp?.waiting) activity = "waiting";
+      else activity = "desk";
 
-      // Determine spaceId.
       const placement = curLayout.placements[a.id];
-      const spaceId = liveSpace?.id ?? (loungeAgentSet.has(a.id) ? loungeSpace?.id : placement?.space) ?? curSpaces[0]!.id;
-
-      result[a.id] = { x, z, spaceId, activity };
+      const spaceId = liveSpace?.id ?? (inLounge ? loungeSpace?.id : placement?.space) ?? curSpaces[0]!.id;
+      const old = prev[a.id];
+      // Round to cm: sub-cm drift is invisible on a 180 px map and would defeat the change check.
+      const rx = Math.round(x * 100) / 100;
+      const rz = Math.round(z * 100) / 100;
+      if (old && old.x === rx && old.z === rz && old.spaceId === spaceId && old.activity === activity) result[a.id] = old;
+      else { result[a.id] = { x: rx, z: rz, spaceId, activity }; changed = true; }
+      count++;
     }
+    if (!changed) for (const id in prev) if (!(id in result)) { changed = true; break; }
+    if (changed || count !== Object.keys(prev).length) usePositions.getState().set(result);
 
-    // Only publish when the snapshot actually changed.
-    const snapshot = JSON.stringify(result);
-    if (snapshot === lastSnapshotRef.current) return;
-    lastSnapshotRef.current = snapshot;
-    usePositions.getState().set(result);
+    // Chairs of owners still walking back to their seat stay swivelled until they sit down.
+    const away = awaySeatSignature(curLayout, curTargets, livePositions);
+    if (away !== liveAwayRef.current) {
+      liveAwayRef.current = away;
+      setLiveAway(away);
+    }
   });
 
   return (
