@@ -1,4 +1,5 @@
 import { useMemo, useCallback, useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { HEX_R } from "@agenticview/shared";
 import { useStore, sortedAgents, agentStatus, STATUS_COLORS } from "../state/store";
 import { useMapOpen } from "../state/map";
@@ -26,10 +27,6 @@ const ACTIVITY_MARK: Record<string, string> = { lounge: "☕", break: "☕", fai
 
 export function MiniMap() {
   const agents = useStore((s) => s.agents);
-  const tasks = useStore((s) => s.tasks);
-  const permissions = useStore((s) => s.permissions);
-  const questions = useStore((s) => s.questions);
-  const feed = useStore((s) => s.feed);
   const spaceNames = useStore((s) => s.spaceNames);
   const selectAgent = useStore((s) => s.select);
   const positions = usePositions((s) => s.byAgent);
@@ -53,6 +50,14 @@ export function MiniMap() {
   }, [open]);
 
   const list = useMemo(() => sortedAgents(agents), [agents]);
+  // Only the per-agent status colours, compared shallowly: the map no longer re-renders on every
+  // run.event / feed append (it subscribed to the whole feed, tasks and prompt lists before).
+  const colors = useStore(
+    useShallow((s) => {
+      const tasks = Object.values(s.tasks);
+      return list.map((a) => STATUS_COLORS[agentStatus(a, tasks, s.permissions, s.questions, s.feed[a.id] ?? [])]);
+    }),
+  );
   const layout = useMemo(() => layoutFor(list, spaceNames), [list, spaceNames]);
   const { spaces } = layout;
   const { svgScale, svgCx, svgCy, hexR } = useMemo(() => {
@@ -62,7 +67,7 @@ export function MiniMap() {
   }, [spaces]);
   const points = useMemo(() => {
     const validIds = new Set(spaces.map((s) => s.id));
-    return list.flatMap((agent) => {
+    return list.flatMap((agent, i) => {
       const fallbackPose = layout.poses[agent.id];
       const resolved = resolveMapPoint(
         agent.id,
@@ -70,9 +75,9 @@ export function MiniMap() {
         fallbackPose ? { x: fallbackPose.x, z: fallbackPose.z, spaceId: fallbackPose.space } : undefined,
         validIds,
       );
-      return resolved ? [{ ...resolved, color: STATUS_COLORS[agentStatus(agent, Object.values(tasks), permissions, questions, feed[agent.id] ?? [])], name: agent.name }] : [];
+      return resolved ? [{ ...resolved, color: colors[i] ?? STATUS_COLORS.idle, name: agent.name }] : [];
     });
-  }, [list, layout, positions, spaces, tasks, permissions, questions, feed]);
+  }, [list, layout, positions, spaces, colors]);
   const occupancy = useMemo(() => roomOccupancy(points), [points]);
   const dotsBySpace = useMemo(() => {
     const map = new Map<string, Array<(typeof points)[number] & { sx: number; sy: number }>>();

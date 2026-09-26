@@ -165,7 +165,9 @@ export function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Sp
     <mesh position={[0, 1.12, 0.04]}
       userData={{ boardSpaceId: space.id }}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }} onPointerOut={() => setHovered(false)}
-      onClick={(e) => { e.stopPropagation(); if (e.delta <= 4) { setHovered(false); onOpen(space); } }}>
+      onClick={(e) => { e.stopPropagation(); if (e.delta <= 4) { setHovered(false); onOpen(space); } }}
+      // Invisible until hovered: no draw call per board (R3F still raycasts invisible meshes).
+      visible={hovered}>
       <boxGeometry args={[1.72, 1.02, 0.055]} />
       <meshBasicMaterial color="#78baff" transparent opacity={hovered ? 0.24 : 0} depthWrite={false} />
     </mesh>

@@ -2,8 +2,8 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls, PerformanceMonitor, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { HEX_R, managerHome, seatPose, spaceAt, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
-import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
+import { HEX_R, managerHome, seatPose, spaceAt, yawToward, type Agent, type ServerMessage, type Space, type Task } from "@agenticview/shared";
+import { useStore, sortedAgents, fileChipsFor, FILE_CHIP_MAX, type FeedItem, type FileChip } from "../state/store";
 import { useLoungeBreaks, agentRevivePhase } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
 import { awaySeatSignature, layoutFor, seatKey, type OfficeLayout } from "./layout";
@@ -28,17 +28,55 @@ import { LoungeScoreboard } from "./LoungeScoreboard";
 import { buildColliders } from "./colliders";
 import { usePositions, type AgentActivity, type AgentPosition } from "../state/positions";
 import { computeTargets, nextVisitExpiry } from "./targets";
+import { ShadowScheduler, applyRenderTuning } from "./renderTuning";
+import { ingestMessage } from "../net/ws";
 
 const DEG = Math.PI / 180;
 
 /** Chips naming the files an agent touched in the last few seconds, floating above it and fading out. */
+const NO_CHIPS: FileChip[] = [];
+const NO_CHIPS_FEED: FeedItem[] = [];
+
+function sameChips(a: FileChip[], b: FileChip[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]!.path !== b[i]!.path || Math.abs(a[i]!.opacity - b[i]!.opacity) > 0.01) return false;
+  return true;
+}
+
+/** Identity of the newest few file_changed events in a feed: changes only when a file event arrives. */
+export function fileChipKey(feed: FeedItem[] | undefined): string {
+  if (!feed) return "";
+  let key = "";
+  let n = 0;
+  for (let i = feed.length - 1; i >= 0 && n < FILE_CHIP_MAX; i--) {
+    const item = feed[i]!;
+    if (!("event" in item) || item.event.type !== "file_changed") continue;
+    key += `${item.ts}:${item.event.path}|`;
+    n++;
+  }
+  return key;
+}
+
 function FileChips({ agentId }: { agentId: string }) {
-  const feed = useStore((s) => s.feed[agentId]);
-  const [chips, setChips] = useState<FileChip[]>([]);
+  // Keyed on the file events only, so text/tool events streaming in do not re-render the chips.
+  const fileKey = useStore((s) => fileChipKey(s.feed[agentId]));
+  const feed = useMemo(() => useStore.getState().feed[agentId], [agentId, fileKey]);
+  const [chips, setChips] = useState<FileChip[]>(NO_CHIPS);
+  // Perf: the fade timer only runs while chips are showing, and an unchanged (empty) result keeps the
+  // previous state. It used to tick every 250 ms for every worker forever with a fresh [] each time,
+  // which was ~48 React commits/s in an idle 12-worker office.
   useEffect(() => {
-    const update = () => setChips(fileChipsFor(feed ?? []));
-    update();
-    const id = setInterval(update, 250);
+    let id: ReturnType<typeof setInterval> | undefined;
+    const update = () => {
+      const next = fileChipsFor(feed ?? NO_CHIPS_FEED);
+      setChips((prev) => (sameChips(prev, next) ? prev : next.length ? next : NO_CHIPS));
+      if (!next.length && id !== undefined) {
+        clearInterval(id);
+        id = undefined;
+      }
+      return next.length > 0;
+    };
+    if (update()) id = setInterval(update, 250);
     return () => clearInterval(id);
   }, [feed]);
   if (chips.length === 0) return null;
@@ -605,6 +643,36 @@ const YOU: Agent = {
 
 const FRESH_MS = 10_000;
 
+/**
+ * The shadow map is re-rendered every frame only while a robot moves (plus a short grace period);
+ * otherwise at 5 Hz. `signature` pokes a refresh when furniture or the theme changes.
+ */
+function ShadowThrottle({ signature }: { signature: string }) {
+  const gl = useThree((s) => s.gl);
+  const sched = useMemo(() => new ShadowScheduler(), []);
+  useEffect(() => {
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
+    return () => { gl.shadowMap.autoUpdate = true; };
+  }, [gl]);
+  useEffect(() => sched.poke(), [sched, signature]);
+  useFrame(() => {
+    if (sched.tick(Date.now(), livePositions, useDrag.getState().active)) gl.shadowMap.needsUpdate = true;
+  });
+  return null;
+}
+
+/** Test probe: renderer and scene for Playwright perf / screenshot specs (read-only use). */
+function GlProbe() {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  useEffect(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__agenticviewTest = Object.assign((w.__agenticviewTest as object | undefined) ?? {}, { gl, scene });
+  }, [gl, scene]);
+  return null;
+}
+
 function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: Palette; onBoard: (space: Space) => void }) {
   const walking = useWalk((s) => s.walking);
   const walkExitAt = useWalk((s) => s.exitAt);
@@ -764,6 +832,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       <color attach="background" args={[palette.bg]} />
       <fog attach="fog" args={[palette.bg, palette.fog[0], palette.fog[1]]} />
       <Lights palette={palette} spaces={spaces} />
+      <ShadowThrottle signature={`${palette.bg}|${spaces.length}|${awaySeats}|${list.length}`} />
       <Ground palette={palette} />
       <Floors spaces={spaces} palette={palette} layout={layout} managerName={manager?.name} />
       <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} away={awaySeats} />
@@ -863,15 +932,17 @@ export function Office({ onCreate }: { onCreate: () => void }) {
 
   // Read-only probes for Playwright screenshot specs (store, live robot positions, board poses).
   useEffect(() => {
-    (window as unknown as Record<string, unknown>).__agenticviewTest = {
+    const w = window as unknown as Record<string, unknown>;
+    w.__agenticviewTest = Object.assign((w.__agenticviewTest as object | undefined) ?? {}, {
       store: useStore,
+      inject: (msg: ServerMessage) => ingestMessage(useStore, msg),
       agentPos: (id: string) => livePositions.get(id),
       boardPose: (spaceId: string) => {
         const state = useStore.getState();
         const space = layoutFor(Object.values(state.agents), state.spaceNames).spaces.find((s) => s.id === spaceId);
         return space ? whiteboardPose(space) : undefined;
       },
-    };
+    });
     return () => { delete (window as unknown as Record<string, unknown>).__agenticviewTest; };
   }, []);
 
@@ -910,6 +981,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
         camera={{ position: [30, 36, 30], fov: 38, near: 0.5, far: 220 }}
         shadows
         gl={{ antialias: true, powerPreference: "high-performance" }}
+        onCreated={({ gl }) => applyRenderTuning(gl)}
         onPointerMissed={() => {
           select(undefined);
           useFocus.getState().setHover(undefined);
@@ -923,6 +995,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
           flipflops={4}
           onFallback={() => setDpr(1)}
         />
+        <GlProbe />
         <Suspense fallback={null}>
           <Scene onCreate={onCreate} palette={palette} onBoard={setBoardSpace} />
         </Suspense>

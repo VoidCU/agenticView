@@ -84,7 +84,7 @@ export function WalkModeController({
   });
 
   const keys = useRef(new Set<string>());
-  const lastPlayerPosition = useRef<{ x: number; z: number; yaw: number; spaceId: string } | null>(null);
+  const lastPlayerPosition = useRef<{ x: number; z: number; yaw: number; spaceId: string; at: number } | null>(null);
 
   useEffect(() => () => {
     usePositions.getState().setPlayer(undefined);
@@ -217,8 +217,10 @@ export function WalkModeController({
     const currentSpace = spaceAt(spaces, cur.x, cur.z);
     if (currentSpace) {
       const prev = lastPlayerPosition.current;
-      if (!prev || prev.spaceId !== currentSpace.id || Math.hypot(cur.x - prev.x, cur.z - prev.z) >= 0.12 || Math.abs(cur.yaw - prev.yaw) >= 0.045) {
-        lastPlayerPosition.current = { x: cur.x, z: cur.z, yaw: cur.yaw, spaceId: currentSpace.id };
+      // MiniMap marker: at most 4 Hz (room changes immediately). Turning used to publish every frame.
+      const nowMs = performance.now();
+      if (!prev || prev.spaceId !== currentSpace.id || (nowMs - prev.at >= 250 && (Math.hypot(cur.x - prev.x, cur.z - prev.z) >= 0.12 || Math.abs(cur.yaw - prev.yaw) >= 0.045))) {
+        lastPlayerPosition.current = { x: cur.x, z: cur.z, yaw: cur.yaw, spaceId: currentSpace.id, at: nowMs };
         usePositions.getState().setPlayer({ x: cur.x, z: cur.z, yaw: cur.yaw, spaceId: currentSpace.id });
       }
     }
