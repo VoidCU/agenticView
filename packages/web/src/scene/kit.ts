@@ -196,7 +196,7 @@ export function whiteboard(k: Kit) {
     k.box("alu", [x, 0.02, 0], [0.06, 0.04, 0.5]);
   }
   k.box("alu", [0, 1.12, -0.005], [1.66, 0.96, 0.03]);
-  k.box("whiteboard", [0, 1.12, 0.012], [1.6, 0.9, 0.01]);
+  k.box("whiteboard", [0, WHITEBOARD_FACE.y, WHITEBOARD_FACE.z - 0.005], [WHITEBOARD_FACE.w, WHITEBOARD_FACE.h, 0.01]);
 }
 
 export function floorLamp(k: Kit) {
@@ -246,12 +246,22 @@ export function tvStand(k: Kit) {
 // ---------- rooms ----------
 
 /** Corner slots: vertex directions k*60deg, 4.6 from the center, facing in. */
-function corner(k: Kit, angleDeg: number, at = 4.55): Kit {
+export function cornerFrame(angleDeg: number, at = 4.55): { x: number; z: number; yaw: number } {
   const dist = (at * HEX_R) / 6;
   const a = angleDeg * DEG;
   const x = dist * Math.cos(a);
   const z = dist * Math.sin(a);
-  return k.frame(x, z, yawToward({ x, z }, { x: 0, z: 0 }));
+  return { x, z, yaw: yawToward({ x, z }, { x: 0, z: 0 }) };
+}
+
+/** Whiteboard corner slot per room kind (meeting rooms put the TV at 240, so the board goes to 180). */
+export const WHITEBOARD_SLOT = { pod: { angleDeg: 240, at: 4.4 }, meeting: { angleDeg: 180, at: 4.4 } } as const;
+/** Board face inside the whiteboard frame: centre y, front-face z (box z 0.012 + half depth 0.005), size. */
+export const WHITEBOARD_FACE = { y: 1.12, z: 0.017, w: 1.6, h: 0.9 } as const;
+
+function corner(k: Kit, angleDeg: number, at = 4.55): Kit {
+  const c = cornerFrame(angleDeg, at);
+  return k.frame(c.x, c.z, c.yaw);
 }
 
 export interface RoomOccupancy {
@@ -272,7 +282,7 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
   k.box("deskLeg", [0, 0.36, 0], [0.06, 0.72, 0.06]);
   // Corners: tall pieces at the back (away from the camera), low ones at the front.
   bookshelf(corner(k, 180), seed);
-  whiteboard(corner(k, 240, 4.4));
+  whiteboard(corner(k, WHITEBOARD_SLOT.pod.angleDeg, WHITEBOARD_SLOT.pod.at));
   credenza(corner(k, 300), seed);
   plant(corner(k, 0, 4.7), 1.1, seed);
   plant(corner(k, 120, 4.7), 0.9, seed + 1);
@@ -306,7 +316,7 @@ function officeRoom(k: Kit, s: Space) {
     chair(k.frame(p.x, p.z, yawToward(p, home)));
   }
   bookshelf(corner(k, 180, 4.5), 3, 1.9);
-  whiteboard(corner(k, 240, 4.4));
+  whiteboard(corner(k, WHITEBOARD_SLOT.pod.angleDeg, WHITEBOARD_SLOT.pod.at));
   credenza(corner(k, 300), 2);
   armchair(corner(k, 0, 4.4));
   plant(corner(k, 60, 4.8), 1.25, 2);
@@ -329,7 +339,7 @@ function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
     chair(k.frame(back * Math.cos(a), back * Math.sin(a), l.yaw));
   }
   tvStand(corner(k, 240, 4.5));
-  whiteboard(corner(k, 180, 4.4));
+  whiteboard(corner(k, WHITEBOARD_SLOT.meeting.angleDeg, WHITEBOARD_SLOT.meeting.at));
   credenza(corner(k, 300), 4);
   plant(corner(k, 0, 4.7), 1.1, 3);
   plant(corner(k, 60, 4.8), 0.8, 4);
