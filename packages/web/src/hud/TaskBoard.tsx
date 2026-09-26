@@ -136,7 +136,10 @@ function AgentGroupHeader({
   count,
   collapsed,
   onToggle,
+  roomName,
 }: {
+  /** Display name of the agent's room (custom name, else the floor plan's default like "Pod A"). */
+  roomName?: string;
   agentId: string;
   count: number;
   collapsed: boolean;
@@ -151,7 +154,7 @@ function AgentGroupHeader({
   const session = agent ? sessions.find((s) => s.agentIds.includes(agentId)) : undefined;
   const model = session?.model ?? null;
   const spaceId = agent?.placement?.space;
-  const room = spaceId ? (spaceNames[spaceId]?.trim() || spaceId) : undefined;
+  const room = spaceId ? (roomName ?? (spaceNames[spaceId]?.trim() || spaceId)) : undefined;
 
   const isLimited = limits.some((l) => l.agentId === agentId);
   const isLounge = !!agent?.lounging;
@@ -347,6 +350,7 @@ export function TaskBoard({
                     count={assigned.length}
                     collapsed={isGroupCollapsed}
                     onToggle={() => toggleGroup(agentId)}
+                    roomName={rooms.find((r) => r.id === agents[agentId]?.placement?.space)?.name}
                   />
                   {/* Always render for DOM consistency; hide via CSS when collapsed */}
                   <ul

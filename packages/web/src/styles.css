@@ -2362,7 +2362,8 @@ h3 {
   width: 480px; max-width: 92%;
   background: var(--panel-solid);
   border-left: 1px solid var(--line-strong);
-  box-shadow: -6px 0 32px rgba(0, 0, 0, 0.28);
+  /* The second shadow dims the board behind the sheet (clipped by the board frame) without resizing it. */
+  box-shadow: -6px 0 32px rgba(0, 0, 0, 0.28), 0 0 0 100vmax rgba(15, 20, 30, 0.22);
   z-index: 21;
   display: flex; flex-direction: column; overflow: hidden;
   animation: task-sheet-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
