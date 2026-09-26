@@ -4,6 +4,10 @@ export const ProjectSettingsSchema = z.object({
     defaultProvider: ProviderSchema.nullable().default(null),
     defaultModel: z.string().nullable().default(null),
     maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
+    /** How to handle an agent whose provider hits a quota/rate-limit: prompt the user ('ask') or revive automatically ('auto'). */
+    limitPolicy: z.enum(["ask", "auto"]).default("ask"),
+    /** Allow the manager to suggest lounge breaks when the project is quiet. */
+    loungeBreaks: z.boolean().default(true),
 });
 const ProviderConfigSchema = z.object({ apiKey: z.string().optional(), model: z.string().optional() }).prefault({});
 export const KnownProjectSchema = z.object({ path: z.string(), name: z.string(), lastOpened: z.string() });

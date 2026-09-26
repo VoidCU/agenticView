@@ -1,10 +1,16 @@
 import { join } from "node:path";
 import { z } from "zod";
 import { effectiveEffort, isTerminal, newId, ProviderSchema, PROVIDER_ORDER, WORK_COMMAND, } from "@agenticview/shared";
+import { classifyError } from "../runtimes/errors.js";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { buildRosterPreamble } from "./preamble.js";
 import { SessionRuntime } from "../runtimes/session.js";
 import { MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
+/** Provider preference order for revive (skip claude which just hit the limit). */
+const REVIVE_CANDIDATES = ["claude-session", "antigravity", "codex", "gemini", "claude"];
+function delay(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+}
 const SessionFileSchema = z.record(z.string(), z.object({ provider: ProviderSchema, sessionId: z.string() }));
 const LOG_COALESCE_LIMIT = 2000;
 /** Runs tasks on runtimes, keeps the Manager's map truthful, and mediates permissions and questions. */
@@ -18,6 +24,7 @@ export class Orchestrator {
     waiters = new Map();
     pendingPermissions = new Map();
     pendingQuestions = new Map();
+    pendingLimits = new Map();
     pumping = false;
     constructor(deps) {
         this.deps = deps;
@@ -203,7 +210,114 @@ export class Orchestrator {
         return {
             permissions: [...this.pendingPermissions.values()].map((p) => p.info),
             questions: [...this.pendingQuestions.values()].map((q) => q.info),
+            limits: [...this.pendingLimits.values()].map((l) => l.info),
         };
+    }
+    respondLimit(id, answer, provider, model) {
+        const entry = this.pendingLimits.get(id);
+        if (!entry)
+            return;
+        this.pendingLimits.delete(id);
+        this.deps.bus.emit({ type: "limit.resolved", id });
+        entry.resolve(answer, provider, model);
+    }
+    /** Pick the best available provider to revive an agent on, skipping the one that just failed. */
+    pickReviveProvider(failedProvider) {
+        const s = this.deps.settings();
+        for (const p of REVIVE_CANDIDATES) {
+            if (p === failedProvider)
+                continue;
+            const rt = this.deps.runtimes.get(p);
+            if (!rt)
+                continue;
+            const lim = this.deps.usageTracker?.getProviderLimit(p);
+            if (lim?.limited)
+                continue;
+            const model = s.providerModels[p] ?? undefined;
+            return { provider: p, model };
+        }
+        return undefined;
+    }
+    /** Trigger the revive state machine for a worker agent after a quota/rate-limit failure. */
+    async triggerRevive(agent, failedProvider, failedTaskId, errorText, managerId) {
+        const { registry } = this.deps;
+        try {
+            const s = this.deps.settings();
+            const suggested = this.pickReviveProvider(failedProvider);
+            const fainted = await registry.update(agent.id, { revive: { phase: "fainted", managerId, suggested, failedTaskId } });
+            this.emitAgent(fainted);
+            if (s.limitPolicy === "auto" && suggested) {
+                // Short delay then switch and retry automatically (only when an alternate provider is available).
+                const revivingAgent = await registry.update(agent.id, { revive: { phase: "reviving", managerId, suggested, failedTaskId } });
+                this.emitAgent(revivingAgent);
+                await delay(this.deps.reviveDelayMs ?? 6000);
+                await this.reviveAgent(agent.id, suggested.provider, suggested.model);
+                return;
+            }
+            // No alternate provider available, or limitPolicy === "ask": prompt the user.
+            {
+                // Ask mode: create a pending limit request that the user resolves.
+                const id = newId("lim");
+                const info = { id, agentId: agent.id, taskId: failedTaskId, suggested, reason: errorText };
+                this.deps.bus.emit({ type: "limit.request", ...info });
+                const answer = await new Promise((resolve) => {
+                    this.pendingLimits.set(id, { info, resolve: (answer, provider, model) => resolve({ answer, provider, model }) });
+                });
+                if (answer.answer === "dismiss") {
+                    const cur = await registry.get(agent.id);
+                    if (cur) {
+                        const cleared = await registry.update(agent.id, { revive: undefined });
+                        this.emitAgent(cleared);
+                    }
+                    return;
+                }
+                const chosenProvider = answer.answer === "choose" ? answer.provider : suggested?.provider;
+                const chosenModel = answer.answer === "choose" ? answer.model : suggested?.model;
+                const cur = await registry.get(agent.id);
+                if (!cur)
+                    return;
+                const revivingAgent = await registry.update(agent.id, { revive: { phase: "reviving", managerId, suggested, failedTaskId } });
+                this.emitAgent(revivingAgent);
+                await this.reviveAgent(agent.id, chosenProvider, chosenModel);
+            }
+        }
+        catch (e) {
+            console.error("[agenticview] triggerRevive failed", e.message);
+        }
+    }
+    /** Switch agent to a new provider and retry its last failed task. */
+    async reviveAgent(agentId, provider, model) {
+        const { registry, tasks } = this.deps;
+        try {
+            const agent = await registry.get(agentId);
+            if (!agent)
+                return;
+            const failedTaskId = agent.revive?.failedTaskId;
+            // Switch provider.
+            const updated = await registry.update(agentId, { provider: provider ?? null, model: model ?? null, limit: undefined, revive: { phase: "done", failedTaskId } });
+            this.emitAgent(updated);
+            // Retry the task.
+            if (failedTaskId) {
+                const task = await tasks.get(failedTaskId);
+                if (task && task.status === "failed") {
+                    await tasks.transition(failedTaskId, "queued", { error: undefined, result: undefined });
+                    this.startTask(failedTaskId);
+                }
+            }
+            // Clear revive state after a brief window so the client can show the "done" phase.
+            const clearMs = this.deps.reviveClearMs ?? 5000;
+            void delay(clearMs).then(async () => {
+                const cur = await registry.get(agentId);
+                if (cur?.revive?.phase === "done") {
+                    const cleared = await registry.update(agentId, { revive: undefined }).catch(() => undefined);
+                    if (cleared)
+                        this.emitAgent(cleared);
+                }
+            }).catch(() => undefined);
+        }
+        catch (e) {
+            console.error("[agenticview] reviveAgent failed", e.message);
+        }
     }
     /** A task that ended (or was cancelled) can no longer be waiting on anyone: deny/close its prompts. */
     resolvePendingFor(taskId) {
@@ -339,6 +453,9 @@ export class Orchestrator {
                 checkProvider: (a) => this.providerProblem(a),
                 sessionConflict: (a) => this.sessionConflict(runId, a),
                 notify: (text) => this.deps.bus.emit({ type: "run.event", taskId: task.id, agentId: agent.id, event: { type: "status", text } }),
+                reviveAgent: (agentId, provider, model) => this.reviveAgent(agentId, provider, model),
+                addRoom: this.deps.addRoom,
+                emitBrainstorm: (ev) => this.deps.bus.emit(ev),
             });
         }
         return task.readOnly ? [] : this.deps.workerTools?.(agent, task) ?? [];
@@ -474,6 +591,11 @@ export class Orchestrator {
                     const updatedAgent = await registry.update(agent.id, { limit: lim });
                     this.emitAgent(updatedAgent);
                     await this.deps.emitProviders?.();
+                    // Trigger revive for workers whose provider hit a quota or rate-limit.
+                    const cls = classifyError(errorText ?? "");
+                    if (agent.role === "worker" && (cls === "quota" || cls === "rate-limit")) {
+                        void this.triggerRevive(agent, provider, task.id, errorText ?? "");
+                    }
                 }
             }
             if (result.usage && this.deps.usageTracker) {
@@ -501,6 +623,10 @@ export class Orchestrator {
                 const updatedAgent = await registry.update(runAgent.id, { limit: lim });
                 this.emitAgent(updatedAgent);
                 await this.deps.emitProviders?.();
+                const cls = classifyError(errorText ?? "");
+                if (runAgent.role === "worker" && (cls === "quota" || cls === "rate-limit")) {
+                    void this.triggerRevive(runAgent, runProvider, task.id, errorText ?? "");
+                }
             }
         }
         finally {

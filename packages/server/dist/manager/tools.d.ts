@@ -1,4 +1,4 @@
-import { type Agent, type Task } from "@agenticview/shared";
+import { type Agent, type Provider, type ServerMessage, type Task } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
@@ -30,6 +30,20 @@ export interface ManagerToolContext {
     sessionConflict?: (agent: Agent) => Promise<string | undefined>;
     /** Surface a status line in the Manager's feed. */
     notify?: (text: string) => void;
+    /** Switch agent to a new provider and retry its last failed task. */
+    reviveAgent?: (agentId: string, provider?: Provider, model?: string) => Promise<void>;
+    /** Add a new room to the office layout. */
+    addRoom?: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{
+        ok: true;
+        spaceId: string;
+    } | {
+        ok: false;
+        message: string;
+    }>;
+    /** Emit a brainstorm.updated event. */
+    emitBrainstorm?: (ev: Extract<ServerMessage, {
+        type: "brainstorm.updated";
+    }>) => void;
 }
 /** Resolve the target project for an assignment, or return an error string. */
 export declare function resolveAssignmentTarget(ctx: Pick<ManagerToolContext, "world" | "knownProjects">, agent: Agent, projectPath: string | undefined): {

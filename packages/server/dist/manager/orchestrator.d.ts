@@ -1,4 +1,4 @@
-import { type Agent, type Provider, type ProjectSettings, type PendingPermissionInfo, type PendingQuestionInfo, type Task, type WorldInfo } from "@agenticview/shared";
+import { type Agent, type Provider, type ProjectSettings, type PendingPermissionInfo, type PendingQuestionInfo, type PendingLimitInfo, type Task, type WorldInfo } from "@agenticview/shared";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
 import type { BridgeTool, Runtime } from "../runtimes/types.js";
@@ -32,6 +32,17 @@ export interface WorldDeps {
     renameSpace?: (id: string, name: string) => Promise<void>;
     usageTracker?: UsageTracker;
     emitProviders?: () => Promise<void>;
+    addRoom?: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{
+        ok: true;
+        spaceId: string;
+    } | {
+        ok: false;
+        message: string;
+    }>;
+    /** Override the auto-revive delay (ms) for tests. Default 6000. */
+    reviveDelayMs?: number;
+    /** Override the revive-done clear delay (ms) for tests. Default 5000. */
+    reviveClearMs?: number;
 }
 export interface UserMessageInput {
     agentId: string;
@@ -50,6 +61,7 @@ export declare class Orchestrator {
     private readonly waiters;
     private readonly pendingPermissions;
     private readonly pendingQuestions;
+    private readonly pendingLimits;
     private pumping;
     constructor(deps: WorldDeps);
     running(): number;
@@ -84,7 +96,18 @@ export declare class Orchestrator {
     pending(): {
         permissions: PendingPermissionInfo[];
         questions: PendingQuestionInfo[];
+        limits: PendingLimitInfo[];
     };
+    respondLimit(id: string, answer: "accept" | "choose" | "dismiss", provider?: Provider, model?: string): void;
+    /** Pick the best available provider to revive an agent on, skipping the one that just failed. */
+    pickReviveProvider(failedProvider: Provider): {
+        provider: Provider;
+        model?: string;
+    } | undefined;
+    /** Trigger the revive state machine for a worker agent after a quota/rate-limit failure. */
+    private triggerRevive;
+    /** Switch agent to a new provider and retry its last failed task. */
+    reviveAgent(agentId: string, provider?: Provider, model?: string): Promise<void>;
     /** A task that ended (or was cancelled) can no longer be waiting on anyone: deny/close its prompts. */
     private resolvePendingFor;
     respondPermission(id: string, allow: boolean): void;

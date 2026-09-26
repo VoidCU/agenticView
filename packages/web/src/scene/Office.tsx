@@ -4,6 +4,8 @@ import { Html, OrbitControls, useCursor } from "@react-three/drei";
 import * as THREE from "three";
 import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
+import { useLoungeBreaks, agentRevivePhase } from "./breaks";
+import { MeetingTV } from "./MeetingTV";
 import { layoutFor, seatKey, type OfficeLayout } from "./layout";
 import { Robot, type RobotTarget } from "./Robot";
 import { Beam } from "./Beam";
@@ -576,11 +578,15 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const celebrations = useStore((s) => s.celebrations);
   const mirrorLatest = useStore((s) => s.mirror[0]);
   const spaceNames = useStore((s) => s.spaceNames);
+  const settings = useStore((s) => s.settings);
   const list = useMemo(() => sortedAgents(agents), [agents]);
   const layout = useMemo(() => layoutFor(list, spaceNames), [list, spaceNames]);
   const { spaces } = layout;
   const office = spaces[0]!;
   const manager = list.find((a) => a.role === "manager");
+  const loungeEnabled = (settings as { loungeBreaks?: boolean } | undefined)?.loungeBreaks ?? true;
+  const loungeBreaks = useLoungeBreaks(agents, tasks, loungeEnabled);
+  const lounge = spaces.find((s) => s.kind === "lounge");
   const { visiting, onArrive } = useManagerVisits(tasks, agents, manager?.id);
   const onGrab = useDragToReassign(layout);
   const mountedAt = useRef(Date.now());
@@ -588,13 +594,47 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const targets = useMemo(() => {
     const out: Record<string, RobotTarget> = {};
     for (const [id, pose] of Object.entries(layout.poses)) out[id] = pose;
+
+    // Lounge breaks: send idle workers to their lounge seat
+    if (lounge) {
+      for (const [id, brk] of loungeBreaks) {
+        const seat = seatPose(lounge, brk.seat);
+        out[id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
+      }
+    }
+
+    // Fainting: send fainted/reviving workers to the lounge
+    if (lounge) {
+      for (const a of list) {
+        const phase = agentRevivePhase(a);
+        if (phase === "fainted" || phase === "reviving") {
+          const seatIdx = Math.abs(a.id.split("").reduce((n, c) => n * 31 + c.charCodeAt(0), 7)) % 4;
+          const seat = seatPose(lounge, seatIdx);
+          out[a.id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
+        }
+      }
+    }
+
+    // Manager walks to fainted agent when phase is 'reviving'
+    if (manager && lounge) {
+      const faintingAgent = list.find((a) => agentRevivePhase(a) === "reviving");
+      if (faintingAgent && !visiting) {
+        const agentPos = out[faintingAgent.id];
+        if (agentPos) {
+          const visitP = { x: agentPos.x + 0.6, z: agentPos.z };
+          out[manager.id] = { ...visitP, yaw: yawToward(visitP, agentPos) };
+        }
+      }
+    }
+
+    // Manager task visits (existing logic; overrides the faint walk when visiting is set)
     if (manager && visiting) {
       const p = layout.placements[visiting];
       const s = p && spaces.find((o) => o.id === p.space);
       if (s && p) out[manager.id] = visitPose(s, p.seat);
     }
     return out;
-  }, [layout, manager, visiting, spaces]);
+  }, [layout, manager, visiting, spaces, loungeBreaks, lounge, list]);
 
   const youPose = useMemo(() => {
     const a = 45 * DEG;
@@ -614,6 +654,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       <Floors spaces={spaces} palette={palette} layout={layout} managerName={manager?.name} />
       <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} />
       {spaces.filter(s => s.kind !== "lounge").map(s => <Whiteboard key={s.id} space={s} onOpen={onBoard} />)}
+      {spaces.filter(s => s.kind === "meeting").map(s => <MeetingTV key={`tv-${s.id}`} space={s} />)}
       <DropMarker spaces={spaces} />
 
       {list.map((a) => {
@@ -621,6 +662,8 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
         if (!target) return null;
         const fresh = a.role === "worker" && Date.parse(a.createdAt) > mountedAt.current - FRESH_MS;
         const home = managerHome(office);
+        const phase = agentRevivePhase(a);
+        const isFainted = phase === "fainted" || phase === "reviving";
         return (
           <Robot
             key={a.id}
@@ -629,7 +672,8 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
             spaces={spaces}
             spawnAt={fresh ? { x: home.x + 1.6, z: home.z + 1.6 } : undefined}
             onArrive={a.role === "manager" ? onArrive : undefined}
-            onGrab={a.role === "worker" ? onGrab : undefined}
+            onGrab={a.role === "worker" && !isFainted ? onGrab : undefined}
+            fainted={isFainted}
           >
             {a.role === "worker" && <FileChips agentId={a.id} />}
           </Robot>

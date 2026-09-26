@@ -230,6 +230,41 @@ export function managerTools(ctx) {
         },
         brainstormTool(ctx),
         ...officeTools(ctx),
+        {
+            name: "revive_agent",
+            description: "Switch a fainted agent to a new provider and retry its last failed task. Call after the user approves the revive or chooses a different provider.",
+            schema: {
+                agentId: z.string().describe("The id of the fainted agent"),
+                provider: ProviderSchema.optional().describe("Provider to switch to; omit to use the suggested provider"),
+                model: z.string().optional().describe("Model override; omit for the provider default"),
+            },
+            handler: async (args) => {
+                if (!ctx.reviveAgent)
+                    return "ERROR: reviveAgent not available";
+                const agentId = String(args.agentId);
+                const agent = await ctx.registry.get(agentId);
+                if (!agent)
+                    return `ERROR: unknown agent ${agentId}`;
+                await ctx.reviveAgent(agentId, args.provider, args.model);
+                return `Reviving ${agent.name} — switched provider and retried task`;
+            },
+        },
+        {
+            name: "add_room",
+            description: "Add a new pod, meeting room, or lounge to the office layout. Returns the new space id.",
+            schema: {
+                kind: z.enum(["pod", "meeting", "lounge"]),
+                name: z.string().max(40).optional().describe("Display name; omit for a default like 'Pod B'"),
+            },
+            handler: async (args) => {
+                if (!ctx.addRoom)
+                    return "ERROR: addRoom not available";
+                const result = await ctx.addRoom(args.kind, args.name ?? "");
+                if (!result.ok)
+                    return `ERROR: ${result.message}`;
+                return `Added ${args.kind} room (id: ${result.spaceId})`;
+            },
+        },
     ];
 }
 //# sourceMappingURL=tools.js.map

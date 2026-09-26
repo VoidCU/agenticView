@@ -25,7 +25,7 @@ beforeEach(() => {
     agents: [hubManager],
     tasks: [],
     providers: [{ provider: "claude", ok: true }],
-    settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3 },
+    settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3, limitPolicy: "ask" as const, loungeBreaks: true },
   });
 });
 

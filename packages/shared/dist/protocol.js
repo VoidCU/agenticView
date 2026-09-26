@@ -71,6 +71,13 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("session.rename"), id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) }),
     z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),
     z.object({ type: z.literal("session.capacity"), id: z.string().min(1).max(64), capacity: z.number().int().min(1).max(MAX_SESSION_CAPACITY) }),
+    z.object({
+        type: z.literal("limit.respond"),
+        id: z.string(),
+        answer: z.enum(["accept", "choose", "dismiss"]),
+        provider: ProviderSchema.optional(),
+        model: z.string().optional(),
+    }),
 ]);
 export const SpaceNamesSchema = z.record(z.string(), z.string().trim().min(1).max(40));
 //# sourceMappingURL=protocol.js.map

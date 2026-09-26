@@ -1,5 +1,5 @@
 import { basename, join } from "node:path";
-import { GlobalConfigSchema, SpaceNamesSchema, PROVIDER_ORDER, ProjectSettingsSchema, WorkerSessionFileSchema, } from "@agenticview/shared";
+import { GlobalConfigSchema, SpaceNamesSchema, PROVIDER_ORDER, ProjectSettingsSchema, WorkerSessionFileSchema, buildSpaces, ringsFor, MAX_RINGS, ExplicitRoomsSchema, planOfficeWithSpaces, } from "@agenticview/shared";
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { subagentNames, syncSubagents, writeSubagent } from "./agents/subagents.js";
@@ -11,6 +11,77 @@ import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.j
 import { isTerminal } from "@agenticview/shared";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
 import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
+// ── Explicit-room helpers (used by addRoom / removeRoom) ─────────────────────
+/** Build a Space[] from an explicit room list, assigning seats by kind. */
+function buildSpacesFromExplicit(rooms) {
+    const SEATS_BY_KIND = { pod: 4, meeting: 6, lounge: 4 };
+    return [
+        // Manager's office is always present at origin.
+        { id: "office", name: "Manager's Office", kind: "office", q: 0, r: 0, x: 0, z: 0, ring: 0, seats: 0 },
+        ...rooms.map((rm) => {
+            const { q, r } = rm;
+            // Axial to flat-top world coords (HEX_R = 5, sqrt3 * 5 / 2 ≈ 4.33)
+            const x = 5 * 1.5 * q;
+            const z = 5 * Math.sqrt(3) * (r + q / 2);
+            const ring = Math.max(Math.abs(q), Math.abs(r), Math.abs(-q - r));
+            return { id: rm.id, name: rm.name, kind: rm.kind, q, r, x, z, ring, seats: SEATS_BY_KIND[rm.kind] ?? 4 };
+        }),
+    ];
+}
+/** Returns the largest ring index present in an explicit room list (minimum 1). */
+function currentOfficeRings(rooms) {
+    let max = 1;
+    for (const rm of rooms) {
+        const ring = Math.max(Math.abs(rm.q), Math.abs(rm.r), Math.abs(-rm.q - rm.r));
+        if (ring > max)
+            max = ring;
+    }
+    return max;
+}
+/** Hexes used by the meeting-room and lounge in ring-1 of the default layout. */
+const RESERVED_HEX = new Set(["0,-1", "-1,0"]);
+/** Find the next free hex coordinate to place a new room (spiral outward). */
+function nextAddRoomHex(rooms) {
+    const taken = new Set(rooms.map((rm) => `${rm.q},${rm.r}`));
+    taken.add("0,0"); // manager's office
+    // Spiral outward ring by ring up to MAX_RINGS.
+    for (let ring = 1; ring <= MAX_RINGS; ring++) {
+        // Produce all hexes at this ring distance.
+        const hexes = [];
+        let q = ring;
+        let r = -ring;
+        const dirs = [[0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1], [1, 0]];
+        for (let d = 0; d < 6; d++) {
+            for (let s = 0; s < ring; s++) {
+                hexes.push({ q, r });
+                q += dirs[d][0];
+                r += dirs[d][1];
+            }
+        }
+        for (const h of hexes) {
+            const key = `${h.q},${h.r}`;
+            if (!taken.has(key) && !RESERVED_HEX.has(key))
+                return h;
+        }
+    }
+    return undefined;
+}
+/** Generate a unique room id given the kind and current rooms. */
+function nextRoomId(kind, rooms) {
+    if (kind !== "pod") {
+        const existing = rooms.filter((r) => r.kind === kind).length;
+        return existing === 0 ? kind : `${kind}-${existing + 1}`;
+    }
+    const letters = "abcdefghijklmnopqrstuvwxyz";
+    const existingPods = new Set(rooms.filter((r) => r.kind === "pod").map((r) => r.id));
+    for (const letter of letters) {
+        const id = `pod-${letter}`;
+        if (!existingPods.has(id))
+            return id;
+    }
+    return `pod-${rooms.filter((r) => r.kind === "pod").length}`;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 export function globalConfigPath() {
     return join(globalRoot(), "config.json");
 }
@@ -64,6 +135,32 @@ export async function createWorld(ref, opts) {
         });
         nameWrites = work.catch(() => undefined);
         return work;
+    };
+    // Explicit room layout (rooms.json).  null = no file yet → fall back to auto-grow for ringCount.
+    const roomsFile = join(root, "rooms.json");
+    let explicitRooms = await readJsonFile(roomsFile, ExplicitRoomsSchema.nullable(), null);
+    let roomWrites = Promise.resolve();
+    const writeRooms = (next) => {
+        const work = roomWrites.then(() => writeJsonFile(roomsFile, next));
+        roomWrites = work.catch(() => undefined);
+        return work;
+    };
+    /**
+     * On the first explicit addRoom call, initialise rooms.json from the auto-grown layout so
+     * existing workers keep their spaces.
+     */
+    const ensureRoomsInitialized = async () => {
+        if (explicitRooms !== null)
+            return explicitRooms;
+        const agents = await registry.list();
+        const workers = agents.filter((a) => a.role === "worker");
+        const baseSpaces = buildSpaces(Math.max(1, ringsFor(workers.length)));
+        const rooms = baseSpaces
+            .filter((s) => s.kind !== "office")
+            .map((s) => ({ id: s.id, kind: s.kind, name: s.name, q: s.q, r: s.r }));
+        explicitRooms = rooms;
+        await writeRooms(rooms);
+        return rooms;
     };
     const registry = new AgentRegistry(ref);
     // Only state changes go on the wire, and never with the log: the web feed is built from run.events.
@@ -250,6 +347,74 @@ export async function createWorld(ref, opts) {
     emitProvidersFn = async () => {
         opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
     };
+    // Snapshot helper (defined here so addRoom/removeRoom can broadcast it before the return object).
+    const snapshot = async () => {
+        const agents = await registry.list();
+        const rc = explicitRooms !== null
+            ? currentOfficeRings(explicitRooms)
+            : ringsFor(agents.filter((a) => a.role === "worker").length);
+        return {
+            spaceNames: { ...spaceNames },
+            world: await info(),
+            agents,
+            tasks: (await tasks.list()).map(toWire),
+            providers: await providerStatuses(),
+            autoProvider: await orchestrator.autoProvider(),
+            settings: projectSettings,
+            sessions: await sessions(),
+            ringCount: rc,
+            ...orchestrator.pending(),
+        };
+    };
+    // addRoom: ring-by-ring explicit room placement.
+    const addRoomFn = async (kind, name) => {
+        const rooms = await ensureRoomsInitialized();
+        const hex = nextAddRoomHex(rooms);
+        if (!hex) {
+            return { ok: false, message: `The office is full (${MAX_RINGS} rings). Remove an empty room first.` };
+        }
+        const id = nextRoomId(kind, rooms);
+        const podCount = rooms.filter((r) => r.kind === "pod").length;
+        const defaultName = kind === "pod" ? `Pod ${String.fromCharCode(65 + podCount)}` : kind === "meeting" ? "Meeting Room" : "Lounge";
+        const newRoom = { id, kind, name: name.trim() || defaultName, q: hex.q, r: hex.r };
+        const next = [...rooms, newRoom];
+        explicitRooms = next;
+        await writeRooms(next);
+        // Persist a display-name override so list_spaces and the client see the custom name immediately.
+        if (newRoom.name !== defaultName)
+            await renameSpace(id, newRoom.name);
+        void snapshot().then((s) => opts.bus.emit({ type: "snapshot", ...s }));
+        return { ok: true, spaceId: id };
+    };
+    // removeRoom: only empty rooms (no seated agents), never the Manager's Office.
+    const removeRoomFn = async (spaceId) => {
+        if (spaceId === "office")
+            return { ok: false, message: "Cannot remove the Manager's Office." };
+        const rooms = explicitRooms;
+        if (rooms === null || !rooms.find((r) => r.id === spaceId)) {
+            return { ok: false, message: `Unknown room '${spaceId}'.` };
+        }
+        const agents = await registry.list();
+        const spaces = buildSpacesFromExplicit(rooms);
+        const plan = planOfficeWithSpaces(spaces, agents);
+        const seatedIds = Object.entries(plan.placements)
+            .filter(([, p]) => p.space === spaceId)
+            .map(([agentId]) => agentId);
+        if (seatedIds.length > 0) {
+            const names = seatedIds.map((agentId) => agents.find((a) => a.id === agentId)?.name ?? agentId);
+            return {
+                ok: false,
+                message: `Cannot remove '${spaceId}': ${names.join(", ")} ${names.length === 1 ? "is" : "are"} seated there. Move them first.`,
+            };
+        }
+        const next = rooms.filter((r) => r.id !== spaceId);
+        explicitRooms = next;
+        await writeRooms(next);
+        if (spaceNames[spaceId])
+            await renameSpace(spaceId, "");
+        void snapshot().then((s) => opts.bus.emit({ type: "snapshot", ...s }));
+        return { ok: true };
+    };
     return {
         ref,
         root,
@@ -334,17 +499,9 @@ export async function createWorld(ref, opts) {
             }
             return projectSettings;
         },
-        snapshot: async () => ({
-            spaceNames: { ...spaceNames },
-            world: await info(),
-            agents: await registry.list(),
-            tasks: (await tasks.list()).map(toWire),
-            providers: await providerStatuses(),
-            autoProvider: await orchestrator.autoProvider(),
-            settings: projectSettings,
-            sessions: await sessions(),
-            ...orchestrator.pending(),
-        }),
+        addRoom: addRoomFn,
+        removeRoom: removeRoomFn,
+        snapshot,
     };
 }
 /** Wire form of a task: identical minus the (potentially large) log. */

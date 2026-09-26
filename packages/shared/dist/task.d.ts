@@ -1,10 +1,10 @@
 import { z } from "zod";
 export declare const TaskStatusSchema: z.ZodEnum<{
+    done: "done";
     queued: "queued";
     assigned: "assigned";
     running: "running";
     waiting: "waiting";
-    done: "done";
     failed: "failed";
     cancelled: "cancelled";
 }>;
@@ -43,11 +43,11 @@ export declare const TaskSchema: z.ZodObject<{
     title: z.ZodString;
     description: z.ZodString;
     status: z.ZodEnum<{
+        done: "done";
         queued: "queued";
         assigned: "assigned";
         running: "running";
         waiting: "waiting";
-        done: "done";
         failed: "failed";
         cancelled: "cancelled";
     }>;
