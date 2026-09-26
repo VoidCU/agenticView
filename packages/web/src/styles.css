@@ -3428,6 +3428,14 @@ kbd {
 .failover-editor { grid-column: 1 / -1; }
 .failover-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
 .failover-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.minimap-agent { cursor: pointer; outline: none; }
+.minimap-agent-dot { transition: cx 260ms ease, cy 260ms ease, r 180ms ease; }
+.minimap-agent:focus-visible .minimap-agent-dot { stroke: var(--blue); stroke-width: 2; }
+.minimap-agent:hover .minimap-agent-dot { r: 4.5px; }
+.minimap-agent-lounge .minimap-activity-ring,
+.minimap-agent-break .minimap-activity-ring { animation: minimap-ring-pulse 2.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes minimap-ring-pulse { 50% { opacity: .45; transform: scale(1.18); } }
+@media (prefers-reduced-motion: reduce) { .minimap-agent-dot, .minimap-agent-lounge .minimap-activity-ring, .minimap-agent-break .minimap-activity-ring { animation: none; transition: none; } }
 .provider-compact .provider-reason, .provider-compact .provider-version { display: none; }
 @media (max-width: 1280px) {
   .topbar { align-items: flex-start; }
