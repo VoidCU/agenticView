@@ -747,3 +747,78 @@ it("brainstorm.updated events are emitted when brainstorm starts and answers arr
   const last = updates[updates.length - 1]!;
   expect(last.complete).toBe(true);
 });
+
+describe("preferCheapModels", () => {
+  it("create_agent without provider/model picks cheapest available (codex) when preferCheapModels is on", async () => {
+    let createReply = "";
+    const managerScript: FakeScript = async function* (req) {
+      if (req.agent.role === "manager") {
+        const create = req.bridgeTools.find((b) => b.name === "create_agent")!;
+        createReply = await create.handler({ name: "Penny", specialty: "frontend" });
+        yield { type: "text", text: "ok" };
+      } else {
+        yield { type: "text", text: "done" };
+      }
+    };
+    const fakeManager = new FakeRuntime(managerScript);
+    const fakeWorker = new FakeRuntime(async function* () { yield { type: "text", text: "done" }; });
+    // Include codex so it shows up as an available cheap provider
+    const runtimes = new Map<Provider, Runtime>([
+      ["claude", fakeManager],
+      ["codex", fakeWorker],
+    ]);
+    const ctx = await setup(managerScript, { runtimes });
+    const m = await ctx.reg.ensureManager();
+    await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" })).id);
+    expect(createReply).toContain("preferCheapModels");
+    expect(createReply).toContain("codex");
+    const penny = (await ctx.reg.list()).find((a) => a.name === "Penny")!;
+    expect(penny.provider).toBe("codex");
+    expect(penny.model).toBe("gpt-6-luna");
+  });
+
+  it("create_agent with explicit provider skips cheap selection", async () => {
+    let createReply = "";
+    const managerScript2: FakeScript = async function* (req) {
+      if (req.agent.role === "manager") {
+        const create = req.bridgeTools.find((b) => b.name === "create_agent")!;
+        createReply = await create.handler({ name: "Explicit", specialty: "backend", provider: "claude", model: "opus" });
+        yield { type: "text", text: "ok" };
+      } else {
+        yield { type: "text", text: "done" };
+      }
+    };
+    const fakeManager2 = new FakeRuntime(managerScript2);
+    const fakeWorker2 = new FakeRuntime(async function* () { yield { type: "text", text: "done" }; });
+    const runtimes2 = new Map<Provider, Runtime>([["claude", fakeManager2], ["codex", fakeWorker2]]);
+    const ctx = await setup(managerScript2, { runtimes: runtimes2 });
+    const m = await ctx.reg.ensureManager();
+    await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" })).id);
+    expect(createReply).not.toContain("preferCheapModels");
+    const agent = (await ctx.reg.list()).find((a) => a.name === "Explicit")!;
+    expect(agent.provider).toBe("claude");
+    expect(agent.model).toBe("opus");
+  });
+
+  it("create_agent skips cheap selection when preferCheapModels is false", async () => {
+    let createReply = "";
+    const managerScript3: FakeScript = async function* (req) {
+      if (req.agent.role === "manager") {
+        const create = req.bridgeTools.find((b) => b.name === "create_agent")!;
+        createReply = await create.handler({ name: "Free", specialty: "backend" });
+        yield { type: "text", text: "ok" };
+      } else {
+        yield { type: "text", text: "done" };
+      }
+    };
+    const fakeManager3 = new FakeRuntime(managerScript3);
+    const fakeWorker3 = new FakeRuntime(async function* () { yield { type: "text", text: "done" }; });
+    const runtimes3 = new Map<Provider, Runtime>([["claude", fakeManager3], ["codex", fakeWorker3]]);
+    const ctx = await setup(managerScript3, { runtimes: runtimes3, settings: { preferCheapModels: false } });
+    const m = await ctx.reg.ensureManager();
+    await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" })).id);
+    expect(createReply).not.toContain("preferCheapModels");
+    const agent = (await ctx.reg.list()).find((a) => a.name === "Free")!;
+    expect(agent.provider).toBeNull();
+  });
+});

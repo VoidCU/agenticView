@@ -65,6 +65,13 @@ export interface WorldDeps {
 /** Provider preference order for revive (skip claude which just hit the limit). */
 const REVIVE_CANDIDATES: readonly Provider[] = ["claude-session", "antigravity", "codex", "gemini", "claude"];
 
+/** Ordered cheapest-first choices for preferCheapModels. */
+const CHEAP_CANDIDATES: ReadonlyArray<{ provider: Provider; model: string }> = [
+  { provider: "claude-session", model: "sonnet" },
+  { provider: "antigravity", model: "gemini-3.8-flash-medium" },
+  { provider: "codex", model: "gpt-6-luna" },
+];
+
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -278,6 +285,23 @@ export class Orchestrator {
     this.pendingLimits.delete(id);
     this.deps.bus.emit({ type: "limit.resolved", id });
     entry.resolve(answer, provider, model);
+  }
+
+  /** Returns the cheapest available provider when preferCheapModels is on, or undefined. */
+  async cheapProvider(): Promise<{ provider: Provider; model: string } | undefined> {
+    for (const c of CHEAP_CANDIDATES) {
+      const rt = this.deps.runtimes.get(c.provider);
+      if (!rt) continue;
+      const lim = this.deps.usageTracker?.getProviderLimit(c.provider);
+      if (lim?.limited) continue;
+      // claude-session is always "available" when configured — it waits for a session to connect.
+      if (c.provider !== "claude-session") {
+        const status = await rt.check();
+        if (!status.ok) continue;
+      }
+      return c;
+    }
+    return undefined;
   }
 
   /** Pick the best available provider to revive an agent on, skipping the one that just failed. */
@@ -503,6 +527,7 @@ export class Orchestrator {
         sessionConflict: (a) => this.sessionConflict(runId, a),
         notify: (text) => this.deps.bus.emit({ type: "run.event", taskId: task.id, agentId: agent.id, event: { type: "status", text } }),
         reviveAgent: (agentId, provider, model) => this.reviveAgent(agentId, provider, model),
+        cheapProvider: this.deps.settings().preferCheapModels ? () => this.cheapProvider() : undefined,
         addRoom: this.deps.addRoom,
         emitBrainstorm: (ev) => this.deps.bus.emit(ev),
       });

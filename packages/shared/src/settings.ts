@@ -9,6 +9,8 @@ export const ProjectSettingsSchema = z.object({
   limitPolicy: z.enum(["ask", "auto"]).default("ask"),
   /** Allow the manager to suggest lounge breaks when the project is quiet. */
   loungeBreaks: z.boolean().default(true),
+  /** When true (default), create_agent without an explicit provider/model picks the cheapest available choice. */
+  preferCheapModels: z.boolean().default(true),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 

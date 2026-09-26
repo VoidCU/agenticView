@@ -375,6 +375,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             ask: "ask";
         }>>>;
         loungeBreaks: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+        preferCheapModels: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"project.open">;

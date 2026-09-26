@@ -14,6 +14,7 @@ export declare const ProjectSettingsSchema: z.ZodObject<{
         ask: "ask";
     }>>;
     loungeBreaks: z.ZodDefault<z.ZodBoolean>;
+    preferCheapModels: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strip>;
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 export declare const KnownProjectSchema: z.ZodObject<{

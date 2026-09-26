@@ -99,6 +99,11 @@ export declare class Orchestrator {
         limits: PendingLimitInfo[];
     };
     respondLimit(id: string, answer: "accept" | "choose" | "dismiss", provider?: Provider, model?: string): void;
+    /** Returns the cheapest available provider when preferCheapModels is on, or undefined. */
+    cheapProvider(): Promise<{
+        provider: Provider;
+        model: string;
+    } | undefined>;
     /** Pick the best available provider to revive an agent on, skipping the one that just failed. */
     pickReviveProvider(failedProvider: Provider): {
         provider: Provider;

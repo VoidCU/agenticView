@@ -8,6 +8,8 @@ export const ProjectSettingsSchema = z.object({
     limitPolicy: z.enum(["ask", "auto"]).default("ask"),
     /** Allow the manager to suggest lounge breaks when the project is quiet. */
     loungeBreaks: z.boolean().default(true),
+    /** When true (default), create_agent without an explicit provider/model picks the cheapest available choice. */
+    preferCheapModels: z.boolean().default(true),
 });
 const ProviderConfigSchema = z.object({ apiKey: z.string().optional(), model: z.string().optional() }).prefault({});
 export const KnownProjectSchema = z.object({ path: z.string(), name: z.string(), lastOpened: z.string() });

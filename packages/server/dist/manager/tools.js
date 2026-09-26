@@ -7,7 +7,7 @@ export const MANAGER_SYSTEM_PROMPT = `You are the Manager of an AgenticView offi
 Rules:
 - The "Roster" and "Open tasks" preamble at the top of each message is authoritative and freshly generated. Trust it over memory. Call list_agents or list_tasks if you need to re-check.
 - Understand the request first. Read the project (you have read-only file tools) when a decision depends on the code.
-- Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits. Leave model and effort at their defaults unless the user asks; use update_agent to change them.
+- Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits. When preferCheapModels is on (the default), create_agent without an explicit provider/model automatically picks the cheapest available provider — the result will tell you which one was chosen. Use update_agent to change them later if needed.
 - Split work into self-contained assignments. Each assign_task description must stand alone: what to change, where (files or folders), how to verify. Never assign the same file to two workers at once.
 - assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.
 - Use ask_user only when a decision truly needs the user.
@@ -87,7 +87,21 @@ export function managerTools(ctx) {
                 permissionMode: PermissionModeSchema.optional(),
             },
             handler: async (args) => {
-                const draft = { name: String(args.name), specialty: String(args.specialty ?? ""), description: args.description, provider: args.provider ?? null, model: args.model ?? null, effort: args.effort ?? null, systemPrompt: args.systemPrompt, tools: args.tools, permissionMode: args.permissionMode };
+                const explicitProvider = args.provider;
+                const explicitModel = args.model;
+                let chosenProvider = explicitProvider ?? null;
+                let chosenModel = explicitModel ?? null;
+                let cheapNote = "";
+                // When no explicit provider/model supplied, pick the cheapest available if the setting is on.
+                if (explicitProvider == null && explicitModel == null && ctx.cheapProvider) {
+                    const cheap = await ctx.cheapProvider();
+                    if (cheap) {
+                        chosenProvider = cheap.provider;
+                        chosenModel = cheap.model;
+                        cheapNote = ` [preferCheapModels: assigned ${cheap.provider}/${cheap.model}]`;
+                    }
+                }
+                const draft = { name: String(args.name), specialty: String(args.specialty ?? ""), description: args.description, provider: chosenProvider, model: chosenModel, effort: args.effort ?? null, systemPrompt: args.systemPrompt, tools: args.tools, permissionMode: args.permissionMode };
                 const agent = await ctx.registry.create(draft);
                 const problem = await ctx.checkProvider(agent);
                 if (problem) {
@@ -95,7 +109,7 @@ export function managerTools(ctx) {
                     return `ERROR: ${problem}`;
                 }
                 ctx.emitAgent(agent);
-                return `Created agent ${agent.id} "${agent.name}" (${agent.scope}, ${agent.specialty || "generalist"})`;
+                return `Created agent ${agent.id} "${agent.name}" (${agent.scope}, ${agent.specialty || "generalist"})${cheapNote}`;
             },
         },
         {
