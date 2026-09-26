@@ -5,7 +5,7 @@
  *  - Camera is placed at eye height; OrbitControls disabled.
  *  - WASD/arrows move the player; smooth acceleration/deceleration.
  *  - Mouse look via Pointer Lock API (click canvas → captured; Esc → released + exit walk mode).
- *  - Walking head-bob (vertical sine + lateral cosine).
+ *  - Subtle walking head-bob (a few mm; eased in/out with speed; none when standing still).
  *  - Collision via movePlayer (AABB sub-step + isWalkable outer wall).
  *  - Screen-centre raycast: clicking while locked fires select on the nearest
  *    DeskMonitor or whiteboard within MAX_INTERACT_DIST; E (or a click) on a robot within
@@ -18,7 +18,7 @@ import * as THREE from "three";
 import { spaceAt, type Space } from "@agenticview/shared";
 import { useWalk } from "../state/walk";
 import { useStore } from "../state/store";
-import { movePlayer, walkDelta, clampPitch, applyVelocity } from "./walkPhysics";
+import { movePlayer, walkDelta, clampPitch, applyVelocity, BOB_FREQ, bobWeightStep, headBobSide, headBobY } from "./walkPhysics";
 import { type Solid } from "./colliders";
 import { usePositions } from "../state/positions";
 import { bonk, BONK_RANGE } from "../state/bonk";
@@ -30,12 +30,6 @@ const EYE_HEIGHT = 1.7;
 /** Mouse sensitivity (radians per pixel via pointer lock movementX/Y). */
 const MOUSE_SENSITIVITY = 0.0022;
 
-/** Head-bob amplitude (Y, world units). */
-const BOB_AMP_Y = 0.055;
-/** Head-bob amplitude (X, lateral sway). */
-const BOB_AMP_X = 0.022;
-/** Head-bob frequency (cycles per world-unit walked). */
-const BOB_FREQ = 3.8;
 
 /** Max distance for monitor/whiteboard interaction raycast. */
 const MAX_INTERACT_DIST = 7;
@@ -82,6 +76,7 @@ export function WalkModeController({
     vx: 0,    // horizontal velocity X
     vz: 0,    // horizontal velocity Z
     bobPhase: 0,
+    bobWeight: 0,
     locked: false,       // is pointer lock active?
     clickPending: false, // user pressed primary button while locked
     bonkPending: false,  // user pressed E: bonk the agent under the crosshair if close
@@ -209,12 +204,13 @@ export function WalkModeController({
 
     // Head-bob: applied only while moving.
     const speed = Math.hypot(cur.vx, cur.vz);
-    const bobWeight = Math.min(1, speed / 2);
-    const bobY = Math.sin(cur.bobPhase * 2) * BOB_AMP_Y * bobWeight;
-    const bobX = Math.cos(cur.bobPhase) * BOB_AMP_X * bobWeight;
+    cur.bobWeight = bobWeightStep(cur.bobWeight, speed, dt);
+    const bobY = headBobY(cur.bobPhase, cur.bobWeight);
+    const side = headBobSide(cur.bobPhase, cur.bobWeight);
 
     // Apply camera.
-    camera.position.set(cur.x + bobX, EYE_HEIGHT + bobY, cur.z);
+    // Sway along the camera's right vector (cos yaw, -sin yaw), not world X.
+    camera.position.set(cur.x + Math.cos(cur.yaw) * side, EYE_HEIGHT + bobY, cur.z - Math.sin(cur.yaw) * side);
 
     const currentSpace = spaceAt(spaces, cur.x, cur.z);
     if (currentSpace) {

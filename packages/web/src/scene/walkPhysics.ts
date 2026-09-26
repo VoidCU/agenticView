@@ -116,3 +116,34 @@ export function applyVelocity(
     return { vx: vx * (1 - t), vz: vz * (1 - t) };
   }
 }
+
+// ---- Head-bob (tuned to be felt, not seen) ----
+
+/** Vertical bob amplitude in world units (~6 mm at 1.7 m eye height). Was 55 mm: far too strong. */
+export const BOB_AMP_Y = 0.006;
+/** Sideways sway amplitude along the camera's right vector (~3 mm). */
+export const BOB_AMP_X = 0.003;
+/**
+ * Bob phase advance per world unit walked. Vertical bob is sin(2 * phase), so at full WALK_SPEED
+ * that is BOB_FREQ * WALK_SPEED / PI ≈ 1.9 Hz: about two footsteps a second.
+ */
+export const BOB_FREQ = 1.3;
+/** How fast the bob fades in when starting to walk and out when stopping (1/s). */
+export const BOB_EASE = 5;
+
+/** Ease the bob weight toward the current speed fraction; exactly 0 bob once standing still. */
+export function bobWeightStep(weight: number, speed: number, dt: number): number {
+  const goal = Math.min(1, speed / WALK_SPEED);
+  const next = weight + (goal - weight) * Math.min(1, dt * BOB_EASE);
+  return next < 1e-4 && goal === 0 ? 0 : next;
+}
+
+/** Vertical camera offset for the bob (allocation-free). */
+export function headBobY(phase: number, weight: number): number {
+  return Math.sin(phase * 2) * BOB_AMP_Y * weight;
+}
+
+/** Sideways offset (to apply along the camera's right vector). */
+export function headBobSide(phase: number, weight: number): number {
+  return Math.cos(phase) * BOB_AMP_X * weight;
+}
