@@ -170,6 +170,7 @@ export declare const AgentSchema: z.ZodObject<{
         failedTaskId: z.ZodOptional<z.ZodString>;
         resetAt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
+    lounging: z.ZodOptional<z.ZodBoolean>;
     createdAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;

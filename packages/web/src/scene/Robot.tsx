@@ -28,6 +28,8 @@ interface Props {
   onArrive?: (agentId: string) => void;
   /** Pointer went down on the robot (drag-to-reassign). */
   onGrab?: (agentId: string, e: ThreeEvent<PointerEvent>) => void;
+  /** Called when the robot body is clicked (in addition to the default select toggle). */
+  onBodyClick?: (agentId: string) => void;
   /** Extra HTML that follows the robot (file chips). */
   children?: ReactNode;
   /** When true: grey visor, zZ float, robot lies down on the floor (quota/rate-limit faint). */
@@ -118,7 +120,7 @@ function Eyes({
   );
 }
 
-export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive, onGrab, children, fainted = false }: Props) {
+export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive, onGrab, onBodyClick, children, fainted = false }: Props) {
   const _status = useAgentStatus(agent.id);
   const status = fainted ? "idle" : _status;
   const selected = useStore((s) => s.selectedAgentId === agent.id);
@@ -306,6 +308,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     e.stopPropagation();
     if (Date.now() - useDrag.getState().droppedAt < 250) return;
     select(selected ? undefined : agent.id);
+    onBodyClick?.(agent.id);
   };
 
   return (

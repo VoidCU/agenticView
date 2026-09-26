@@ -106,6 +106,8 @@ export function apiRoutes(world: World): Hono {
 
   app.get("/api/usage", async (c) => c.json(await world.getUsage()));
 
+  app.get("/api/games", async (c) => c.json(await world.getGames()));
+
   app.post("/api/claude-limits", async (c) => {
     let json: unknown;
     try {

@@ -4,6 +4,8 @@ import { type Task } from "./task.js";
 import { type ProjectSettings } from "./settings.js";
 import type { RunEvent } from "./runtime.js";
 import { type WorkerSessionInfo } from "./session.js";
+import { type Match, type GamesData, type GameRoundResult } from "./games.js";
+export type { Match, GamesData, GameRoundResult };
 export declare const ProviderStatusSchema: z.ZodObject<{
     provider: z.ZodEnum<{
         claude: "claude";
@@ -162,6 +164,7 @@ export declare const AgentPatchSchema: z.ZodObject<{
         failedTaskId: z.ZodOptional<z.ZodString>;
         resetAt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>;
+    lounging: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
     description: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -298,6 +301,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             failedTaskId: z.ZodOptional<z.ZodString>;
             resetAt: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>>;
+        lounging: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
         description: z.ZodOptional<z.ZodString>;
         systemPrompt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -376,6 +380,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }>>>;
         loungeBreaks: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
         preferCheapModels: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+        idleLoungeMinutes: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"project.open">;
@@ -407,6 +412,15 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         gemini: "gemini";
     }>>;
     model: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"game.play">;
+    opponentId: z.ZodString;
+    matchId: z.ZodOptional<z.ZodString>;
+    move: z.ZodEnum<{
+        rock: "rock";
+        paper: "paper";
+        scissors: "scissors";
+    }>;
 }, z.core.$strip>], "type">;
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export interface PendingLimitInfo {
@@ -460,6 +474,8 @@ export interface Snapshot {
      * 1 = ring-1 rooms present, up to MAX_RINGS = 3).  Used by the camera to auto-fit the scene.
      */
     ringCount?: number;
+    /** Rock-paper-scissors games: leaderboard and recent matches. */
+    games?: GamesData;
 }
 export type MirrorEvent = {
     kind: string;
@@ -548,4 +564,19 @@ export type ServerMessage = ({
     }[];
     complete: boolean;
     error?: string;
+} | {
+    type: "game.round";
+    matchId: string;
+    round: number;
+    userMove: Match["moves"][0];
+    agentMove: Match["moves"][1];
+    winner: "you" | "agent" | null;
+    score: {
+        you: number;
+        agent: number;
+    };
+    done: boolean;
+} | {
+    type: "game.result";
+    match: Match;
 };

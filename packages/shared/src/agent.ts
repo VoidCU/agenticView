@@ -76,6 +76,8 @@ export const AgentSchema = z.object({
   limit: LimitInfoSchema.optional(),
   /** Revive state machine: set when the agent's provider hit a limit and a revival is in progress. */
   revive: AgentReviveSchema.optional(),
+  /** True when the worker has been idle long enough to be in the lounge. Cleared when assigned a task. */
+  lounging: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

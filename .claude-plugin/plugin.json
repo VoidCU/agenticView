@@ -2,7 +2,7 @@
   "name": "agenticview",
   "displayName": "AgenticView",
   "description": "Gamified 3D office for your coding agents: Claude, Codex, Antigravity or Gemini workers in project or global scope, with a Manager that maps the roster and delegates tasks.",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "author": {
     "name": "AgenticView contributors"
   },

@@ -6,6 +6,9 @@ import { ProjectSettingsSchema, KnownProjectSchema, type ProjectSettings } from 
 import type { RunEvent } from "./runtime.js";
 import { AgentSessionSchema, MAX_SESSION_CAPACITY, type WorkerSessionInfo } from "./session.js";
 import { LimitInfoSchema, type LimitInfo } from "./limits.js";
+import { MoveSchema, type Match, type GamesData, type GameRoundResult } from "./games.js";
+
+export type { Match, GamesData, GameRoundResult };
 
 export const ProviderStatusSchema = z.object({
   provider: ProviderSchema,
@@ -89,6 +92,12 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     provider: ProviderSchema.optional(),
     model: z.string().optional(),
   }),
+  z.object({
+    type: z.literal("game.play"),
+    opponentId: z.string(),
+    matchId: z.string().optional(),
+    move: MoveSchema,
+  }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
@@ -145,6 +154,8 @@ export interface Snapshot {
    * 1 = ring-1 rooms present, up to MAX_RINGS = 3).  Used by the camera to auto-fit the scene.
    */
   ringCount?: number;
+  /** Rock-paper-scissors games: leaderboard and recent matches. */
+  games?: GamesData;
 }
 
 export type MirrorEvent = { kind: string; text: string; ts: string };
@@ -167,4 +178,6 @@ export type ServerMessage =
   | { type: "sessions.updated"; sessions: WorkerSessionInfo[] }
   | { type: "limit.request"; id: string; agentId: string; taskId: string; suggested?: { provider: Provider; model?: string }; resetAt?: string; reason?: string }
   | { type: "limit.resolved"; id: string }
-  | { type: "brainstorm.updated"; managerId: string; requestTaskId: string; topic: string; participants: BrainstormParticipant[]; skipped: { agentId: string; name: string; reason: string }[]; complete: boolean; error?: string };
+  | { type: "brainstorm.updated"; managerId: string; requestTaskId: string; topic: string; participants: BrainstormParticipant[]; skipped: { agentId: string; name: string; reason: string }[]; complete: boolean; error?: string }
+  | { type: "game.round"; matchId: string; round: number; userMove: Match["moves"][0]; agentMove: Match["moves"][1]; winner: "you" | "agent" | null; score: { you: number; agent: number }; done: boolean }
+  | { type: "game.result"; match: Match };

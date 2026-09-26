@@ -16,6 +16,7 @@ import {
   type Effort,
   type LimitsReport,
   type UsageReport,
+  type GamesData,
   buildSpaces,
   ringsFor,
   MAX_RINGS,
@@ -38,6 +39,7 @@ import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.j
 import { isTerminal, type Agent, type Task } from "@agenticview/shared";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
 import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
+import { GameService } from "./games/gameService.js";
 
 export interface WorldOptions {
   runtimes: Map<Provider, Runtime>;
@@ -77,6 +79,8 @@ export interface World {
   unresolveTask: (taskId: string) => Promise<Task>;
   getLimits: () => Promise<LimitsReport>;
   getUsage: () => Promise<UsageReport>;
+  getGames: () => Promise<GamesData>;
+  playUser: (opponentId: string, matchId: string | undefined, move: import("@agenticview/shared").Move) => Promise<import("@agenticview/shared").GameRoundResult>;
   /**
    * Add a new room to the office layout.
    * Returns {ok:true, spaceId} on success or {ok:false, message} when the office is full.
@@ -272,6 +276,23 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   const usageTracker = new UsageTracker(root);
   await usageTracker.init();
 
+  const gameService = new GameService({ root, bus: opts.bus, registry });
+  gameService.start();
+
+  // Idle lounge tracking: watch task state transitions on the bus.
+  opts.bus.on((m) => {
+    if (m.type === "task.updated") {
+      const { task } = m;
+      const agentId = task.assigneeId;
+      const s = settings();
+      if (task.status === "running" || task.status === "assigned") {
+        void gameService.onAgentBusy(agentId);
+      } else if (isTerminal(task.status)) {
+        gameService.onAgentIdle(agentId, s.idleLoungeMinutes);
+      }
+    }
+  });
+
   let emitProvidersFn: () => Promise<void> = async () => undefined;
 
   const deps: WorldDeps = {
@@ -457,6 +478,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       settings: projectSettings,
       sessions: await sessions(),
       ringCount: rc,
+      games: await gameService.getGames(),
       ...orchestrator.pending(),
     };
   };
@@ -585,6 +607,8 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     },
     getLimits: async () => usageTracker.getLimitsReport(),
     getUsage: async () => usageTracker.getUsageReport(),
+    getGames: () => gameService.getGames(),
+    playUser: (opponentId, matchId, move) => gameService.playUser(opponentId, matchId, move),
     updateSettings: async (patch) => {
       projectSettings = ProjectSettingsSchema.parse({ ...projectSettings, ...patch });
       if (ref.kind === "project") await writeJsonFile(settingsFile, projectSettings);

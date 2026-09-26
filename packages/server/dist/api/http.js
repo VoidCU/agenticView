@@ -98,6 +98,7 @@ export function apiRoutes(world) {
     app.get("/api/snapshot", async (c) => c.json(await world.snapshot()));
     app.get("/api/limits", async (c) => c.json(await world.getLimits()));
     app.get("/api/usage", async (c) => c.json(await world.getUsage()));
+    app.get("/api/games", async (c) => c.json(await world.getGames()));
     app.post("/api/claude-limits", async (c) => {
         let json;
         try {

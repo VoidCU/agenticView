@@ -4,7 +4,7 @@ import { Html, OrbitControls, useCursor } from "@react-three/drei";
 import * as THREE from "three";
 import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
-import { useLoungeBreaks, agentRevivePhase } from "./breaks";
+import { useLoungeBreaks, agentRevivePhase, breakSeat } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
 import { layoutFor, seatKey, type OfficeLayout } from "./layout";
 import { Robot, type RobotTarget } from "./Robot";
@@ -20,6 +20,10 @@ import { BOARD_COLORS, podBoard } from "../state/boards";
 import { keyToRoom } from "./roomKeys";
 
 import { MiniMap } from "./MiniMap";
+import { WalkMode } from "./WalkMode";
+import { AllDeskMonitors } from "./DeskMonitor";
+import { useWalk } from "../state/walk";
+import { LoungeScoreboard } from "./LoungeScoreboard";
 
 const DEG = Math.PI / 180;
 
@@ -552,6 +556,52 @@ function CameraRig({ spaces }: { spaces: Space[] }) {
   return null;
 }
 
+// ---------- RPS animation overlay ----------
+
+const MOVE_EMOJI: Record<string, string> = { rock: "✊", paper: "✋", scissors: "✌" };
+
+/**
+ * Shows a ~3 s HTML badge over each player when a game.result arrives.
+ * Accepts the current `at` resolver so it can read live robot positions.
+ */
+function RpsAnimation({ at, agents }: { at: (id: string) => { x: number; z: number } | undefined; agents: Record<string, Agent> }) {
+  const gameAnimation = useStore((s) => s.gameAnimation);
+  const [current, setCurrent] = useState<typeof gameAnimation>(undefined);
+
+  useEffect(() => {
+    if (!gameAnimation) return;
+    setCurrent(gameAnimation);
+    const tid = setTimeout(() => setCurrent(undefined), 3000);
+    return () => clearTimeout(tid);
+  }, [gameAnimation]);
+
+  if (!current) return null;
+  const { match } = current;
+
+  return (
+    <>
+      {(match.players as [string, string]).map((playerId, idx) => {
+        const pos = at(playerId) ?? (agents[playerId] ? undefined : undefined);
+        if (!pos) return null;
+        const move = match.moves[idx]!;
+        const isWinner = match.winner === playerId;
+        const isDraw = match.winner === null;
+        return (
+          <group key={playerId} position={[pos.x, 0, pos.z]}>
+            <Html center position={[0, 2.8, 0]} distanceFactor={14} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+              <div className={`rps-badge${isWinner ? " rps-winner" : isDraw ? " rps-draw" : ""}`}>
+                <span className="rps-move">{MOVE_EMOJI[move] ?? "?"}</span>
+                {isWinner && <span className="rps-label">WIN</span>}
+                {isDraw && <span className="rps-label">DRAW</span>}
+              </div>
+            </Html>
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
 // ---------- scene ----------
 
 const YOU: Agent = {
@@ -575,6 +625,7 @@ const YOU: Agent = {
 const FRESH_MS = 10_000;
 
 function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: Palette; onBoard: (space: Space) => void }) {
+  const walking = useWalk((s) => s.walking);
   const agents = useStore((s) => s.agents);
   const tasks = useStore((s) => s.tasks);
   const beams = useStore((s) => s.beams);
@@ -603,6 +654,22 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       for (const [id, brk] of loungeBreaks) {
         const seat = seatPose(lounge, brk.seat);
         out[id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
+      }
+    }
+
+    // Server-sent lounging (agent.lounging === true): agent goes to a lounge seat.
+    // Use a different seed than breaks to spread them across seats.
+    if (lounge) {
+      const takenSeats = new Set([...loungeBreaks.values()].map((b) => b.seat));
+      for (const a of list) {
+        if (!a.lounging || a.role !== "worker") continue;
+        if (out[a.id] && loungeBreaks.has(a.id)) continue; // already placed by break logic
+        const preferred = breakSeat(a.id, "server-lounge");
+        let seatIdx = preferred;
+        for (let i = 1; takenSeats.has(seatIdx) && i < 4; i++) seatIdx = (preferred + i) % 4;
+        takenSeats.add(seatIdx);
+        const seat = seatPose(lounge, seatIdx);
+        out[a.id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
       }
     }
 
@@ -645,6 +712,18 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
     return { ...p, yaw: yawToward(p, managerHome(office)) };
   }, [office]);
 
+  // Desk monitor positions: one per seated worker in pod spaces.
+  const deskMonitors = useMemo(() => {
+    const out: { agentId: string; spaceX: number; spaceZ: number; seat: number }[] = [];
+    for (const [key, agentId] of layout.occupied.entries()) {
+      const [spaceId, seatStr] = key.split("#") as [string, string];
+      const s = spaces.find((sp) => sp.id === spaceId);
+      if (!s || s.kind !== "pod") continue;
+      out.push({ agentId, spaceX: s.x, spaceZ: s.z, seat: parseInt(seatStr, 10) });
+    }
+    return out;
+  }, [layout.occupied, spaces]);
+
   const nextPose = layout.next && spaces.find((s) => s.id === layout.next!.space) ? seatPose(spaces.find((s) => s.id === layout.next!.space)!, layout.next.seat) : undefined;
   const at = (id: string) => livePos(id, targets[id]);
 
@@ -667,6 +746,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
         const home = managerHome(office);
         const phase = agentRevivePhase(a);
         const isFainted = phase === "fainted" || phase === "reviving";
+        const isLounging = a.lounging === true && a.role === "worker";
         return (
           <Robot
             key={a.id}
@@ -676,6 +756,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
             spawnAt={fresh ? { x: home.x + 1.6, z: home.z + 1.6 } : undefined}
             onArrive={a.role === "manager" ? onArrive : undefined}
             onGrab={a.role === "worker" && !isFainted ? onGrab : undefined}
+            onBodyClick={isLounging ? (agentId) => window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId } })) : undefined}
             fainted={isFainted}
           >
             {a.role === "worker" && <FileChips agentId={a.id} />}
@@ -700,8 +781,16 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
         return <Confetti key={`${c.agentId}-${c.until}-${i}`} origin={[p.x, 0, p.z]} until={c.until} />;
       })}
 
+      <AllDeskMonitors desks={deskMonitors} />
+
+      {lounge && <LoungeScoreboard lounge={lounge} />}
+      <RpsAnimation at={at} agents={agents} />
+
+      <WalkMode spaces={spaces} startX={youPose.x} startZ={youPose.z} />
+
       <OrbitControls
         makeDefault
+        enabled={!walking}
         enableDamping
         dampingFactor={0.08}
         minPolarAngle={0.35}
@@ -713,7 +802,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
         panSpeed={0.7}
         screenSpacePanning={false}
       />
-      <CameraRig spaces={spaces} />
+      {!walking && <CameraRig spaces={spaces} />}
     </>
   );
 }
@@ -724,8 +813,15 @@ export function Office({ onCreate }: { onCreate: () => void }) {
   const select = useStore((s) => s.select);
   const focus = useFocus((s) => s.focus);
   const setFocus = useFocus((s) => s.setFocus);
+  const setWalking = useWalk((s) => s.setWalking);
   const theme = useSceneTheme();
   const palette = PALETTES[theme];
+
+  // Expose walk toggle on window for Playwright tests / TopBar
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).__setWalking = setWalking;
+    return () => { delete (window as unknown as Record<string, unknown>).__setWalking; };
+  }, [setWalking]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -736,12 +832,14 @@ export function Office({ onCreate }: { onCreate: () => void }) {
       if (document.querySelector('[role="dialog"]')) return;
 
       if (e.key === "Escape") {
+        // Exit walk mode first, then clear focus.
+        if (useWalk.getState().walking) { setWalking(false); return; }
         setFocus(undefined);
         return;
       }
 
-      // 1–9: focus the nth room in viewOrder.
-      if (e.key >= "1" && e.key <= "9" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // 1–9: focus the nth room in viewOrder (overview mode only).
+      if (!useWalk.getState().walking && e.key >= "1" && e.key <= "9" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const state = useStore.getState();
         const list = sortedAgents(state.agents);
         const { spaces } = layoutFor(list, state.spaceNames);
@@ -751,7 +849,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setFocus]);
+  }, [setFocus, setWalking]);
 
   return (
     <div className="office" data-scene-theme={theme}>

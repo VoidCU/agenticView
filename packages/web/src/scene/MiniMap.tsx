@@ -1,6 +1,7 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useEffect } from "react";
 import { HEX_R } from "@agenticview/shared";
 import { useStore, sortedAgents, agentStatus, STATUS_COLORS } from "../state/store";
+import { useMapOpen } from "../state/map";
 import { useFocus } from "./motion";
 import { useSceneTheme } from "./theme";
 import { layoutFor } from "./layout";
@@ -33,6 +34,7 @@ const KIND_FILL_LIGHT: Record<string, string> = {
 /**
  * Mini-map overlay: top-down view of the office hex grid with agent status dots.
  * Rendered as a plain HTML/SVG element outside the R3F Canvas.
+ * Positioned in the bottom-right corner; M key or close × toggles it.
  */
 export function MiniMap() {
   const agents = useStore((s) => s.agents);
@@ -45,6 +47,21 @@ export function MiniMap() {
   const setFocus = useFocus((s) => s.setFocus);
   const theme = useSceneTheme();
   const isDark = theme === "dark";
+
+  const { open, setOpen } = useMapOpen();
+
+  // Persist open/closed state to localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("av:map-open");
+      if (stored === "false") setOpen(false);
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem("av:map-open", String(open)); } catch { /* ignore */ }
+  }, [open]);
 
   const list = useMemo(() => sortedAgents(agents), [agents]);
   const layout = useMemo(() => layoutFor(list, spaceNames), [list, spaceNames]);
@@ -91,20 +108,37 @@ export function MiniMap() {
   const focusFill = isDark ? "#3b5bdb" : "#4c6ef5";
   const focusText = "#ffffff";
 
+  // Bottom-right anchor; above the commandbar area (~80px) and right gutter (16px).
+  const anchorStyle: React.CSSProperties = {
+    position: "absolute",
+    bottom: 88,
+    right: 16,
+    zIndex: 30,
+    userSelect: "none",
+  };
+
+  // Small round button shown when map is closed
+  if (!open) {
+    return (
+      <div style={anchorStyle}>
+        <button
+          type="button"
+          className="minimap-toggle-btn"
+          onClick={() => setOpen(true)}
+          title="Show mini-map (M)"
+          aria-label="Show mini-map"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 7l6-3 6 3 6-3v13l-6 3-6-3-6 3V7z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/>
+            <path d="M9 4v13M15 7v13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          </svg>
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div
-      style={{
-        // Top-left of the 3D view, just right of the Tasks panel: the bottom corners belong to the
-        // command bar and the chat input.
-        position: "absolute",
-        top: 84,
-        left: 352,
-        width: MAP_SIZE,
-        zIndex: 30,
-        pointerEvents: "none",
-        userSelect: "none",
-      }}
-    >
+    <div style={{ ...anchorStyle, pointerEvents: "none" }}>
       <div
         style={{
           background: containerBg,
@@ -112,10 +146,22 @@ export function MiniMap() {
           borderRadius: 10,
           backdropFilter: "blur(8px)",
           WebkitBackdropFilter: "blur(8px)",
-          overflow: "hidden",
+          overflow: "visible",
           boxShadow: isDark ? "0 4px 18px rgba(0,0,0,0.45)" : "0 4px 18px rgba(0,0,0,0.12)",
+          position: "relative",
         }}
       >
+        {/* Close button */}
+        <button
+          type="button"
+          className="minimap-close-btn"
+          onClick={() => setOpen(false)}
+          title="Hide mini-map (M)"
+          aria-label="Hide mini-map"
+          style={{ pointerEvents: "auto" }}
+        >
+          ×
+        </button>
         <svg
           width={MAP_SIZE}
           height={MAP_SIZE}
