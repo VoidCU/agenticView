@@ -315,6 +315,8 @@ function TaskDrawer({
   const sessions = useStore((s) => s.sessions);
   const tasks = useStore((s) => s.tasks);
   const select = useStore((s) => s.select);
+  // Only offer the Inbox when a real question or permission for this task is pending there.
+  const hasPending = useStore((s) => s.questions.some((q) => q.taskId === task.id) || s.permissions.some((p) => p.taskId === task.id));
   const sheetRef = useRef<HTMLDivElement>(null);
   const [showChanges, setShowChanges] = useState(false);
   const [showMarkSolved, setShowMarkSolved] = useState(false);
@@ -556,7 +558,7 @@ function TaskDrawer({
               Undo solved
             </button>
           )}
-          {task.status === "waiting" && onOpenInbox && (
+          {hasPending && onOpenInbox && (
             <button
               type="button"
               className="btn btn-primary btn-xs"

@@ -219,6 +219,8 @@ describe("PodBoard task drawer", () => {
     useStore.getState().apply(
       snapshot([manager, workerInPodA], [task({ id: "d5", title: "Waiting task", status: "waiting" })]),
     );
+    // The button only appears when the Inbox really holds something for this task.
+    useStore.setState({ questions: [{ id: "q5", agentId: worker.id, taskId: "d5", question: "Which colour?" }] });
     render(<PodBoard space={podA} onClose={vi.fn()} onOpenInbox={onOpenInbox} />);
     await userEvent.click(screen.getByRole("button", { name: /waiting task/i }));
     const drawer = screen.getByTestId("task-drawer");

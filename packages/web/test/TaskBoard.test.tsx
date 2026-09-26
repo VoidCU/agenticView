@@ -143,6 +143,19 @@ describe("TaskBoard", () => {
     expect(onOpenInbox).toHaveBeenCalled();
   });
 
+  it("shows no Inbox button or fake question when a waiting task has nothing pending in the Inbox", () => {
+    useStore.getState().apply(
+      snapshot(
+        [worker],
+        [task({ id: "wait_2", title: "Round 5", description: "Long request text that is not a question", status: "waiting", assigneeId: worker.id })],
+      ),
+    );
+    useStore.setState({ questions: [], permissions: [] });
+    render(<TaskBoard onOpenInbox={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /open.*inbox/i })).toBeNull();
+    expect(screen.queryByText("Long request text that is not a question")).toBeNull();
+  });
+
   it("collapses panel and agents independently and retains collapse on updates", async () => {
     useStore.getState().apply(snapshot([worker], [task({ id: "one", title: "First" })]));
     render(<TaskBoard />);
