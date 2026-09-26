@@ -41,3 +41,5 @@ export function layoutFor(agents: Agent[], spaceNames?: Record<string, string>):
   }
   return { spaces: resolvedSpaces, poses, placements, occupied, next: nextPlacement(agents) };
 }
+
+export { solidsForLayout, type SolidBox, type SolidCircle, type SolidObstacle } from "./solids";

@@ -265,8 +265,8 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
     if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + (l.z < 0 ? -0.1 : 0.1), l.yaw));
   }
   // Felt privacy screen along the spine of the cluster, with an aluminium cap.
-  k.rbox("felt", [0, DESK_H + 0.2, 0], [2.5, 0.4, 0.05]);
-  k.box("alu", [0, DESK_H + 0.405, 0], [2.5, 0.015, 0.06]);
+  k.rbox("felt", [0, DESK_H + 0.2, 0], [3.8, 0.4, 0.05]);
+  k.box("alu", [0, DESK_H + 0.405, 0], [3.8, 0.015, 0.06]);
   k.box("deskLeg", [0, 0.36, 0], [0.06, 0.72, 0.06]);
   // Corners: tall pieces at the back (away from the camera), low ones at the front.
   bookshelf(corner(k, 180), seed);
@@ -280,8 +280,8 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
 function officeRoom(k: Kit, s: Space) {
   const home = managerHome({ ...s, x: 0, z: 0 });
   // Rug, then the executive desk between the manager and the room.
-  k.cyl("rugOffice", [0, 0.006, 0], 4.3, 0.012);
-  k.cyl("accent", [0, 0.004, 0], 4.38, 0.008);
+  k.cyl("rugOffice", [0, 0.006, 0], 6.0, 0.012);
+  k.cyl("accent", [0, 0.004, 0], 6.1, 0.008);
   const toCam = { x: Math.cos(45 * DEG), z: Math.sin(45 * DEG) };
   const deskAt = { x: home.x + toCam.x * 0.78, z: home.z + toCam.z * 0.78 };
   const dk = k.frame(deskAt.x, deskAt.z, yawToward(deskAt, home));
@@ -312,9 +312,9 @@ function officeRoom(k: Kit, s: Space) {
 }
 
 function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
-  k.cyl("walnut", [0, 0.74, 0], 2.5, 0.07);
-  k.cyl("deskLeg", [0, 0.37, 0], 0.3, 0.7);
-  k.cyl("deskLeg", [0, 0.02, 0], 1.0, 0.04);
+  k.cyl("walnut", [0, 0.74, 0], 3.4, 0.07);
+  k.cyl("deskLeg", [0, 0.37, 0], 0.4, 0.7);
+  k.cyl("deskLeg", [0, 0.02, 0], 1.4, 0.04);
   for (let i = 0; i < 3; i++) k.box("book", [Math.cos(i * 2.1) * 0.5, 0.79, Math.sin(i * 2.1) * 0.5], [0.22, 0.01, 0.3], { yaw: i, color: "#efe7da" });
   k.cyl("pot", [0, 0.86, 0], 0.18, 0.18);
   k.add("ico", "leaf2", [0, 1.02, 0], [0.26, 0.24, 0.26]);
@@ -334,11 +334,11 @@ function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
 }
 
 function loungeRoom(k: Kit, s: Space, occ: RoomOccupancy) {
-  k.cyl("rugLounge", [0, 0.006, 0], 3.9, 0.012);
-  k.cyl("rugLounge2", [0, 0.01, 0], 3.0, 0.012);
-  k.cyl("rugLounge", [0, 0.014, 0], 2.7, 0.012);
-  k.cyl("walnut", [0, 0.38, 0], 1.1, 0.05);
-  k.cyl("deskLeg", [0, 0.19, 0], 0.12, 0.36);
+  k.cyl("rugLounge", [0, 0.006, 0], 5.4, 0.012);
+  k.cyl("rugLounge2", [0, 0.01, 0], 4.2, 0.012);
+  k.cyl("rugLounge", [0, 0.014, 0], 3.8, 0.012);
+  k.cyl("walnut", [0, 0.38, 0], 1.5, 0.05);
+  k.cyl("deskLeg", [0, 0.19, 0], 0.16, 0.36);
   k.cyl("pot", [0.15, 0.46, 0.1], 0.1, 0.12, { color: "#e4b04a" });
   k.box("book", [-0.2, 0.42, -0.1], [0.3, 0.03, 0.22], { yaw: 0.4, color: "#3f6f8f" });
   for (let seat = 0; seat < s.seats; seat++) {

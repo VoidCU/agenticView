@@ -24,6 +24,7 @@ import { WalkMode } from "./WalkMode";
 import { AllDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
 import { LoungeScoreboard } from "./LoungeScoreboard";
+import { buildColliders } from "./colliders";
 
 const DEG = Math.PI / 180;
 
@@ -150,7 +151,7 @@ function FloorDecal({
 
   const a = 45 * DEG;
   // In the open floor between the room's furniture and its front wall, toward the camera.
-  const dist = space.kind === "office" ? 2.9 : space.kind === "meeting" ? 3.0 : 2.7;
+  const dist = space.kind === "office" ? 4.2 : space.kind === "meeting" ? 4.6 : 4.3;
   const x = space.x + dist * Math.cos(a);
   const z = space.z + dist * Math.sin(a);
 
@@ -275,6 +276,7 @@ function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Space) =>
   const rows = Math.max(3, Math.ceil(active.length / cols));
   return <group position={[space.x + x, 0, space.z + z]} rotation={[0, yawToward({ x, z }, { x: 0, z: 0 }), 0]}>
     <mesh position={[0, 1.12, 0.04]}
+      userData={{ boardSpaceId: space.id }}
       onPointerOver={e => { e.stopPropagation(); setHovered(true); }} onPointerOut={() => setHovered(false)}
       onClick={e => { e.stopPropagation(); if (e.delta <= 4) { setHovered(false); onOpen(space); } }}>
       <boxGeometry args={[1.72, 1.02, 0.055]} />
@@ -530,7 +532,7 @@ function CameraRig({ spaces }: { spaces: Space[] }) {
     const target = space ? new THREE.Vector3(space.x, 0.5, space.z) : new THREE.Vector3(1.2, 0, 1.2);
     const az = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
     const polar = space ? 0.82 : 0.78;
-    const dist = space ? 19 : overviewDistance(spaces);
+    const dist = space ? 25 : overviewDistance(spaces);
     const pos = new THREE.Vector3(target.x + dist * Math.sin(polar) * Math.sin(az), dist * Math.cos(polar), target.z + dist * Math.sin(polar) * Math.cos(az));
     goal.current = { target, pos };
     // Rings change the overview distance; a focus change moves there.
@@ -724,6 +726,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
     return out;
   }, [layout.occupied, spaces]);
 
+  const colliders = useMemo(() => buildColliders(layout), [layout]);
   const nextPose = layout.next && spaces.find((s) => s.id === layout.next!.space) ? seatPose(spaces.find((s) => s.id === layout.next!.space)!, layout.next.seat) : undefined;
   const at = (id: string) => livePos(id, targets[id]);
 
@@ -786,7 +789,9 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       {lounge && <LoungeScoreboard lounge={lounge} />}
       <RpsAnimation at={at} agents={agents} />
 
-      <WalkMode spaces={spaces} startX={youPose.x} startZ={youPose.z} />
+      <WalkMode spaces={spaces} startX={youPose.x} startZ={youPose.z} solids={colliders}
+        onBoard={(id) => { const s = spaces.find((sp) => sp.id === id); if (s) onBoard(s); }}
+      />
 
       <OrbitControls
         makeDefault
