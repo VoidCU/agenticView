@@ -13,3 +13,6 @@ playwright-report/
 
 # E2E screenshots (generated, not committed)
 e2e/screenshots/
+
+# Stray nested packages directory (build artifact)
+packages/web/packages/
