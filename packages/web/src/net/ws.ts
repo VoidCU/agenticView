@@ -64,6 +64,62 @@ export async function uploadImage(file: File): Promise<string> {
 
 type StoreApi = { getState(): Store; setState(patch: Partial<Store>): void };
 
+/**
+ * run.events arriving within this window are applied as one store update. A busy office streams
+ * 100+ events/s; applied one by one each was its own React commit for every subscriber and every
+ * drei <Html> root (measured ~490 react-dom commits/s at 160 events/s). 50 ms keeps chat streaming
+ * smooth (20 updates/s) while bounding UI work regardless of the event rate.
+ */
+export const RUN_EVENT_BATCH_MS = 50;
+
+export interface Ingest {
+  (msg: ServerMessage): void;
+  /** Apply anything queued now. */
+  flush(): void;
+  /** Drop the pending timer (connection closed). */
+  dispose(): void;
+}
+
+/**
+ * Message intake: run.events are queued and flushed together; any other message first flushes the
+ * queue (so ordering is preserved: a task.updated never overtakes the events that preceded it).
+ */
+export function createIngest(store: Pick<StoreApi, "getState">, windowMs = RUN_EVENT_BATCH_MS): Ingest {
+  const queue: ServerMessage[] = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+    if (queue.length) store.getState().applyMany(queue.splice(0));
+  };
+  const ingest = ((msg: ServerMessage) => {
+    if (msg.type === "run.event") {
+      queue.push(msg);
+      timer ??= setTimeout(flush, windowMs);
+      return;
+    }
+    flush();
+    store.getState().apply(msg);
+  }) as Ingest;
+  ingest.flush = flush;
+  ingest.dispose = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    queue.length = 0;
+  };
+  return ingest;
+}
+
+let activeIngest: Ingest | undefined;
+
+/** Feed a server message through the live connection's intake (test / perf probes). */
+export function ingestMessage(store: Pick<StoreApi, "getState">, msg: ServerMessage): void {
+  if (activeIngest) activeIngest(msg);
+  else store.getState().apply(msg);
+}
+
 export interface Connection {
   send(m: ClientMessage): void;
   close(): void;
@@ -84,6 +140,8 @@ export function connect(store: StoreApi, opts: { url?: string } = {}): Connectio
   let timer: ReturnType<typeof setTimeout> | undefined;
   const queue: ClientMessage[] = [];
   let everOpened = false;
+  const ingest = createIngest(store);
+  activeIngest = ingest;
 
   const send = (m: ClientMessage) => {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
@@ -107,9 +165,10 @@ export function connect(store: StoreApi, opts: { url?: string } = {}): Connectio
       } catch {
         return;
       }
-      store.getState().apply(msg);
+      ingest(msg);
     };
     ws.onclose = () => {
+      ingest.flush();
       store.getState().setConnected(false);
       ws = undefined;
       if (closed) return;
@@ -129,6 +188,8 @@ export function connect(store: StoreApi, opts: { url?: string } = {}): Connectio
     close() {
       closed = true;
       if (timer) clearTimeout(timer);
+      ingest.dispose();
+      if (activeIngest === ingest) activeIngest = undefined;
       ws?.close();
     },
   };
