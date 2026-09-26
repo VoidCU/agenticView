@@ -8,7 +8,8 @@
  *  - Walking head-bob (vertical sine + lateral cosine).
  *  - Collision via movePlayer (AABB sub-step + isWalkable outer wall).
  *  - Screen-centre raycast: clicking while locked fires select on the nearest
- *    DeskMonitor or whiteboard within MAX_INTERACT_DIST.
+ *    DeskMonitor or whiteboard within MAX_INTERACT_DIST; E (or a click) on a robot within
+ *    BONK_RANGE gives it a playful bonk (state/bonk.ts).
  *  - Keys ignored while typing in inputs or a modal is open.
  */
 import { useRef, useEffect } from "react";
@@ -20,6 +21,7 @@ import { useStore } from "../state/store";
 import { movePlayer, walkDelta, clampPitch, applyVelocity } from "./walkPhysics";
 import { type Solid } from "./colliders";
 import { usePositions } from "../state/positions";
+import { bonk, BONK_RANGE } from "../state/bonk";
 
 // ---- Constants ----
 
@@ -82,6 +84,7 @@ export function WalkModeController({
     bobPhase: 0,
     locked: false,       // is pointer lock active?
     clickPending: false, // user pressed primary button while locked
+    bonkPending: false,  // user pressed E: bonk the agent under the crosshair if close
   });
 
   const keys = useRef(new Set<string>());
@@ -165,6 +168,7 @@ export function WalkModeController({
         // If locked, exitPointerLock triggers the pointerlockchange handler.
         return;
       }
+      if (e.code === "KeyE" && !e.repeat) st.current.bonkPending = true;
       keys.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
@@ -179,6 +183,7 @@ export function WalkModeController({
   // ---- Raycaster for screen-centre interaction ----
 
   const raycaster = useRef(new THREE.Raycaster());
+  const scratch = useRef({ euler: new THREE.Euler(0, 0, 0, "YXZ"), centre: new THREE.Vector2(0, 0), world: new THREE.Vector3() });
 
   // ---- Per-frame update ----
 
@@ -221,31 +226,20 @@ export function WalkModeController({
     }
 
     // Build rotation from yaw + pitch.
-    const euler = new THREE.Euler(cur.pitch, cur.yaw, 0, "YXZ");
+    const euler = scratch.current.euler.set(cur.pitch, cur.yaw, 0, "YXZ");
     camera.quaternion.setFromEuler(euler);
 
-    // Screen-centre raycast: fire when click was pending.
-    if (cur.clickPending) {
+    // Screen-centre raycast: fire when a click or E press is pending.
+    if (cur.clickPending || cur.bonkPending) {
+      const bonkOnly = !cur.clickPending;
       cur.clickPending = false;
-      raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
+      cur.bonkPending = false;
+      raycaster.current.setFromCamera(scratch.current.centre, camera);
       const hits = raycaster.current.intersectObjects(scene.children, true);
-      for (const hit of hits) {
-        if (hit.distance > MAX_INTERACT_DIST) break;
-        // Walk up the hierarchy looking for userData.agentId or userData.boardSpaceId.
-        let obj: THREE.Object3D | null = hit.object;
-        while (obj) {
-          if (obj.userData?.agentId) {
-            select(obj.userData.agentId as string);
-            break;
-          }
-          if (obj.userData?.boardSpaceId) {
-            onBoard?.(obj.userData.boardSpaceId as string);
-            break;
-          }
-          obj = obj.parent;
-        }
-        if (obj) break;
-      }
+      const action = walkInteraction(hits, camera.position, scratch.current.world, bonkOnly);
+      if (action?.kind === "bonk") bonk(action.id);
+      else if (action?.kind === "select") select(action.id);
+      else if (action?.kind === "board") onBoard?.(action.id);
     }
   });
 
@@ -282,4 +276,38 @@ export function WalkMode({ spaces, startX, startZ, solids, onBoard }: WalkModePr
       onBoard={onBoard}
     />
   );
+}
+
+export type WalkAction = { kind: "bonk" | "select" | "board"; id: string };
+
+/**
+ * What a screen-centre click (or E press, `bonkOnly`) does, given the raycast hits (nearest first).
+ * A robot within BONK_RANGE (horizontal, from the camera to the robot's origin) gets bonked; a
+ * farther robot or a desk monitor selects its agent; a whiteboard opens its board.
+ * `tmp` is a caller-owned scratch vector so this never allocates.
+ */
+export function walkInteraction(
+  hits: ReadonlyArray<{ distance: number; object: THREE.Object3D }>,
+  cam: { x: number; z: number },
+  tmp: THREE.Vector3,
+  bonkOnly = false,
+): WalkAction | undefined {
+  for (const hit of hits) {
+    if (hit.distance > MAX_INTERACT_DIST) return undefined;
+    let obj: THREE.Object3D | null = hit.object;
+    while (obj) {
+      const ud = obj.userData;
+      if (ud?.robotAgentId) {
+        const root = obj.parent?.parent?.parent ?? obj; // body -> tilt -> yaw -> root group
+        root.getWorldPosition(tmp);
+        const near = Math.hypot(tmp.x - cam.x, tmp.z - cam.z) <= BONK_RANGE;
+        if (near) return { kind: "bonk", id: ud.robotAgentId as string };
+        return bonkOnly ? undefined : { kind: "select", id: ud.robotAgentId as string };
+      }
+      if (ud?.agentId) return bonkOnly ? undefined : { kind: "select", id: ud.agentId as string };
+      if (ud?.boardSpaceId) return bonkOnly ? undefined : { kind: "board", id: ud.boardSpaceId as string };
+      obj = obj.parent;
+    }
+  }
+  return undefined;
 }

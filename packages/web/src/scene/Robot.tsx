@@ -11,6 +11,7 @@ import { dragPoint, livePositions, useDrag } from "./motion";
 import { agentActivityText } from "./selectors";
 import { useWalk } from "../state/walk";
 import { useHudPrefs } from "../state/hudPrefs";
+import { bonk, bonkedAt, bonkWobble } from "../state/bonk";
 
 export interface RobotTarget extends Point {
   yaw: number;
@@ -308,6 +309,12 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
         b.scale.set(breath, 2 - breath, breath);
         b.position.y = Math.sin(t * 2.2 + seed) * 0.04 * idle + Math.abs(Math.cos(st.phase)) * 0.07 * w;
       }
+      // Bonk wobble: squash-and-stretch on top of whatever the body is doing (no allocations).
+      const wob = bonkWobble(Date.now() - bonkedAt(agent.id));
+      if (wob !== 0) {
+        const side = 1 + 0.14 * wob;
+        b.scale.set(b.scale.x * side, b.scale.y * (1 - 0.22 * wob), b.scale.z * side);
+      }
     }
     if (antennaTip.current) {
       const m = antennaTip.current.material as THREE.MeshStandardMaterial;
@@ -352,6 +359,8 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
 
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
+    // Alt+click: a playful bonk instead of selecting.
+    if (e.altKey) { bonk(agent.id); return; }
     if (Date.now() - useDrag.getState().droppedAt < 250) return;
     select(selected ? undefined : agent.id);
     onBodyClick?.(agent.id);
@@ -364,6 +373,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           <group
             ref={body}
             onClick={onClick}
+            userData={{ robotAgentId: agent.id }}
             onPointerDown={onGrab ? (e) => onGrab(agent.id, e) : undefined}
             onPointerOver={() => (document.body.style.cursor = onGrab ? "grab" : "pointer")}
             onPointerOut={() => (document.body.style.cursor = "")}
@@ -550,6 +560,11 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           </button>
         </div>
       </Html>
+      )}
+      {!tagsVisible && bubble?.bonk && bubbleText && (
+        <Html center distanceFactor={10} position={[0, 2.35 * ROBOT_SCALE + 0.1, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+          <div className="bubble bubble-text bubble-bonk" data-testid="bonk-bubble">{bubbleText}</div>
+        </Html>
       )}
       {fainted && tagsVisible && (
         <Html center position={[0, 2.2 * ROBOT_SCALE, 0]} distanceFactor={18} zIndexRange={[18, 0]} style={{ pointerEvents: "none" }}>
