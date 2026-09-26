@@ -132,27 +132,25 @@ function resolveBoxDir(
   if (cx <= ex.minX || cx >= ex.maxX || cz <= ex.minZ || cz >= ex.maxZ) {
     return { x: cx, z: cz };
   }
-  const fromLeft = prevX <= ex.minX;
-  const fromRight = prevX >= ex.maxX;
-  const fromFront = prevZ <= ex.minZ;
-  const fromBack = prevZ >= ex.maxZ;
-
-  if (fromLeft && !fromFront && !fromBack) return { x: ex.minX, z: cz };
-  if (fromRight && !fromFront && !fromBack) return { x: ex.maxX, z: cz };
-  if (fromFront && !fromLeft && !fromRight) return { x: cx, z: ex.minZ };
-  if (fromBack && !fromLeft && !fromRight) return { x: cx, z: ex.maxZ };
-
-  const velX = cx - prevX;
-  const velZ = cz - prevZ;
-  if (Math.abs(velX) > Math.abs(velZ)) {
-    // Entered primarily from the X direction.
-    return { x: velX >= 0 ? ex.minX : ex.maxX, z: cz };
-  } else if (Math.abs(velZ) > 1e-9) {
-    // Entered primarily from the Z direction.
-    return { x: cx, z: velZ >= 0 ? ex.minZ : ex.maxZ };
-  }
-  // No net movement: fall back to min-penetration.
-  return resolveBox(cx, cz, box, r);
+  // A small tolerance: a walker sliding along a rotated face sits ON it up to float round-off, and
+  // must count as outside. (Without it, a hair of "inside" skipped every entry face and the old
+  // velocity fallback threw a walker sliding along a sofa to the sofa's far end: the teleport bug.)
+  const fromLeft = prevX <= ex.minX + ENTRY_EPS;
+  const fromRight = prevX >= ex.maxX - ENTRY_EPS;
+  const fromFront = prevZ <= ex.minZ + ENTRY_EPS;
+  const fromBack = prevZ >= ex.maxZ - ENTRY_EPS;
+  // Started the step inside: nearest face (resolveMove eases genuinely deep overlaps separately).
+  if (!fromLeft && !fromRight && !fromFront && !fromBack) return resolveBox(cx, cz, box, r);
+  // Out through the shallowest of the faces the step came through: always the near side, also
+  // when it entered across a corner.
+  let best = Infinity;
+  let ox = cx;
+  let oz = cz;
+  if (fromLeft && cx - ex.minX < best) { best = cx - ex.minX; ox = ex.minX; oz = cz; }
+  if (fromRight && ex.maxX - cx < best) { best = ex.maxX - cx; ox = ex.maxX; oz = cz; }
+  if (fromFront && cz - ex.minZ < best) { best = cz - ex.minZ; ox = cx; oz = ex.minZ; }
+  if (fromBack && ex.maxZ - cz < best) { ox = cx; oz = ex.maxZ; }
+  return { x: ox, z: oz };
 }
 
 /**
@@ -173,6 +171,9 @@ export function resolveCircle(
   const push = (minDist - dist) / dist;
   return { x: cx + dx * push, z: cz + dz * push };
 }
+
+/** Tolerance for "the previous position was outside this face". */
+const ENTRY_EPS = 1e-7;
 
 const LOCAL_BOX: AABB = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
 
@@ -205,30 +206,152 @@ export function resolveSolid(s: Solid, prevX: number, prevZ: number, x: number, 
 /** True when a circle of radius r at (x, z) overlaps any of the solids. */
 export function overlapsAny(solids: readonly Solid[], x: number, z: number, r: number): boolean {
   for (const s of solids) {
-    if (s.kind === "circle") {
-      if (Math.hypot(x - s.circle.cx, z - s.circle.cz) < s.circle.r + r) return true;
-      continue;
-    }
-    const p = resolveSolid(s, x, z, x, z, r);
-    if (Math.abs(p.x - x) > 1e-6 || Math.abs(p.z - z) > 1e-6) return true;
+    if (penetration(s, x, z, r, PEN_SCRATCH) > 0) return true;
   }
   return false;
 }
 
+// ---- Depenetration (walker already inside an obstacle) ----
+
+/**
+ * Most a walker that STARTS a frame inside an obstacle is pushed back out per frame (world units).
+ * About one frame of walking (4.5 u/s at 60 fps = 0.075) plus the skin: a deep overlap (a chair
+ * shoved the walker into a desk, a long frame) resolves over a few frames as a quick slide, never as a
+ * visible jump.
+ */
+export const MAX_DEPEN_PER_FRAME = 0.075 + PLAYER_SKIN;
+
+/** Unit exit direction written by penetration(). */
+export interface ExitNormal { x: number; z: number }
+
+const PEN_SCRATCH: ExitNormal = { x: 0, z: 0 };
+
+/**
+ * How deep a circle of radius r at (x, z) sits inside solid `s`, and the direction of the NEAREST way
+ * out (written into `out` as a unit vector). Returns a depth <= 0 when there is no overlap (then `out`
+ * is untouched). Boxes use the same square-expanded footprint as the push-out code; a point exactly
+ * at a circle's centre exits along +x. Allocation-free.
+ */
+export function penetration(s: Solid, x: number, z: number, r: number, out: ExitNormal): number {
+  if (s.kind === "circle") {
+    const dx = x - s.circle.cx;
+    const dz = z - s.circle.cz;
+    const dist = Math.hypot(dx, dz);
+    const depth = s.circle.r + r - dist;
+    if (depth <= 0) return depth;
+    if (dist > 1e-9) {
+      out.x = dx / dist;
+      out.z = dz / dist;
+    } else {
+      out.x = 1;
+      out.z = 0;
+    }
+    return depth;
+  }
+  let lx: number;
+  let lz: number;
+  let hw: number;
+  let hd: number;
+  let cos = 1;
+  let sin = 0;
+  if (s.kind === "box") {
+    const b = s.box;
+    hw = (b.maxX - b.minX) / 2;
+    hd = (b.maxZ - b.minZ) / 2;
+    lx = x - (b.minX + b.maxX) / 2;
+    lz = z - (b.minZ + b.maxZ) / 2;
+  } else {
+    const o = s.obox;
+    const dx = x - o.cx;
+    const dz = z - o.cz;
+    cos = o.cos;
+    sin = o.sin;
+    lx = dx * cos - dz * sin;
+    lz = dx * sin + dz * cos;
+    hw = o.hw;
+    hd = o.hd;
+  }
+  const px = hw + r - Math.abs(lx);
+  const pz = hd + r - Math.abs(lz);
+  if (px <= 0 || pz <= 0) return Math.min(px, pz);
+  let nx = 0;
+  let nz = 0;
+  let depth: number;
+  if (px <= pz) {
+    nx = lx >= 0 ? 1 : -1;
+    depth = px;
+  } else {
+    nz = lz >= 0 ? 1 : -1;
+    depth = pz;
+  }
+  // Local normal back to world (inverse rotation; identity for axis-aligned boxes).
+  out.x = nx * cos + nz * sin;
+  out.z = -nx * sin + nz * cos;
+  return depth;
+}
+
 // ---- Sub-stepped move ----
+
+/** Bounding radius of a solid around its centre (cheap broad phase). */
+function solidReach(s: Solid): number {
+  if (s.kind === "circle") return s.circle.r;
+  if (s.kind === "obox") return Math.hypot(s.obox.hw, s.obox.hd);
+  return Math.hypot((s.box.maxX - s.box.minX) / 2, (s.box.maxZ - s.box.minZ) / 2);
+}
+
+function solidCentre(s: Solid, out: ExitNormal): void {
+  if (s.kind === "circle") {
+    out.x = s.circle.cx;
+    out.z = s.circle.cz;
+  } else if (s.kind === "obox") {
+    out.x = s.obox.cx;
+    out.z = s.obox.cz;
+  } else {
+    out.x = (s.box.minX + s.box.maxX) / 2;
+    out.z = (s.box.minZ + s.box.maxZ) / 2;
+  }
+}
+
+/** Reused broad-phase buffers: the solids near this frame's path, and how deep the walker started in each. */
+const NEAR: Solid[] = [];
+const CENTRE: ExitNormal = { x: 0, z: 0 };
+const NORMAL: ExitNormal = { x: 0, z: 0 };
+
+/**
+ * Collect the solids that can possibly touch a walker moving from (x, z) by (dx, dz) (bounding circles
+ * within reach of the path). Keeps collision work O(nearby obstacles) instead of O(whole office).
+ */
+export function nearbySolids(solids: readonly Solid[], x: number, z: number, dx: number, dz: number, r: number, out: Solid[] = []): Solid[] {
+  out.length = 0;
+  const mx = x + dx / 2;
+  const mz = z + dz / 2;
+  const pad = Math.hypot(dx, dz) / 2 + r + MAX_DEPEN_PER_FRAME + 0.05;
+  for (const s of solids) {
+    solidCentre(s, CENTRE);
+    const reach = solidReach(s) + pad;
+    const ox = CENTRE.x - mx;
+    const oz = CENTRE.z - mz;
+    if (ox * ox + oz * oz <= reach * reach) out.push(s);
+  }
+  return out;
+}
 
 /**
  * Move a player capsule from (x, z) by (dx, dz) resolving against `solids`.
  *
  * Algorithm:
- * 1. Divide (dx, dz) into `steps` sub-steps.
- * 2. After each sub-step, push the player out of any overlapping obstacle using
- *    a direction-aware algorithm that always pushes toward the entry face.
- * 3. Cancel velocity in any axis where a collision was detected (wall-sliding).
- *    This prevents re-entering the obstacle in subsequent sub-steps.
+ * 1. Broad phase: only solids whose bounds reach the frame's path are considered.
+ * 2. Divide (dx, dz) into sub-steps (one step when standing still, so a walker left overlapping an
+ *    obstacle — a shoved chair, a long frame — still gets eased back out).
+ * 3. Per sub-step and solid:
+ *    - Entered this step from outside: direction-aware push back out through the entry face (the
+ *      overlap is at most one sub-step deep, so this is always the near side).
+ *    - Already inside at the start of the step: never let the walker go deeper, and ease it out
+ *      through the NEAREST face by at most MAX_DEPEN_PER_FRAME per call. It is never pushed across
+ *      the obstacle, and never jumps.
+ * 4. Drop the part of the step that goes into the obstacle (wall sliding).
  *
- * The outer walkable boundary is enforced separately by isWalkable() in
- * walkPhysics.ts, so we don't need to worry about room edges here.
+ * The outer walkable boundary is enforced separately by isWalkable() in walkPhysics.ts.
  */
 export function resolveMove(
   solids: Solid[],
@@ -239,13 +362,17 @@ export function resolveMove(
   steps = DEFAULT_SUB_STEPS,
 ): { x: number; z: number } {
   if (solids.length === 0) return { x: x + dx, z: z + dz };
-  const actualSteps = steps === DEFAULT_SUB_STEPS ? Math.max(DEFAULT_SUB_STEPS, Math.ceil(Math.hypot(dx, dz) / 0.15)) : steps;
+  const near = nearbySolids(solids, x, z, dx, dz, PLAYER_RADIUS, NEAR);
+  if (near.length === 0) return { x: x + dx, z: z + dz };
+  const still = dx === 0 && dz === 0;
+  const actualSteps = still ? 1 : steps === DEFAULT_SUB_STEPS ? Math.max(DEFAULT_SUB_STEPS, Math.ceil(Math.hypot(dx, dz) / 0.15)) : steps;
   let sx = dx / actualSteps;
   let sz = dz / actualSteps;
   let cx = x;
   let cz = z;
+  let budget = MAX_DEPEN_PER_FRAME;
   for (let i = 0; i < actualSteps; i++) {
-    if (sx === 0 && sz === 0) break;
+    if (sx === 0 && sz === 0 && !(still && i === 0)) break;
     const prevX = cx;
     const prevZ = cz;
     const nx = cx + sx;
@@ -255,7 +382,22 @@ export function resolveMove(
     // Two passes: in a narrow gap the push out of one obstacle can land in its neighbour.
     for (let pass = 0; pass < 2; pass++) {
       let any = false;
-      for (const s of solids) {
+      for (let k = 0; k < near.length; k++) {
+        const s = near[k]!;
+        const dPrev = penetration(s, prevX, prevZ, PLAYER_RADIUS, NORMAL);
+        if (dPrev > ENTRY_EPS) {
+          // Started this step inside: allowed depth = where we started, minus this frame's easing.
+          const take = pass === 0 ? Math.min(dPrev, budget) : 0;
+          budget -= take;
+          const dNew = penetration(s, rx, rz, PLAYER_RADIUS, NORMAL);
+          const push = dNew - (dPrev - take);
+          if (push > 1e-9) {
+            rx += NORMAL.x * push;
+            rz += NORMAL.z * push;
+            any = true;
+          }
+          continue;
+        }
         const r = resolveSolid(s, prevX, prevZ, rx, rz);
         if (r.x !== rx || r.z !== rz) any = true;
         rx = r.x;

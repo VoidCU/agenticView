@@ -164,7 +164,7 @@ export class ChairField {
    * One walk-mode frame: glide moving chairs, push nearby pushable chairs the walker overlaps, then push
    * the walker out of any chair (fixed or blocked). Mutates and returns `player` (no allocation).
    */
-  interact(player: Vec2, r: number, dt: number, clear: ChairClearFn, now: number): Vec2 {
+  interact(player: Vec2, r: number, dt: number, clear: ChairClearFn, now: number, maxPush = Infinity): Vec2 {
     let moved = false;
     const decay = Math.exp(-CHAIR_DAMPING * dt);
     for (const c of this.chairs) {
@@ -204,8 +204,12 @@ export class ChairField {
           if (!circleVsChair(player.x, player.z, r, c.x, c.z, c.yaw, scratch)) continue;
         }
       }
-      player.x += scratch.x;
-      player.z += scratch.z;
+      // Ease the walker out (at most maxPush per frame): a chair gliding into a standing walker must
+      // not shove them a whole seat-width in one frame.
+      const len = Math.hypot(scratch.x, scratch.z);
+      const k = len > maxPush ? maxPush / len : 1;
+      player.x += scratch.x * k;
+      player.z += scratch.z * k;
     }
     if (moved) this.lastMove = now;
     return player;

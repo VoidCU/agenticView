@@ -19,7 +19,7 @@ import { spaceAt, type Space } from "@agenticview/shared";
 import { useWalk } from "../state/walk";
 import { useStore } from "../state/store";
 import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, BOB_FREQ, bobWeightStep, headBobSide, headBobY } from "./walkPhysics";
-import { PLAYER_RADIUS, type Solid } from "./colliders";
+import { MAX_DEPEN_PER_FRAME, PLAYER_RADIUS, type Solid } from "./colliders";
 import { chairField } from "./pushChairs";
 import { usePositions } from "../state/positions";
 import { bonk, BONK_RANGE } from "../state/bonk";
@@ -201,8 +201,12 @@ export function WalkModeController({
     cur.vz = vel.vz;
 
     const moveDist = Math.hypot(cur.vx, cur.vz) * dt;
-    if (moveDist > 1e-4) {
-      const next = movePlayer(spaces, cur.x, cur.z, cur.vx * dt, cur.vz * dt, solids);
+    {
+      // Always resolve, even standing still: a walker left overlapping furniture (a chair shoved them,
+      // a long frame) is eased out through the nearest face a little per frame instead of being
+      // thrown across the obstacle on the next step.
+      const still = moveDist <= 1e-4;
+      const next = movePlayer(spaces, cur.x, cur.z, still ? 0 : cur.vx * dt, still ? 0 : cur.vz * dt, solids);
       cur.x = next.x;
       cur.z = next.z;
     }
@@ -212,7 +216,7 @@ export function WalkModeController({
       const w = walker.current;
       w.x = cur.x;
       w.z = cur.z;
-      chairField.interact(w, PLAYER_RADIUS, dt, chairClear, performance.now());
+      chairField.interact(w, PLAYER_RADIUS, dt, chairClear, performance.now(), MAX_DEPEN_PER_FRAME);
       if ((w.x !== cur.x || w.z !== cur.z) && isWalkable(spaces, w.x, w.z)) {
         cur.x = w.x;
         cur.z = w.z;
