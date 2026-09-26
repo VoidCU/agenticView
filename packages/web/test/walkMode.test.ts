@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { buildSpaces } from "@agenticview/shared";
+import * as THREE from "three";
 import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, WALK_SPEED, ACCEL, DECEL } from "../src/scene/walkPhysics";
 import { getFeedLines, MAX_DIST, REFRESH_MS, MAX_UPDATES_PER_FRAME, monitorPoseForSeat, NEAR_DIST } from "../src/scene/DeskMonitor";
 import { useWalk } from "../src/state/walk";
@@ -77,16 +78,31 @@ describe("walkDelta", () => {
     expect(d.dz).toBe(0);
   });
 
-  it("moves forward (+z direction) when W pressed and yaw=0", () => {
+  it("W moves toward -z (where the camera looks) at yaw=0", () => {
     const d = walkDelta(new Set(["KeyW"]), 0);
-    // yaw=0: forward = +z
-    expect(d.dz).toBeGreaterThan(0);
-    expect(Math.abs(d.dx)).toBeLessThan(0.01);
+    expect(d.dz).toBeCloseTo(-1, 6);
+    expect(d.dx).toBeCloseTo(0, 6);
   });
 
-  it("moves backward when S pressed", () => {
+  it("S moves backward (+z) at yaw=0", () => {
     const d = walkDelta(new Set(["KeyS"]), 0);
-    expect(d.dz).toBeLessThan(0);
+    expect(d.dz).toBeCloseTo(1, 6);
+  });
+
+  it("matches the camera's forward/right vectors for yaw 0 and 90 degrees", () => {
+    for (const yaw of [0, Math.PI / 2]) {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0, "YXZ"));
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+      const w = walkDelta(new Set(["KeyW"]), yaw);
+      const s = walkDelta(new Set(["KeyS"]), yaw);
+      const d = walkDelta(new Set(["KeyD"]), yaw);
+      const a = walkDelta(new Set(["KeyA"]), yaw);
+      expect(w.dx).toBeCloseTo(fwd.x, 6); expect(w.dz).toBeCloseTo(fwd.z, 6);
+      expect(s.dx).toBeCloseTo(-fwd.x, 6); expect(s.dz).toBeCloseTo(-fwd.z, 6);
+      expect(d.dx).toBeCloseTo(right.x, 6); expect(d.dz).toBeCloseTo(right.z, 6);
+      expect(a.dx).toBeCloseTo(-right.x, 6); expect(a.dz).toBeCloseTo(-right.z, 6);
+    }
   });
 
   it("moves right when D pressed and yaw=0", () => {
@@ -114,10 +130,11 @@ describe("walkDelta", () => {
   });
 
   it("yaw rotates the movement direction", () => {
-    // yaw=π/2: forward maps to -x
+    // yaw=π/2: the camera looks toward -x, so W moves -x and D moves -z.
     const d = walkDelta(new Set(["KeyW"]), Math.PI / 2);
-    expect(d.dx).toBeGreaterThan(0.5); // mostly +x
-    expect(Math.abs(d.dz)).toBeLessThan(0.5);
+    expect(d.dx).toBeCloseTo(-1, 6);
+    expect(d.dz).toBeCloseTo(0, 6);
+    expect(walkDelta(new Set(["KeyD"]), Math.PI / 2).dz).toBeCloseTo(-1, 6);
   });
 });
 

@@ -87,7 +87,24 @@ export function WalkModeController({
   const keys = useRef(new Set<string>());
   const lastPlayerPosition = useRef<{ x: number; z: number; yaw: number; spaceId: string } | null>(null);
 
-  useEffect(() => () => usePositions.getState().setPlayer(undefined), []);
+  useEffect(() => () => {
+    usePositions.getState().setPlayer(undefined);
+    // Remember where we stopped so the 'You' robot can walk home from here.
+    useWalk.getState().setExitAt({ x: st.current.x, z: st.current.z });
+  }, []);
+
+  // ---- Test hook: teleport walk position ----
+  useEffect(() => {
+    const teleport = (x: number, z: number, yaw = 0) => {
+      st.current.x = x;
+      st.current.z = z;
+      st.current.yaw = yaw;
+      st.current.vx = 0;
+      st.current.vz = 0;
+    };
+    (window as unknown as Record<string, unknown>).__teleportWalk = teleport;
+    return () => { delete (window as unknown as Record<string, unknown>).__teleportWalk; };
+  }, []);
 
   // ---- Pointer lock setup ----
 
