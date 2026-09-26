@@ -94,9 +94,11 @@ export function MiniMap() {
   return (
     <div
       style={{
+        // Top-left of the 3D view, just right of the Tasks panel: the bottom corners belong to the
+        // command bar and the chat input.
         position: "absolute",
-        bottom: 14,
-        right: 14,
+        top: 84,
+        left: 352,
         width: MAP_SIZE,
         zIndex: 30,
         pointerEvents: "none",

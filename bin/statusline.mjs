@@ -159,8 +159,17 @@ async function main() {
     }
   })();
 
-  // Check for wrap command
-  const wrap = process.env.AGENTICVIEW_STATUSLINE_WRAP;
+  // The user's previous status-line command, if any: `--wrap-b64 <base64>` on the command line (what
+  // /agenticview-statusline writes), or AGENTICVIEW_STATUSLINE_WRAP in the environment.
+  const i = process.argv.indexOf("--wrap-b64");
+  let wrap = process.env.AGENTICVIEW_STATUSLINE_WRAP;
+  if (i > 0 && process.argv[i + 1]) {
+    try {
+      wrap = Buffer.from(process.argv[i + 1], "base64").toString("utf8") || wrap;
+    } catch {
+      // keep the env value
+    }
+  }
   if (wrap) {
     // Run the wrap command, feeding the original stdin text
     const result = spawnSync(wrap, { input: raw, shell: true, encoding: "utf8", timeout: 5000 });

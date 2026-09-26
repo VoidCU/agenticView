@@ -10,7 +10,7 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../..");
 const scriptPath = join(repoRoot, "bin", "statusline.mjs");
@@ -195,5 +195,41 @@ describe("statusline.mjs", () => {
     expect(stdout).toContain("WRAPPED_OUTPUT");
     // Default model line should NOT appear when wrap is active
     expect(stdout).not.toContain("Sonnet 4.6");
+  });
+
+  it("--wrap-b64 runs the user's previous status-line command with the same stdin", async () => {
+    const input = JSON.stringify({ session_id: "s", model: { display_name: "Sonnet 4.6" }, cwd: "/tmp/wraptest" });
+    // The previous command reads the statusLine JSON from stdin, proving stdin is forwarded.
+    const prev = `node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log('PREV:'+JSON.parse(s).model.display_name))"`;
+    const b64 = Buffer.from(prev).toString("base64");
+    const out = await new Promise<{ stdout: string; code: number | null }>((res) => {
+      const child = spawn(process.execPath, [scriptPath, "--wrap-b64", b64], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, AGENTICVIEW_STATUSLINE_WRAP: "" } });
+      let stdout = "";
+      child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+      child.on("close", (code) => res({ stdout, code }));
+      child.stdin.end(input);
+    });
+    expect(out.code).toBe(0);
+    expect(out.stdout).toContain("PREV:Sonnet 4.6");
+  });
+});
+
+describe("SessionStart record-root", () => {
+  it("refreshes a stable copy of the relay so upgrades never break the status line", async () => {
+    const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const home = await mkdtemp(join(tmpdir(), "av-sl-home-"));
+    const saved = process.env.AGENTICVIEW_HOME;
+    process.env.AGENTICVIEW_HOME = home;
+    try {
+      const { recordRoot } = (await import(pathToFileURL(join(repoRoot, "hooks", "hook.mjs")).href)) as { recordRoot: (p: string) => Promise<void> };
+      await recordRoot(repoRoot);
+      expect(await readFile(join(home, "plugin-root"), "utf8")).toBe(repoRoot);
+      expect(await readFile(join(home, "statusline.mjs"), "utf8")).toBe(await readFile(scriptPath, "utf8"));
+    } finally {
+      if (saved === undefined) delete process.env.AGENTICVIEW_HOME;
+      else process.env.AGENTICVIEW_HOME = saved;
+      await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   });
 });

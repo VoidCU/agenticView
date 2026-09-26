@@ -47,39 +47,25 @@ Stop here for the `off` path.
 
 1. If `statusLine` is already set to a command whose `command` string contains `statusline.mjs`, tell the user the relay is already active and stop.
 
-2. Build the new `statusLine` object:
+2. Make sure the stable relay copy exists: `cat ~/.agenticview/statusline.mjs` must print a file. The plugin's SessionStart hook refreshes it from `PLUGIN_ROOT/bin/statusline.mjs` every session, so plugin upgrades never break the status line. If it is missing, copy it once:
+
+       node -e "require('fs').copyFileSync(process.argv[1], require('path').join(require('os').homedir(), '.agenticview', 'statusline.mjs'))" "PLUGIN_ROOT/bin/statusline.mjs"
+
+3. Build the new `statusLine` object. Point it at the stable copy (absolute path, forward slashes, e.g. `C:/Users/me/.agenticview/statusline.mjs`), never at the versioned plugin folder:
 
    ```json
-   {
-     "type": "command",
-     "command": "node \"PLUGIN_ROOT/bin/statusline.mjs\""
-   }
+   { "type": "command", "command": "node \"<HOME>/.agenticview/statusline.mjs\"" }
    ```
 
-   Replace `PLUGIN_ROOT` with the actual absolute path from Step 1. On Windows the path uses backslashes; keep them as-is inside the JSON string (they will be double-escaped in the raw JSON).
+4. If there is an existing `statusLine` value (not absent, not null):
+   - Save it to `~/.agenticview/statusline-backup.json` as `{ "statusLine": <existing value> }`.
+   - If its `type` is `command`, keep it showing: base64-encode its `command` string (`node -e "process.stdout.write(Buffer.from(process.argv[1]).toString('base64'))" "<existing command>"`) and append ` --wrap-b64 <base64>` to the new command. The relay decodes it, runs it with the same stdin and prints its output. Do not use an `env` key: Claude Code does not document one for `statusLine`.
+   - If there is no existing `statusLine`, skip the backup and the wrap.
 
-3. If there is an existing `statusLine` value (not absent, not null):
-   - Save the existing value to `~/.agenticview/statusline-backup.json`:
-     ```json
-     { "statusLine": <existing value> }
-     ```
-   - Add an `env` key to the new `statusLine` object so the relay can invoke the old command:
-     ```json
-     {
-       "type": "command",
-       "command": "node \"PLUGIN_ROOT/bin/statusline.mjs\"",
-       "env": {
-         "AGENTICVIEW_STATUSLINE_WRAP": "<existing command string>"
-       }
-     }
-     ```
-     For the `AGENTICVIEW_STATUSLINE_WRAP` value: if the existing `statusLine` has `type: "command"`, use its `command` string. If it has another shape, JSON-stringify the entire existing value. The relay reads this env variable and runs it as a shell command (POSIX) or `cmd /c` (Windows), forwarding stdin and printing its stdout; the settings `env` key is cross-platform and requires no shell prefix — state this to the user.
-   - If there is no existing `statusLine`, skip the backup and the `env` key.
-
-4. Show the user the diff:
+5. Show the user the diff:
    - **Before** — the current `statusLine` value (or "not set")
    - **After** — the new `statusLine` object (pretty-printed)
-5. Ask for confirmation before writing.
+6. Ask for confirmation before writing.
 
 ## Step 4 — Write `~/.claude/settings.json`
 

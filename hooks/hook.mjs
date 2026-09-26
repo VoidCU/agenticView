@@ -4,9 +4,10 @@
  *
  *   node hook.mjs mirror              reads a hook JSON payload from stdin, posts it to a running
  *                                     AgenticView server (matched by cwd), always exits 0 fast
- *   node hook.mjs record-root <path>  writes <path> to ~/.agenticview/plugin-root
+ *   node hook.mjs record-root <path>  writes <path> to ~/.agenticview/plugin-root and refreshes the
+ *                                     stable ~/.agenticview/statusline.mjs copy of the relay
  */
-import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,6 +117,9 @@ export async function recordRoot(path) {
   const root = globalRoot();
   await mkdir(root, { recursive: true });
   await writeFile(join(root, "plugin-root"), String(path), "utf8");
+  // The opt-in status line points at this stable copy, so plugin upgrades (new versioned folder) never
+  // break it. The relay is dependency-free, so a plain copy runs anywhere.
+  await copyFile(join(String(path), "bin", "statusline.mjs"), join(root, "statusline.mjs")).catch(() => undefined);
 }
 
 export async function runHook(argv) {
