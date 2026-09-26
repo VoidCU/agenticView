@@ -34,8 +34,14 @@ describe("walk exit position", () => {
 
 describe("whiteboard overlay pose mirrors kit.ts", () => {
   const spaces = buildSpaces(2);
-  const rooms = [spaces.find((s) => s.kind === "pod")!, spaces.find((s) => s.kind === "meeting")!, spaces.find((s) => s.kind === "office")].filter(Boolean);
-  it.each(rooms.map((s) => [s!.kind, s!] as const))("%s: live face sits 2-4 mm in front of the physical board", (_kind, space) => {
+  // Every room with a board, across a bigger floor: the office, several pods at different hex
+  // positions, and meeting rooms (which use a different corner slot).
+  const rooms = buildSpaces(3).filter((s) => s.kind !== "lounge");
+  it("covers several rooms and both corner slots", () => {
+    expect(rooms.length).toBeGreaterThanOrEqual(4);
+    expect(new Set(rooms.map((r) => r.kind))).toEqual(new Set(["office", "pod", "meeting"]));
+  });
+  it.each(rooms.map((s) => [s.id, s] as const))("%s: live face sits 2-4 mm in front of the physical board", (_kind, space) => {
     const kit = new Kit();
     furnishSpace(kit, space, { seats: new Map() });
     const boards = kit.items.filter((it) => it.mat === "whiteboard");

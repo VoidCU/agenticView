@@ -205,7 +205,7 @@ for (const vp of viewports) {
 
       // Get the new agent's id from the store
       const agentId = await page.evaluate((name: string) => {
-        const agents = Object.values((window as unknown as { __agenticviewStore?: { getState(): { agents: Record<string, { id: string; name: string }> } } }).__agenticviewStore?.getState().agents ?? {});
+        const agents = Object.values((window as unknown as { __agenticviewTest?: { store: { getState(): { agents: Record<string, { id: string; name: string }> } } } }).__agenticviewTest?.store.getState().agents ?? {});
         return agents.find((a) => a.name === name)?.id;
       }, agentName);
 
@@ -262,6 +262,66 @@ for (const vp of viewports) {
       // Exit walk mode.
       await page.evaluate(() => (window as unknown as { __setWalking?: (v: boolean) => void }).__setWalking?.(false));
       await page.emulateMedia({ colorScheme: "light" });
+    });
+
+    test(`Walk-mode whiteboard close-up, bonk and keyboard RPS — ${vp.name}`, async ({ page }) => {
+      ensureScreenshotsDir();
+      await page.addInitScript(() => localStorage.setItem("av:hud:show-tags", "true"));
+      await page.goto(`/#token=${launchToken()}`);
+      await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+      await seedTasks(page);
+      type Probe = {
+        store: { getState(): { agents: Record<string, { id: string; name: string }> } };
+        agentPos(id: string): { x: number; z: number } | undefined;
+        boardPose(spaceId: string): { x: number; z: number; yaw: number; face: [number, number, number] } | undefined;
+      };
+      type Win = { __agenticviewTest?: Probe; __setWalking?: (v: boolean) => void; __teleportWalk?: (x: number, z: number, yaw?: number) => void };
+      await page.evaluate(() => (window as unknown as Win).__setWalking?.(true));
+      await expect.poll(() => page.evaluate(() => typeof (window as unknown as Win).__teleportWalk)).toBe("function");
+
+      // Whiteboard: straight on, then oblique so any gap between overlay and board would show.
+      for (const room of ["pod-a", "office"] as const) for (const [label, side, back] of [["front", 0, 2.2], ["oblique", 1.1, 1.3]] as const) {
+        await page.evaluate(([s, b, r]) => {
+          const w = window as unknown as Win;
+          const pose = w.__agenticviewTest!.boardPose(r)!;
+          const nx = Math.sin(pose.yaw), nz = Math.cos(pose.yaw);
+          const x = pose.face[0] + nx * b + nz * s;
+          const z = pose.face[2] + nz * b - nx * s;
+          w.__teleportWalk!(x, z, Math.atan2(-(pose.face[0] - x), -(pose.face[2] - z)));
+        }, [side, back, room] as const);
+        await page.waitForTimeout(1_400); // board texture redraws at most once a second
+        await page.screenshot({ path: `e2e/screenshots/walk-whiteboard-${room}-${label}-light-${vp.name}.png`, fullPage: false });
+      }
+
+      // Bonk: stand 1.4 units from Atlas, look at it, press E.
+      await page.evaluate(() => {
+        const w = window as unknown as Win;
+        const atlas = Object.values(w.__agenticviewTest!.store.getState().agents).find((a) => a.name === "Atlas")!;
+        const p = w.__agenticviewTest!.agentPos(atlas.id)!;
+        const x = p.x + 1.0, z = p.z + 1.0;
+        w.__teleportWalk!(x, z, Math.atan2(-(p.x - x), -(p.z - z)));
+      });
+      await page.waitForTimeout(300);
+      await page.keyboard.press("e");
+      await expect(page.getByTestId("bonk-bubble")).toBeVisible({ timeout: 3_000 });
+      await page.waitForTimeout(120);
+      await page.screenshot({ path: `e2e/screenshots/walk-bonk-light-${vp.name}.png`, fullPage: false });
+
+      // RPS while walking: the popup takes the mouse, keys pick moves.
+      const atlasId = await page.evaluate(() => Object.values((window as unknown as Win).__agenticviewTest!.store.getState().agents).find((a) => a.name === "Atlas")!.id);
+      await page.evaluate((id) => window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: id } })), atlasId);
+      await expect(page.getByTestId("play-rps-modal")).toBeVisible();
+      await expect(page.getByTestId("rps-move-rock")).toContainText("[1/R]");
+      await page.screenshot({ path: `e2e/screenshots/walk-rps-keys-light-${vp.name}.png`, fullPage: false });
+      await page.keyboard.press("2");
+      await expect(page.locator(".rps-round-item").first()).toBeVisible({ timeout: 5_000 });
+      await page.waitForTimeout(900);
+      await page.screenshot({ path: `e2e/screenshots/walk-rps-keys-round-light-${vp.name}.png`, fullPage: false });
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("play-rps-modal")).toBeHidden();
+      // Still walking after the game.
+      await expect(page.locator(".walk-crosshair")).toBeVisible();
+      await page.evaluate(() => (window as unknown as Win).__setWalking?.(false));
     });
   });
 }
