@@ -220,9 +220,9 @@ export function armchair(k: Kit, mat: "sofa" | "sofa2" = "sofa2") {
 }
 
 /** Coffee point: counter, machine, mugs. */
-export function kitchenette(k: Kit) {
-  k.rbox("deskTop", [0, 0.46, 0], [1.9, 0.9, 0.62]);
-  k.box("walnut", [0, 0.92, 0], [1.94, 0.04, 0.66]);
+export function kitchenette(k: Kit, counterW = 1.9) {
+  k.rbox("deskTop", [0, 0.46, 0], [counterW, 0.9, 0.62]);
+  k.box("walnut", [0, 0.92, 0], [counterW + 0.04, 0.04, 0.66]);
   k.rbox("bezel", [-0.5, 1.13, -0.05], [0.34, 0.38, 0.3]);
   k.box("lampGlow", [-0.5, 1.2, 0.101], [0.08, 0.04, 0.004]);
   for (let i = 0; i < 3; i++) k.cyl("pot", [0.1 + i * 0.16, 0.99, 0.12], 0.08, 0.1, { color: ["#ffffff", "#e4b04a", "#3f6f8f"][i] });
@@ -337,29 +337,34 @@ function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
 }
 
 function loungeRoom(k: Kit, _s: Space, _occ: RoomOccupancy) {
-  // Rugs and coffee table (center)
+  // Place furniture using the shared loungeSpots layout so positions match agent spots exactly.
+  // Use fp.w and fp.d (the footprint dimensions from loungeSpots) directly so visual sizes
+  // match the lounge layout at any scale factor.
+  const { furniture, tableR } = loungeSpots();
+
+  // Rugs and coffee table — diameter from tableR so it matches the collision radius.
   k.cyl("rugLounge", [0, 0.006, 0], 5.4, 0.012);
   k.cyl("rugLounge2", [0, 0.01, 0], 4.2, 0.012);
   k.cyl("rugLounge", [0, 0.014, 0], 3.8, 0.012);
-  k.cyl("walnut", [0, 0.38, 0], 1.5, 0.05);
+  k.cyl("walnut", [0, 0.38, 0], tableR * 2, 0.05);
   k.cyl("deskLeg", [0, 0.19, 0], 0.16, 0.36);
   k.cyl("pot", [0.15, 0.46, 0.1], 0.1, 0.12, { color: "#e4b04a" });
   k.box("book", [-0.2, 0.42, -0.1], [0.3, 0.03, 0.22], { yaw: 0.4, color: "#3f6f8f" });
 
-  // Place furniture using the shared loungeSpots layout so positions match agent spots exactly.
-  const { furniture } = loungeSpots();
   for (const fp of furniture) {
     const fk = k.frame(fp.x, fp.z, fp.yaw);
     if (fp.kind === "sofa") {
-      // 3-seat sofa: use wider width (2.6) to span the three spot positions (spaced 0.9 apart)
-      sofa(fk, fp.seats >= 3 ? "sofa" : "sofa2", fp.seats >= 3 ? 2.6 : 1.9);
+      // Use fp.w (footprint width) so the sofa spans the correct number of seats
+      sofa(fk, fp.seats >= 3 ? "sofa" : "sofa2", fp.w);
     } else if (fp.kind === "armchair") {
-      armchair(fk, "sofa2");
+      // Use fp.w for armchair width (1.0*s per lounge layout)
+      sofa(fk, "sofa2", fp.w);
     } else if (fp.kind === "counter") {
-      kitchenette(fk);
+      // Pass fp.w so the counter top matches the layout footprint (2.4*s)
+      kitchenette(fk, fp.w);
     } else if (fp.kind === "beanbag") {
-      // Low floor cushion
-      fk.rbox("cushion", [0, 0.12, 0], [0.64, 0.22, 0.64]);
+      // Low floor cushion sized to layout footprint
+      fk.rbox("cushion", [0, 0.12, 0], [fp.w, 0.22, fp.d]);
     }
   }
 
