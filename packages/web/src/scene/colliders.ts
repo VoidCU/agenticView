@@ -438,9 +438,6 @@ export function resolveMove(
  *
  * Call this once per layout change and pass the result to resolveMove().
  */
-/** Obstacle kinds kept as axis-aligned boxes exactly as before (walls and glass partitions). */
-const AABB_KINDS: ReadonlySet<string> = new Set(["wall", "partition"]);
-
 export function buildColliders(layout?: OfficeLayout, opts: { excludeKinds?: readonly string[] } = {}): Solid[] {
   if (!layout) return [];
   const exclude = new Set(opts.excludeKinds ?? []);
@@ -450,17 +447,17 @@ export function buildColliders(layout?: OfficeLayout, opts: { excludeKinds?: rea
       return { kind: "circle", circle: { cx: s.x, cz: s.z, r: s.r } };
     }
     const { x, z, w, d, rot } = s;
-    if (!AABB_KINDS.has(s.kind)) {
-      // Furniture: the real (rotated) footprint.
-      return { kind: "obox", obox: { cx: x, cz: z, hw: w / 2, hd: d / 2, cos: Math.cos(rot), sin: Math.sin(rot) } };
-    }
     const c = Math.cos(rot);
     const sn = Math.sin(rot);
-    const hx = Math.abs((w / 2) * c) + Math.abs((d / 2) * sn);
-    const hz = Math.abs((w / 2) * sn) + Math.abs((d / 2) * c);
-    return {
-      kind: "box",
-      box: { minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz },
-    };
+    // Axis-aligned pieces (the horizontal hex walls, the pod privacy screens, ...) are exact as plain
+    // boxes. Everything else keeps its real rotated footprint. Diagonal hex walls used to be turned
+    // into their axis-aligned bounds: 1.4 x 2.3 blocks beside every doorway and 3.6 x 6.1 blocks along
+    // every outer wall, i.e. invisible barriers far out on the floor.
+    if (Math.abs(sn) < 1e-9 || Math.abs(c) < 1e-9) {
+      const hx = Math.abs((w / 2) * c) + Math.abs((d / 2) * sn);
+      const hz = Math.abs((w / 2) * sn) + Math.abs((d / 2) * c);
+      return { kind: "box", box: { minX: x - hx, maxX: x + hx, minZ: z - hz, maxZ: z + hz } };
+    }
+    return { kind: "obox", obox: { cx: x, cz: z, hw: w / 2, hd: d / 2, cos: c, sin: sn } };
   });
 }

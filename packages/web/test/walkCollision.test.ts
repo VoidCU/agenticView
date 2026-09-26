@@ -49,12 +49,25 @@ describe("walk collision footprints", () => {
     expect(overlapsAny([cred], 0.5, -0.5, PLAYER_RADIUS)).toBe(true); // along its long axis
   });
 
-  it("walls and glass partitions stay axis-aligned boxes exactly as before", () => {
+  it("diagonal walls block only their own thin footprint, not their axis-aligned bounds", () => {
     const layout = layoutFor([manager]);
-    const walls = solidsForLayout(layout).filter((s) => s.kind === "wall" || s.kind === "partition");
+    const all = solidsForLayout(layout);
     const colliders = buildColliders(layout);
-    const boxes = colliders.filter((c) => c.kind === "box");
-    expect(boxes).toHaveLength(walls.length);
+    // buildColliders maps solidsForLayout one to one, in order.
+    const wallIdx = all.flatMap((s, i) => (s.kind === "wall" ? [i] : []));
+    const wallColliders = wallIdx.map((i) => colliders[i]!);
+    expect(wallIdx.length).toBeGreaterThan(6);
+    let diagonal = 0;
+    for (const i of wallIdx) {
+      const w = all[i] as { x: number; z: number; rot: number };
+      if (Math.abs(Math.sin(w.rot)) > 0.1 && Math.abs(Math.cos(w.rot)) > 0.1) diagonal++;
+      // Half a metre off either face, at the wall's midpoint: open floor.
+      const nx = Math.sin(w.rot), nz = Math.cos(w.rot);
+      expect(overlapsAny(wallColliders, w.x + nx * 0.5, w.z + nz * 0.5, PLAYER_RADIUS)).toBe(false);
+      expect(overlapsAny(wallColliders, w.x - nx * 0.5, w.z - nz * 0.5, PLAYER_RADIUS)).toBe(false);
+      expect(overlapsAny(wallColliders, w.x, w.z, PLAYER_RADIUS)).toBe(true);
+    }
+    expect(diagonal).toBeGreaterThan(0);
   });
 
   describe("a corridor of avatar diameter + 0.15 between a chair and a plant pot is walkable", () => {
