@@ -241,7 +241,7 @@ function MarkSolvedForm({ taskId, onDone }: { taskId: string; onDone: () => void
 
 // ── Task detail sheet (slides over board from right, board stays full width) ──
 
-function TaskDrawer({
+export function TaskDrawer({
   task,
   agent,
   filesChanged,
