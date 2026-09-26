@@ -4114,3 +4114,14 @@ kbd {
 }
 .task-waiting-question p.smd-p { margin-bottom: 4px; }
 .task-waiting-question pre.smd-code { font-size: 11px; padding: 4px 6px; }
+
+/* Walk mode: an agent's friendly reply to "say hi" (H). */
+.bubble-greet {
+  background: #e6f7ee;
+  color: #10321f;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 0 0 1.5px #3dbb74;
+}
+.walk-hint-relock {
+  color: #ffd166;
+  font-weight: 600;
+}

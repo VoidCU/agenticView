@@ -22,7 +22,9 @@ import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, BOB_FREQ,
 import { MAX_DEPEN_PER_FRAME, PLAYER_RADIUS, type Solid } from "./colliders";
 import { chairField } from "./pushChairs";
 import { usePositions } from "../state/positions";
-import { bonk, BONK_RANGE } from "../state/bonk";
+import { bonk, BONK_RANGE, greet, GREET_RANGE } from "../state/bonk";
+import { SLAP_HIT_MS, triggerHand } from "./handGesture";
+import { WalkHand, updateWalkHand } from "./WalkHand";
 import { openOverlayFromWalk } from "../state/pointerLock";
 
 // ---- Constants ----
@@ -93,6 +95,7 @@ export function WalkModeController({
     clickPending: false, // user pressed primary button while locked
     bonkPending: false,  // user pressed E: bonk the agent under the crosshair if close
     challengePending: false, // user pressed G: challenge the agent under the crosshair to RPS
+    greetPending: false, // user pressed H: say hi to the agent under the crosshair
   });
 
   const keys = useRef(new Set<string>());
@@ -191,6 +194,7 @@ export function WalkModeController({
       }
       if (e.code === "KeyE" && !e.repeat) st.current.bonkPending = true;
       if (e.code === "KeyG" && !e.repeat) st.current.challengePending = true;
+      if (e.code === "KeyH" && !e.repeat) st.current.greetPending = true;
       keys.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
@@ -205,6 +209,7 @@ export function WalkModeController({
   // ---- Raycaster for screen-centre interaction ----
 
   const raycaster = useRef(new THREE.Raycaster());
+  const hand = useRef<THREE.Group>(null);
   const scratch = useRef({ euler: new THREE.Euler(0, 0, 0, "YXZ"), centre: new THREE.Vector2(0, 0), world: new THREE.Vector3() });
 
   // ---- Per-frame update ----
@@ -274,17 +279,22 @@ export function WalkModeController({
     const euler = scratch.current.euler.set(cur.pitch, cur.yaw, 0, "YXZ");
     camera.quaternion.setFromEuler(euler);
 
-    // Screen-centre raycast: fire when a click or E press is pending.
-    if (cur.clickPending || cur.bonkPending || cur.challengePending) {
-      const intent: WalkIntent = cur.clickPending ? "click" : cur.bonkPending ? "bonk" : "challenge";
+    // Screen-centre raycast: fire when a click, E, G or H press is pending.
+    if (cur.clickPending || cur.bonkPending || cur.challengePending || cur.greetPending) {
+      const intent: WalkIntent = cur.clickPending ? "click" : cur.bonkPending ? "bonk" : cur.challengePending ? "challenge" : "greet";
       cur.clickPending = false;
       cur.bonkPending = false;
       cur.challengePending = false;
+      cur.greetPending = false;
       raycaster.current.setFromCamera(scratch.current.centre, camera);
       const hits = raycaster.current.intersectObjects(scene.children, true);
       const action = walkInteraction(hits, camera.position, scratch.current.world, intent);
-      if (action?.kind === "bonk") bonk(action.id);
-      else if (action?.kind === "select") {
+      if (action?.kind === "bonk") {
+        // The hand swings in; the agent's wobble starts when it lands (SLAP_HIT_MS later).
+        if (bonk(action.id, Date.now() + SLAP_HIT_MS) !== undefined) triggerHand("slap", performance.now());
+      } else if (action?.kind === "greet") {
+        if (greet(action.id) !== undefined) triggerHand("wave", performance.now());
+      } else if (action?.kind === "select") {
         // The agent's chat opens beside the view: free the mouse so it can be used (click the view to walk on).
         openOverlayFromWalk();
         select(action.id);
@@ -292,10 +302,12 @@ export function WalkModeController({
       else if (action?.kind === "board") onBoard?.(action.id);
       else if (action?.kind === "challenge") window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: action.id } }));
     }
+    // First-person hand: posed after the camera moved this frame (hidden and skipped when idle).
+    updateWalkHand(hand.current, camera, performance.now());
   });
 
-  // No visual avatar in first-person mode.
-  return null;
+  // No avatar body in first-person mode: only the hand, while it slaps or waves.
+  return <WalkHand ref={hand} />;
 }
 
 // ---- Public mount point ----
@@ -329,9 +341,9 @@ export function WalkMode({ spaces, startX, startZ, solids, onBoard }: WalkModePr
   );
 }
 
-export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge"; id: string };
-/** What triggered the crosshair raycast: a click, E (bonk) or G (challenge to rock-paper-scissors). */
-export type WalkIntent = "click" | "bonk" | "challenge";
+export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge" | "greet"; id: string };
+/** What triggered the crosshair raycast: a click, E (bonk), G (challenge to rock-paper-scissors) or H (say hi). */
+export type WalkIntent = "click" | "bonk" | "challenge" | "greet";
 /** Walk mode: challenge an agent to RPS from this close (anywhere: desk, corridor, lounge). */
 export const CHALLENGE_RANGE = 3;
 
@@ -359,6 +371,7 @@ export function walkInteraction(
         const dist = Math.hypot(tmp.x - cam.x, tmp.z - cam.z);
         const id = ud.robotAgentId as string;
         if (intent === "challenge") return dist <= CHALLENGE_RANGE ? { kind: "challenge", id } : undefined;
+        if (intent === "greet") return dist <= GREET_RANGE ? { kind: "greet", id } : undefined;
         if (dist <= BONK_RANGE) return { kind: "bonk", id };
         return clickOnly ? undefined : { kind: "select", id };
       }

@@ -22,6 +22,7 @@ import { keyToRoom } from "./roomKeys";
 
 import { MiniMap } from "./MiniMap";
 import { WalkMode } from "./WalkMode";
+import { handState } from "./handGesture";
 import { Whiteboard, whiteboardPose } from "./Whiteboard";
 import { AllDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
@@ -978,6 +979,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
       store: useStore,
       inject: (msg: ServerMessage) => ingestMessage(useStore, msg),
       agentPos: (id: string) => livePositions.get(id),
+      hand: handState,
       chairs: () => chairField.chairs.map((c) => ({ id: c.id, x: c.x, z: c.z, baseX: c.baseX, baseZ: c.baseZ, yaw: c.yaw, pushable: c.pushable })),
       boardPose: (spaceId: string) => {
         const state = useStore.getState();

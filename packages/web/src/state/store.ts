@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
-export type Bubble = { text: string; until: number; /** Local playful bonk line (shown even in walk mode). */ bonk?: boolean };
+export type Bubble = { text: string; until: number; /** Local playful bonk line (shown even in walk mode). */ bonk?: boolean; /** A friendly greeting reply (walk mode H), shown like a bonk line. */ greet?: boolean };
 export type Beam = { id: string; from: string; to: string; until: number };
 export type PendingPermission = { id: string; agentId: string; taskId: string; tool: string; input: unknown };
 export type PendingQuestion = { id: string; agentId: string; taskId: string; question: string };
