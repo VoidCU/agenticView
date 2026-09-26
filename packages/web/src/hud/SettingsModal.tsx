@@ -15,7 +15,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [provider, setProvider] = useState<Provider | "">(settings?.defaultProvider ?? "");
   const [model, setModel] = useState(settings?.defaultModel ?? "");
   const [max, setMax] = useState(settings?.maxConcurrentRuns ?? 3);
-  const [limitPolicy, setLimitPolicy] = useState<"ask" | "auto">(settings?.limitPolicy ?? "ask");
+  const [limitPolicy, setLimitPolicy] = useState<"ask" | "auto" | "manager">(settings?.limitPolicy ?? "ask");
   const [loungeBreaks, setLoungeBreaks] = useState(settings?.loungeBreaks ?? true);
   const [idleLoungeMinutes, setIdleLoungeMinutes] = useState(settings?.idleLoungeMinutes ?? 3);
   const [preferCheapModels, setPreferCheapModels] = useState(settings?.preferCheapModels ?? false);
@@ -91,11 +91,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <span>When an agent hits a limit</span>
               <select
                 value={limitPolicy}
-                onChange={(e) => setLimitPolicy(e.target.value as "ask" | "auto")}
+                onChange={(e) => setLimitPolicy(e.target.value as "ask" | "auto" | "manager")}
                 aria-label="Limit policy"
               >
                 <option value="ask">Ask me</option>
                 <option value="auto">Switch automatically</option>
+                <option value="manager">Switch automatically, Manager reviews</option>
               </select>
             </label>
             <label className="field field-toggle">

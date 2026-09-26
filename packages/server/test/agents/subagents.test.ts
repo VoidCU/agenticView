@@ -42,9 +42,9 @@ describe("subagent file content", () => {
     expect(names.get(b.id)).toBe("agenticview-nova-222222");
   });
 
-  it("maps models to Claude aliases, else inherit", () => {
-    expect(subagentModel("opus")).toBe("opus");
-    expect(subagentModel("claude-sonnet-5")).toBe("sonnet");
+  it("always inherits the serving session's model", () => {
+    expect(subagentModel("opus")).toBe("inherit");
+    expect(subagentModel("claude-sonnet-5")).toBe("inherit");
     expect(subagentModel(null)).toBe("inherit");
     expect(subagentModel("gpt-6-sol")).toBe("inherit");
   });
@@ -67,7 +67,7 @@ describe("subagent file content", () => {
     const [, front] = text.split("---\n");
     expect(front).toContain("name: agenticview-nova\n");
     expect(front).toMatch(/description: ".*Nova: frontend\. Knows \\"React\\".*"/);
-    expect(front).toContain("model: sonnet\n");
+    expect(front).toContain("model: inherit\n");
     expect(front).toMatch(/tools: Read, Grep, Glob, TodoWrite, Edit, Write, MultiEdit, NotebookEdit, Bash, BashOutput, KillShell, mcp__plugin_agenticview_agenticview-worker__agenticview_report/);
     expect(text.startsWith("---\nname:")).toBe(true);
     expect(generatedAgentId(text)).toBe(a.id);
@@ -84,8 +84,8 @@ describe("writing and syncing subagent files", () => {
     const a = mk("Nova");
     expect(await writeSubagent(proj, a, "agenticview-nova")).toEqual({ name: "agenticview-nova", status: "written" });
     expect(await writeSubagent(proj, a, "agenticview-nova")).toEqual({ name: "agenticview-nova", status: "unchanged" });
-    expect(await writeSubagent(proj, { ...a, model: "haiku" }, "agenticview-nova")).toMatchObject({ status: "written" });
-    expect(await read("agenticview-nova")).toContain("model: haiku");
+    expect(await writeSubagent(proj, { ...a, specialty: "backend" }, "agenticview-nova")).toMatchObject({ status: "written" });
+    expect(await read("agenticview-nova")).toContain("model: inherit");
   });
 
   it("never overwrites or deletes a user-authored file", async () => {
@@ -136,7 +136,7 @@ it("generates a strict read-only companion with the same model and lifecycle", a
   expect(res.readOnlyNames.get(a.id)).toBe("agenticview-nova-readonly");
   const text = await read("agenticview-nova-readonly");
   expect(generatedAgentId(text)).toBe(a.id);
-  expect(text).toContain("model: opus");
+  expect(text).toContain("model: inherit");
   expect(text.match(/^tools: (.*)$/m)![1]!.split(", ")).toEqual([
     "Read", "Glob", "Grep",
     "mcp__plugin_agenticview_agenticview-worker__agenticview_report",
@@ -147,7 +147,7 @@ it("generates a strict read-only companion with the same model and lifecycle", a
   expect(await read("agenticview-nova")).not.toMatch(/^tools:/m);
   expect((await syncSubagents(proj, [a])).written).toEqual([]);
   await syncSubagents(proj, [{ ...a, model: "haiku" }]);
-  expect(await read("agenticview-nova-readonly")).toContain("model: haiku");
+  expect(await read("agenticview-nova-readonly")).toContain("model: inherit");
   await syncSubagents(proj, []);
   expect(await readdir(dir())).toEqual([]);
 });

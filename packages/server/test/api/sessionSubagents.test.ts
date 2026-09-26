@@ -68,7 +68,7 @@ describe("claude-session agents as subagents of one session", () => {
     const nova = await s.world.registry.create({ name: "Nova", specialty: "frontend", provider: "claude-session", model: "sonnet" });
     s.bus.emit({ type: "agent.updated", agent: nova });
     await waitFor(async () => (await readdir(agentsDir()).catch(() => [])).includes("agenticview-nova.md"));
-    expect(await readFile(join(agentsDir(), "agenticview-nova.md"), "utf8")).toContain("model: sonnet");
+    expect(await readFile(join(agentsDir(), "agenticview-nova.md"), "utf8")).toContain("model: inherit");
 
     // A user-authored file with another agent's name stays untouched.
     await writeFile(join(agentsDir(), "agenticview-orion.md"), "---\nname: agenticview-orion\ndescription: mine\n---\nhand\n");

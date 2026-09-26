@@ -15,8 +15,12 @@ export const ProjectSettingsSchema = z.object({
   defaultProvider: ProviderSchema.nullable().default(null),
   defaultModel: z.string().nullable().default(null),
   maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
-  /** How to handle an agent whose provider hits a quota/rate-limit or crash: prompt the user ('ask') or revive automatically ('auto'). */
-  limitPolicy: z.enum(["ask", "auto"]).default("ask"),
+  /**
+   * How to handle an agent whose provider hits a quota/rate-limit or crash: prompt the user ('ask'),
+   * revive automatically ('auto'), or revive automatically AND brief the Manager, who reviews the
+   * placement on its next request ('manager').
+   */
+  limitPolicy: z.enum(["ask", "auto", "manager"]).default("ask"),
   /**
    * Ordered list of providers to try when a run fails (quota, rate-limit, or crash).
    * The policy picks the first provider after the current one in this list that is

@@ -12,6 +12,7 @@ import {
   type Space,
   type WorldInfo,
   type WorkerSessionInfo,
+  type ServerMessage,
   WorkerSessionFileSchema,
   type Effort,
   type LimitsReport,
@@ -28,6 +29,7 @@ import {
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime, type RecentWork } from "./runtimes/session.js";
 import { subagentNames, syncSubagents, writeSubagent, type SyncResult } from "./agents/subagents.js";
+import { AgentMemory } from "./agents/memory.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { Orchestrator, type ResolvedSettings, type WorldDeps } from "./manager/orchestrator.js";
@@ -90,6 +92,8 @@ export interface World {
    * Remove an empty room from the office layout. Refuses if any agents are seated there.
    */
   removeRoom: (spaceId: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  /** Wire decoration of outgoing messages (fills agent.sessionModel for claude-session agents). */
+  decorate: (m: ServerMessage) => ServerMessage;
 }
 
 // ── Explicit-room helpers (used by addRoom / removeRoom) ─────────────────────
@@ -273,6 +277,9 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     };
   };
 
+  // Per-agent task memory: <project>/.agenticview/memory/<agentId>.jsonl (the world root for hub work without a project).
+  const memory = new AgentMemory((projectPath) => join(projectPath ? projectRoot(projectPath) : root, "memory"));
+
   const usageTracker = new UsageTracker(root);
   await usageTracker.init();
 
@@ -312,6 +319,8 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     renameSpace,
     usageTracker,
     emitProviders: () => emitProvidersFn(),
+    sessions: () => sessions(),
+    memory,
   };
   const orchestrator = new Orchestrator(deps);
 
@@ -359,8 +368,31 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
           return undefined;
         });
 
-  /** The agent's last finished tasks, newest first, for the "Your recent work" digest. */
-  const recentWork = async (agentId: string, exceptTaskId?: string): Promise<RecentWork[]> =>
+  /**
+   * The agent's latest memory records, newest first, for the "Your recent work" digest (one store for
+   * every provider). Falls back to the task history for agents with no memory yet (older offices).
+   */
+  const recentWork = async (agentId: string, exceptTaskId?: string, projectPath?: string): Promise<RecentWork[]> => {
+    const key = projectPath || (ref.kind === "project" ? ref.projectPath : "");
+    const records = await memory.recent(key, agentId).catch(() => []);
+    if (records.length > 0) {
+      return records.map((r) => ({
+        taskId: r.taskId,
+        title: r.title,
+        status: r.status,
+        summary: r.outcome,
+        files: r.files,
+        finishedAt: r.at,
+        ...(r.subagentId ? { subagentId: r.subagentId } : {}),
+        ...(r.sessionName ? { sessionName: r.sessionName } : {}),
+        ...(r.provider ? { provider: r.provider } : {}),
+        ...(r.model ? { model: r.model } : {}),
+        ...(r.taskId === exceptTaskId ? { earlierAttempt: true } : {}),
+      }));
+    }
+    return historyWork(agentId, exceptTaskId);
+  };
+  const historyWork = async (agentId: string, exceptTaskId?: string): Promise<RecentWork[]> =>
     (await tasks.list())
       .filter((t) => t.assigneeId === agentId && t.id !== exceptTaskId && isTerminal(t.status))
       .sort((a, b) => (b.finishedAt ?? b.createdAt).localeCompare(a.finishedAt ?? a.createdAt))
@@ -401,7 +433,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
           // A brainstorm must not inherit the saved subagent's editing tools or instructions.
           const readOnly = task?.readOnly === true;
           const target = task?.projectPath || (ref.kind === "project" ? ref.projectPath : "");
-          const work = await recentWork(req.agent.id, req.taskId);
+          const work = await recentWork(req.agent.id, req.taskId, task?.projectPath);
           // Hub runs without a target project: no folder to put a subagent in, the session does it itself.
           if (!target) {
             if (readOnly) throw new Error("Read-only session tasks require a project for the restricted subagent");
@@ -429,7 +461,18 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       },
       saved.sessions,
     );
-    sessionRuntime.onSessionsChanged = () => void sessions().then((list) => opts.bus.emit({ type: "sessions.updated", sessions: list }), () => undefined);
+    // Session models as last seen: when one changes, its agents' wire `sessionModel` changes too.
+    const lastModels = new Map<string, string | null>(sessionRuntime.sessionList().map((s) => [s.id, s.model]));
+    sessionRuntime.onSessionsChanged = () => {
+      void sessions().then((list) => opts.bus.emit({ type: "sessions.updated", sessions: list }), () => undefined);
+      const changed = sessionRuntime.sessionList().filter((s) => (lastModels.get(s.id) ?? null) !== s.model);
+      for (const s of changed) lastModels.set(s.id, s.model);
+      if (changed.length === 0) return;
+      const ids = new Set(changed.map((s) => s.id));
+      void registry.list().then((all) => {
+        for (const a of all) if (a.session?.id && ids.has(a.session.id)) opts.bus.emit({ type: "agent.updated", agent: a });
+      }, () => undefined);
+    };
     // A binding changed in the office (or a new agent): a waiting session may now take its task.
     opts.bus.on((m) => {
       if (m.type === "agent.updated" || m.type === "agent.removed") {
@@ -441,7 +484,24 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     });
   }
 
+  // Migration: claude-session agents no longer store a model or effort (they inherit the session's).
+  for (const a of await registry.list()) {
+    if (a.provider === "claude-session" && (a.model || a.effort)) await registry.update(a.id, {}).catch(() => undefined);
+  }
+
   if (sessionRuntime) await syncProjectSubagents();
+
+  /** Wire form of an agent: claude-session agents carry the model of the session serving them. */
+  const decorateAgent = (a: Agent): Agent => {
+    if (a.provider !== "claude-session" || !sessionRuntime) return a;
+    const boundId = a.session?.id ?? sessionRuntime.sessionList().find((s) => s.runs.some((r) => r.agentId === a.id))?.id;
+    return { ...a, sessionModel: (boundId && sessionRuntime.session(boundId)?.model) || null };
+  };
+  const decorate = (m: ServerMessage): ServerMessage => {
+    if (m.type === "agent.updated") return { ...m, agent: decorateAgent(m.agent) };
+    if (m.type === "snapshot") return { ...m, agents: m.agents.map(decorateAgent) };
+    return m;
+  };
 
   const providerStatuses = async (): Promise<ProviderStatus[]> => {
     const out: ProviderStatus[] = [];
@@ -624,6 +684,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     },
     addRoom: addRoomFn,
     removeRoom: removeRoomFn,
+    decorate,
     snapshot,
   };
 }
