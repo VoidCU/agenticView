@@ -1,8 +1,95 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PROVIDER_LABELS } from "@agenticview/shared";
-import type { LimitsReport, UsageReport, WindowLimit } from "@agenticview/shared";
+import type { LimitsReport, ProviderModelLimits, UsageReport, WindowLimit } from "@agenticview/shared";
 import { apiFetch } from "../net/ws";
 import { timeAgo } from "./ui";
+
+/**
+ * Formats a future ISO timestamp as a relative "in Xh Ym" string for times within 24 h,
+ * or an absolute "Mon 09:00" string for times further out. Used for reset countdowns.
+ */
+export function formatResetAt(iso: string, now = Date.now()): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const diff = Math.max(0, t - now);
+  if (diff === 0) return "now";
+  const totalMinutes = Math.ceil(diff / 60_000);
+  if (totalMinutes < 60) return `in ${totalMinutes}m`;
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (hours < 24) return mins > 0 ? `in ${hours}h ${mins}m` : `in ${hours}h`;
+  // For longer waits, show weekday + time
+  const d = new Date(t);
+  const day = d.toLocaleDateString(undefined, { weekday: "short" });
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return `${day} ${time}`;
+}
+
+/** A hook that forces a re-render every `ms` milliseconds (for live countdown displays). */
+function useTick(ms: number): void {
+  const [, setTick] = useState(0);
+  const ref = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  useEffect(() => {
+    ref.current = setInterval(() => setTick((n) => n + 1), ms);
+    return () => clearInterval(ref.current);
+  }, [ms]);
+}
+
+/** Compact one-line representation of a single rate-limit window (5h or Week). */
+export function ClaudeWindowLine({
+  w,
+  label,
+  now,
+  isLimited,
+}: {
+  w: WindowLimit;
+  label: string;
+  now?: number;
+  isLimited?: boolean;
+}) {
+  if (w.status === "not reported") {
+    return (
+      <span className="claude-window-line claude-window-nr">
+        <span className="claude-window-label">{label}:</span>
+        <span className="muted">not reported</span>
+      </span>
+    );
+  }
+  const { percentLeft, resetAt, warning } = w;
+  const red = isLimited || percentLeft <= 0;
+  const cls = red ? "claude-window-red" : warning ? "claude-window-warn" : "";
+  const resetStr = resetAt ? formatResetAt(resetAt, now ?? Date.now()) : undefined;
+  return (
+    <span className={`claude-window-line ${cls}`}>
+      <span className="claude-window-label">{label}:</span>
+      <span className="claude-window-pct">
+        {warning && !red && <span className="claude-window-icon" aria-hidden="true">!</span>}
+        {red && <span className="claude-window-icon" aria-hidden="true">!</span>}
+        {percentLeft}% left
+      </span>
+      {resetStr && <span className="claude-window-reset">{resetStr}</span>}
+    </span>
+  );
+}
+
+/** Two-line block for one model's claude-session limits. */
+export function ClaudeModelLimits({
+  model,
+  ml,
+  isLimited,
+}: {
+  model: string;
+  ml: ProviderModelLimits;
+  isLimited?: boolean;
+}) {
+  return (
+    <div className="claude-model-limits">
+      <span className="claude-limits-model">{model}</span>
+      <ClaudeWindowLine w={ml.fiveHour} label="5h" isLimited={isLimited} />
+      <ClaudeWindowLine w={ml.weekly} label="Week" isLimited={isLimited} />
+    </div>
+  );
+}
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -43,34 +130,59 @@ function WindowBar({ w, label }: { w: WindowLimit; label: string }) {
 }
 
 function LimitsSection({ limits }: { limits: LimitsReport }) {
+  useTick(30_000);
   const entries = Object.entries(limits.providers);
   if (entries.length === 0) return <p className="empty">No provider limit data available.</p>;
   return (
     <div className="usage-limits">
-      {entries.map(([provider, entry]) => (
-        <details key={provider} className="usage-provider-group" open>
-          <summary className="usage-provider-summary">
-            <span className="usage-provider-name">{PROVIDER_LABELS[provider as keyof typeof PROVIDER_LABELS] ?? provider}</span>
-            {entry.limit.limited && (
-              <span className={`usage-limited-badge usage-limited-${entry.limit.errorType ?? "crash"}`}>
-                {entry.limit.errorType ?? "limited"}
-                {entry.limit.resetAt && ` · resets ${timeAgo(entry.limit.resetAt)}`}
-              </span>
+      {entries.map(([provider, entry]) => {
+        const isClaudeSession = provider === "claude-session";
+        const modelEntries = Object.entries(entry.models);
+        const allNotReported =
+          modelEntries.length === 0 ||
+          modelEntries.every(
+            ([, ml]) =>
+              ml.fiveHour.status === "not reported" && ml.weekly.status === "not reported",
+          );
+        return (
+          <details key={provider} className="usage-provider-group" open>
+            <summary className="usage-provider-summary">
+              <span className="usage-provider-name">{PROVIDER_LABELS[provider as keyof typeof PROVIDER_LABELS] ?? provider}</span>
+              {entry.limit.limited && (
+                <span className={`usage-limited-badge usage-limited-${entry.limit.errorType ?? "crash"}`}>
+                  {entry.limit.errorType ?? "limited"}
+                  {entry.limit.resetAt && ` · resets ${timeAgo(entry.limit.resetAt)}`}
+                </span>
+              )}
+            </summary>
+            {isClaudeSession ? (
+              allNotReported ? (
+                <p className="empty usage-no-models claude-statusline-hint">
+                  not reported — run <code>/agenticview-statusline</code> in your Claude Code session to enable reporting
+                </p>
+              ) : (
+                <div className="usage-claude-session-models">
+                  {modelEntries.map(([model, ml]) => (
+                    <ClaudeModelLimits key={model} model={model} ml={ml} isLimited={entry.limit.limited} />
+                  ))}
+                </div>
+              )
+            ) : (
+              modelEntries.length === 0 ? (
+                <p className="empty usage-no-models">No model data yet.</p>
+              ) : (
+                modelEntries.map(([model, ml]) => (
+                  <div key={model} className="usage-model-row">
+                    <span className="usage-model-name">{model}</span>
+                    <WindowBar w={ml.fiveHour} label="5h" />
+                    <WindowBar w={ml.weekly} label="7d" />
+                  </div>
+                ))
+              )
             )}
-          </summary>
-          {Object.entries(entry.models).length === 0 ? (
-            <p className="empty usage-no-models">No model data yet.</p>
-          ) : (
-            Object.entries(entry.models).map(([model, ml]) => (
-              <div key={model} className="usage-model-row">
-                <span className="usage-model-name">{model}</span>
-                <WindowBar w={ml.fiveHour} label="5h" />
-                <WindowBar w={ml.weekly} label="7d" />
-              </div>
-            ))
-          )}
-        </details>
-      ))}
+          </details>
+        );
+      })}
     </div>
   );
 }

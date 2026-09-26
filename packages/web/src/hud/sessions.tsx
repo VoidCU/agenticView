@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { ClaudeModelLimits } from "./UsagePanel";
 import {
   MAX_SESSION_CAPACITY,
   WORK_COMMAND,
@@ -249,7 +250,17 @@ export function SessionNotice({ agent }: { agent: Agent }) {
   );
 }
 
+function useSessionTick(): void {
+  const [, setTick] = useState(0);
+  const ref = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  useEffect(() => {
+    ref.current = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(ref.current);
+  }, []);
+}
+
 function SessionRow({ s }: { s: WorkerSessionInfo }) {
+  useSessionTick();
   const send = useStore((st) => st.send);
   const agents = useStore((st) => st.agents);
   const tasks = useStore((st) => st.tasks);
@@ -258,6 +269,7 @@ function SessionRow({ s }: { s: WorkerSessionInfo }) {
   const bound = s.agentIds.map((id) => agents[id]?.name).filter(Boolean);
   const runs = s.runs ?? [];
   const capacity = s.capacity ?? 4;
+  const limitEntries = Object.entries(s.claudeLimits ?? {});
   return (
     <li className="session-row" data-session={s.id}>
       <div className="session-main">
@@ -291,6 +303,17 @@ function SessionRow({ s }: { s: WorkerSessionInfo }) {
         </span>
         {s.cwd && <span title={s.cwd}>{s.cwd}</span>}
       </div>
+      {limitEntries.length > 0 ? (
+        <div className="session-claude-limits" aria-label="Claude plan limits">
+          {limitEntries.map(([model, ml]) => (
+            <ClaudeModelLimits key={model} model={model} ml={ml} />
+          ))}
+        </div>
+      ) : (
+        <p className="session-claude-limits-hint">
+          <span className="muted">Plan limits: run <code>/agenticview-statusline</code> to enable reporting</span>
+        </p>
+      )}
       {runs.length > 0 && (
         <ul className="session-runs" aria-label={`Running in ${s.name}`}>
           {runs.map((r) => {

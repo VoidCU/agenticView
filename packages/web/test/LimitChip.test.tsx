@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LimitChip, RetryButton, SwitchAgentModal, SwitchProviderModal } from "../src/hud/LimitChip";
@@ -7,28 +7,27 @@ import { ChatPanel } from "../src/hud/ChatPanel";
 import { useStore } from "../src/state/store";
 import { manager, worker, task, snapshot } from "./fixtures";
 import type { LimitInfo } from "@agenticview/shared";
+import * as ws from "../src/net/ws";
 
-// Mock apiFetch so tests don't make real network calls
-vi.mock("../src/net/ws", async (importOriginal) => {
-  const orig = await importOriginal<typeof import("../src/net/ws")>();
-  return {
-    ...orig,
-    apiFetch: vi.fn(),
-    getToken: () => "test-token",
-  };
-});
-
-import { apiFetch } from "../src/net/ws";
-const mockApiFetch = vi.mocked(apiFetch);
+// vi.spyOn is used instead of vi.mock because vitest's module factory mock has a
+// Windows path-resolution issue that prevents the factory from intercepting imports
+// in sibling source files. vi.spyOn patches the live ESM binding directly and works
+// correctly on all platforms.
+// Type inferred from vi.spyOn return — avoids MockInstance vs Mock mismatch
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let mockApiFetch: any;
 
 beforeEach(() => {
   useStore.getState().reset();
-  vi.clearAllMocks();
-  // Default: fetch resolves with empty ok responses
-  mockApiFetch.mockResolvedValue({
+  // Spy on apiFetch and set a default resolved response (empty ok response)
+  mockApiFetch = vi.spyOn(ws, "apiFetch").mockResolvedValue({
     ok: true,
     json: () => Promise.resolve({ providers: {}, agents: {}, updatedAt: new Date().toISOString() }),
   } as Response);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 // ---------- LimitChip ----------
@@ -90,7 +89,7 @@ describe("RetryButton", () => {
     render(<RetryButton taskId="t_abc" taskTitle="Build backend" />);
     const btn = screen.getByRole("button", { name: /retry build backend/i });
     await userEvent.click(btn);
-    expect(mockApiFetch).toHaveBeenCalledWith("/api/tasks/t_abc/retry", { method: "POST" });
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith("/api/tasks/t_abc/retry", { method: "POST" }));
   });
 
   it("shows error label when retry API fails", async () => {
