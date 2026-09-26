@@ -3959,3 +3959,19 @@ kbd {
   border-radius: 50%;
   background: var(--line);
 }
+
+/* Settings: Office life (idle behaviour) */
+.office-life {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+.office-life-pcts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 560px) {
+  .office-life-pcts { grid-template-columns: 1fr; }
+}
+.hint-error { color: var(--red, #ef4444); }
