@@ -163,8 +163,8 @@ describe("worker MCP tools", () => {
     // The agent's subagent runs on its own model, so no mismatch note; the task names the subagent.
     expect(text).not.toContain("MODEL MISMATCH");
     expect(text).toContain("agenticview-nova");
-    expect(text).toContain("subagent runs on opus");
-    expect(await readFile(join(proj, ".claude", "agents", "agenticview-nova.md"), "utf8")).toContain("model: opus");
+    expect(text).toContain("inherited from this Claude Code session (claude-sonnet-5)");
+    expect(await readFile(join(proj, ".claude", "agents", "agenticview-nova.md"), "utf8")).toContain("model: inherit");
     expect((await s.world.registry.get(nova.id))?.session?.id).toBe("3f2a-session");
     expect(s.world.sessionRuntime!.session("3f2a-session")).toMatchObject({ model: "claude-sonnet-5", cwd: proj });
     expect((await report({ text: "working" })).isError).toBeUndefined();

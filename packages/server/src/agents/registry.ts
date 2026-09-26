@@ -34,6 +34,21 @@ export interface CreateAgentInput {
   session?: { id: string; name?: string } | null;
 }
 
+/**
+ * Invariants applied to every stored agent:
+ * - a claude-session agent inherits model and effort from the session that serves it, so none is stored;
+ * - `sessionModel` is wire-only and never persisted.
+ */
+export function normalizeAgent(agent: Agent): Agent {
+  const out = { ...agent };
+  delete out.sessionModel;
+  if (out.provider === "claude-session") {
+    out.model = null;
+    out.effort = null;
+  }
+  return out;
+}
+
 export class ScopeError extends Error {
   constructor(msg: string) {
     super(msg);
@@ -73,13 +88,15 @@ export class AgentRegistry {
   async create(input: CreateAgentInput): Promise<Agent> {
     const scope = input.scope ?? (this.world.kind === "project" ? "project" : "global");
     const store = this.storeFor(scope);
-    const agent = defaultAgent({
-      ...input,
-      role: input.role ?? "worker",
-      scope,
-      provider: input.provider ?? null,
-      model: input.model ?? null,
-    });
+    const agent = normalizeAgent(
+      defaultAgent({
+        ...input,
+        role: input.role ?? "worker",
+        scope,
+        provider: input.provider ?? null,
+        model: input.model ?? null,
+      }),
+    );
     if (agent.role === "worker") {
       // Take the next free desk now so the seat is stable even as the roster changes around it.
       const seat = planOffice([...(await this.list()), agent]).placements[agent.id];
@@ -92,7 +109,7 @@ export class AgentRegistry {
   async update(id: string, patch: Partial<Agent>): Promise<Agent> {
     const cur = await this.get(id);
     if (!cur) throw new Error(`Unknown agent ${id}`);
-    const next = AgentSchema.parse({
+    const next = normalizeAgent(AgentSchema.parse({
       ...cur,
       ...patch,
       id: cur.id,
@@ -100,7 +117,7 @@ export class AgentRegistry {
       scope: cur.scope,
       createdAt: cur.createdAt,
       updatedAt: new Date().toISOString(),
-    });
+    }));
     await this.storeFor(cur.scope).write(id, next);
     return next;
   }

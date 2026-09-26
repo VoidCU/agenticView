@@ -3,11 +3,9 @@ import { ClaudeModelLimits } from "./UsagePanel";
 import {
   MAX_SESSION_CAPACITY,
   WORK_COMMAND,
-  modelFamily,
   newSessionUri,
   resumeCommand,
   resumeSessionUri,
-  sessionModelMatches,
   type Agent,
   type Provider,
   type SessionRunInfo,
@@ -31,13 +29,12 @@ export function boundSession(agent: Agent, sessions: WorkerSessionInfo[]): Worke
   return agent.session?.id ? sessions.find((s) => s.id === agent.session!.id) : undefined;
 }
 
-/** "Session X is on Sonnet 5; run /model opus in that session to switch", or undefined when they match. */
-export function modelMismatchHint(requested: string | null | undefined, session: Pick<WorkerSessionInfo, "name" | "model"> | undefined): string | undefined {
-  if (!requested || !session?.model || sessionModelMatches(requested, session.model)) return undefined;
-  // A Claude alias is written into the agent's subagent file, which runs on it whatever the session's model.
-  if (modelFamily(requested)) return undefined;
-  const alias = modelFamily(requested) ?? requested;
-  return `Session "${session.name}" is on ${session.model}; run /model ${alias} in that session to switch.`;
+/**
+ * The model a Claude Code session agent runs on: the serving session's reported model (the server fills
+ * `agent.sessionModel`; the bound session record is the fallback). Session agents store no model of their own.
+ */
+export function sessionModelOf(agent: Agent, sessions: WorkerSessionInfo[]): string | null {
+  return agent.sessionModel ?? boundSession(agent, sessions)?.model ?? null;
 }
 
 /** The run serving an agent right now, with its session (a session may run several agents at once). */
@@ -197,17 +194,16 @@ export function SessionChip({ agent }: { agent: Agent }) {
   );
 }
 
-/** Banner in the chat when the agent's work waits on its (offline) session, plus model mismatch hint. */
+/** Banner in the chat when the agent's work waits on its (offline) session. */
 export function SessionNotice({ agent }: { agent: Agent }) {
   const provider = useAgentProvider(agent);
   const sessions = useStore((s) => s.sessions);
   const tasks = useStore((s) => s.tasks);
   const send = useStore((s) => s.send);
   const s = boundSession(agent, sessions);
-  const mismatch = modelMismatchHint(agent.model, s);
   const busy = Object.values(tasks).some((t) => t.assigneeId === agent.id && (t.status === "running" || t.status === "assigned" || t.status === "queued"));
   const waiting = busy && s && !s.online && !servingRun(agent.id, sessions);
-  if (!waiting && !mismatch) return null;
+  if (!waiting) return null;
   if (provider !== "claude-session") return null;
   const name = s?.name ?? agent.session?.name ?? agent.session?.id.slice(0, 8) ?? "";
   return (
@@ -245,7 +241,6 @@ export function SessionNotice({ agent }: { agent: Agent }) {
           </div>
         </>
       )}
-      {mismatch && <p className="session-mismatch">{mismatch}</p>}
     </div>
   );
 }

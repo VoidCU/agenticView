@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { modelFamily, type Agent } from "@agenticview/shared";
+import type { Agent } from "@agenticview/shared";
 
 /**
  * Claude Code subagent files for `claude-session` agents.
@@ -85,9 +85,12 @@ export function subagentTools(tools: Agent["tools"]): string[] | undefined {
   ];
 }
 
-/** Subagent `model`: the agent's Claude family alias (opus, sonnet, haiku, fable), else inherit the session's. */
-export function subagentModel(model: string | null | undefined): string {
-  return modelFamily(model) ?? "inherit";
+/**
+ * Subagent `model`: always "inherit". A claude-session agent runs on the model (and effort) of the Claude
+ * Code session that serves it; the Manager routes work to the session whose model fits (assign_session).
+ */
+export function subagentModel(_model?: string | null): string {
+  return "inherit";
 }
 
 function description(agent: Agent): string {

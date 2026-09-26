@@ -11,12 +11,33 @@ export const FAILOVER_PROVIDER_MODELS: Partial<Record<z.infer<typeof ProviderSch
   "claude-session": "sonnet",
 };
 
+/**
+ * Idle behaviour of workers (server-local randomness, never a model call). After `idleLoungeMinutes`
+ * idle, a worker rolls every `minRollSeconds`..`maxRollSeconds`: stay at (or return to) a desk, take a
+ * brief visit to a colleague or the whiteboard, or lounge. The chances are relative weights.
+ */
+export const IdleBehaviourSchema = z.object({
+  stayChance: z.number().min(0).max(1).default(0.4),
+  visitChance: z.number().min(0).max(1).default(0.25),
+  loungeChance: z.number().min(0).max(1).default(0.35),
+  minRollSeconds: z.number().int().min(5).max(3600).default(120),
+  maxRollSeconds: z.number().int().min(5).max(3600).default(240),
+  /** How long a visit lasts before the worker walks back to its desk. */
+  visitSeconds: z.number().int().min(5).max(600).default(45),
+});
+export type IdleBehaviour = z.infer<typeof IdleBehaviourSchema>;
+export const DEFAULT_IDLE_BEHAVIOUR: IdleBehaviour = IdleBehaviourSchema.parse({});
+
 export const ProjectSettingsSchema = z.object({
   defaultProvider: ProviderSchema.nullable().default(null),
   defaultModel: z.string().nullable().default(null),
   maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
-  /** How to handle an agent whose provider hits a quota/rate-limit or crash: prompt the user ('ask') or revive automatically ('auto'). */
-  limitPolicy: z.enum(["ask", "auto"]).default("ask"),
+  /**
+   * How to handle an agent whose provider hits a quota/rate-limit or crash: prompt the user ('ask'),
+   * revive automatically ('auto'), or revive automatically AND brief the Manager, who reviews the
+   * placement on its next request ('manager').
+   */
+  limitPolicy: z.enum(["ask", "auto", "manager"]).default("ask"),
   /**
    * Ordered list of providers to try when a run fails (quota, rate-limit, or crash).
    * The policy picks the first provider after the current one in this list that is
@@ -27,8 +48,10 @@ export const ProjectSettingsSchema = z.object({
   loungeBreaks: z.boolean().default(true),
   /** When true (default), create_agent without an explicit provider/model picks the cheapest available choice. */
   preferCheapModels: z.boolean().default(true),
-  /** Minutes a worker must be idle before it enters the lounge (0 = off). */
+  /** Minutes a worker must be idle before its idle rolls (desk / visit / lounge) start (0 = off). */
   idleLoungeMinutes: z.number().int().min(0).max(60).default(3),
+  /** Idle roll chances and timing (see IdleBehaviourSchema); omitted = DEFAULT_IDLE_BEHAVIOUR. */
+  idleBehaviour: IdleBehaviourSchema.optional(),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 

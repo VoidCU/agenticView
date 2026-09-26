@@ -147,7 +147,7 @@ export function attachWs(server: HttpServer, opts: WsOptions): { close(): Promis
     // A protocol fault from one client must never become an unhandled 'error' that kills the process.
     ws.on("error", () => undefined);
     const send = (m: ServerMessage) => {
-      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m));
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(opts.world.decorate ? opts.world.decorate(m) : m));
     };
     const off = opts.world.bus.on(send);
     void opts.world.snapshot().then((s) => send({ type: "snapshot", ...s }));

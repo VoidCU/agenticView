@@ -55,9 +55,8 @@ Each subagent follows the protocol in its definition and task text: work in the 
 
 ## Models
 
-- A subagent runs on its own model setting: the agent's model in the office (opus, sonnet, haiku, fable) is written into its subagent file, so per-agent models really apply. An agent without a model inherits this session's model.
-- A task shows **MODEL MISMATCH** only when that cannot apply (no subagent, or a model that is not a Claude alias). Then the first `agenticview_report` of that run must say so, for example: "Session is on Sonnet 5; run /model opus in this session to switch." Carry on with the current model. Never try to switch models yourself.
-- Scale effort to the task's **Requested effort** (low, medium, high, xhigh, max): the subagent does this; low means answer directly, high and above means investigate thoroughly and verify.
+- Every generated subagent uses `model: inherit`: office agents served by Claude Code sessions run on the model and effort of this session. The office routes work between sessions by their model (hard work to an Opus session, routine work to a Sonnet session), so never try to switch models yourself.
+- Each task carries "Your recent work": the agent's memory of its latest tasks, whichever provider or model did them. Continue from it; an entry marked as an earlier attempt of THIS task (for example before a provider limit failover) is where to pick up.
 
 ## How the office routes tasks
 

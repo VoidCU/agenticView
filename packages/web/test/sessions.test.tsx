@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { newSessionUri, resumeSessionUri, sessionModelMatches, type WorkerSessionInfo } from "@agenticview/shared";
 import { CreateAgentModal } from "../src/hud/CreateAgentModal";
 import { ChatPanel } from "../src/hud/ChatPanel";
-import { SessionsModal, modelMismatchHint, LAUNCH_FALLBACK_MS } from "../src/hud/sessions";
+import { SessionsModal, sessionModelOf, LAUNCH_FALLBACK_MS } from "../src/hud/sessions";
 import { useStore } from "../src/state/store";
 import { agent, manager, snapshot, task, worker } from "./fixtures";
 
@@ -37,15 +37,18 @@ describe("session helpers", () => {
     expect(resumeSessionUri("0b6f-1")).toBe("vscode://anthropic.claude-code/open?session=0b6f-1");
   });
 
-  it("matches models by family and phrases a mismatch hint", () => {
+  it("matches models by family", () => {
     expect(sessionModelMatches("opus", "claude-opus-5-5[1m]")).toBe(true);
     expect(sessionModelMatches("opus", "Opus 5.5")).toBe(true);
     expect(sessionModelMatches("opus", "claude-sonnet-5")).toBe(false);
     expect(sessionModelMatches(null, "claude-sonnet-5")).toBe(true);
-    // A Claude alias runs in the agent's own subagent, so the session's model does not matter.
-    expect(modelMismatchHint("opus", { name: "Main tab", model: "claude-sonnet-5" })).toBeUndefined();
-    expect(modelMismatchHint("my-model", { name: "Main tab", model: "claude-sonnet-5" })).toBe('Session "Main tab" is on claude-sonnet-5; run /model my-model in that session to switch.');
-    expect(modelMismatchHint("opus", { name: "Main tab", model: "claude-opus-5-5" })).toBeUndefined();
+  });
+
+  it("a session agent's model is the serving session's (wire sessionModel first, else the bound session)", () => {
+    const list = [sess({ id: "s-a", name: "Main tab", model: "claude-sonnet-5" })];
+    expect(sessionModelOf({ ...nova, sessionModel: "claude-opus-5-5" }, list)).toBe("claude-opus-5-5");
+    expect(sessionModelOf(nova, list)).toBe("claude-sonnet-5");
+    expect(sessionModelOf({ ...nova, session: null }, list)).toBeNull();
   });
 });
 

@@ -3,7 +3,7 @@ import { EFFORT_LABELS, MODEL_CATALOGUE, PALETTE, effortsFor, findModel, type Ag
 import { useStore } from "../state/store";
 import { Modal, automaticLabel, defaultProviderOf, providerLabel } from "./ui";
 import { modeHint } from "./modeHint";
-import { ENTER_HINT, NewSessionLink, modelMismatchHint } from "./sessions";
+import { ENTER_HINT, NewSessionLink } from "./sessions";
 
 const TOOL_LABELS: { key: keyof ToolAllowance; label: string; hint: string }[] = [
   { key: "edit", label: "Edit files", hint: "Read and write files in the project" },
@@ -60,6 +60,8 @@ export function CreateAgentModal({ onClose, edit }: Props) {
   const defaultProvider = defaultProviderOf(settings?.defaultProvider, autoProvider);
   const effectiveProvider: Provider = provider || defaultProvider;
   const catalogue = MODEL_CATALOGUE[effectiveProvider];
+  /** Claude Code session agents run on the model and effort of the session that serves them. */
+  const isSession = effectiveProvider === "claude-session";
   const modelChoice = customModel ? CUSTOM : model;
   const effectiveModel = customModel ? model.trim() || null : model || null;
   const efforts = effortsFor(effectiveProvider, effectiveModel);
@@ -112,7 +114,9 @@ export function CreateAgentModal({ onClose, edit }: Props) {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) return;
-    const modelOut = catalogue.models.length > 0 || catalogue.allowCustom ? effectiveModel : null;
+    // A Claude Code session agent inherits model and effort from its session: nothing is stored.
+    const modelOut = isSession ? null : catalogue.models.length > 0 || catalogue.allowCustom ? effectiveModel : null;
+    const effortOut = isSession ? null : shownEffort || null;
     const appearance = { color, accent: edit?.appearance.accent ?? "#ffffff", eyes };
     const sessionOut = effectiveProvider === "claude-session" ? sessionBinding(sessionChoice) : undefined;
     const msg: ClientMessage = edit
@@ -125,7 +129,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
             description: description.trim(),
             provider: provider || null,
             model: modelOut,
-            effort: shownEffort || null,
+            effort: effortOut,
             tools,
             permissionMode: mode,
             appearance,
@@ -140,7 +144,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
             description: description.trim(),
             provider: provider || null,
             model: modelOut,
-            effort: shownEffort || null,
+            effort: effortOut,
             tools,
             permissionMode: mode,
             scope,
@@ -155,7 +159,10 @@ export function CreateAgentModal({ onClose, edit }: Props) {
 
   const busy = Boolean(submittedAt) && !error;
   const pickedSession = sessions.find((s) => s.id === sessionChoice);
-  const mismatch = effectiveProvider === "claude-session" ? modelMismatchHint(effectiveModel, pickedSession) : undefined;
+  const knownBound = pickedSession ?? (edit?.session && sessionChoice === edit.session.id ? { name: edit.session.name ?? edit.session.id, model: edit.sessionModel ?? null } : undefined);
+  const inheritLine = knownBound
+    ? `Model & effort come from the session: ${knownBound.name} · ${knownBound.model ?? "model not reported yet"}`
+    : "Model & effort come from whichever session picks it up";
 
   if (created) {
     return (
@@ -205,23 +212,25 @@ export function CreateAgentModal({ onClose, edit }: Props) {
               ))}
             </select>
           </label>
-          <label className="field">
-            <span>Model</span>
-            {catalogue.models.length === 0 && !catalogue.allowCustom ? (
-              <input value="" disabled placeholder="Uses the session's own model" aria-label="Model" />
-            ) : (
-              <select value={modelChoice} onChange={(e) => pickModel(e.target.value)} aria-label="Model">
-                <option value="">{effectiveProvider === "claude-session" ? "Whatever the session runs" : "Provider default"}</option>
-                {catalogue.models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
-                {catalogue.allowCustom && <option value={CUSTOM}>Custom…</option>}
-              </select>
-            )}
-          </label>
-          {effectiveProvider === "claude-session" && (
+          {!isSession && (
+            <label className="field">
+              <span>Model</span>
+              {catalogue.models.length === 0 && !catalogue.allowCustom ? (
+                <input value="" disabled placeholder="Provider default" aria-label="Model" />
+              ) : (
+                <select value={modelChoice} onChange={(e) => pickModel(e.target.value)} aria-label="Model">
+                  <option value="">Provider default</option>
+                  {catalogue.models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                  {catalogue.allowCustom && <option value={CUSTOM}>Custom…</option>}
+                </select>
+              )}
+            </label>
+          )}
+          {isSession && (
             <label className="field">
               <span>Session</span>
               <select value={sessionChoice} onChange={(e) => setSessionChoice(e.target.value)} aria-label="Session">
@@ -239,8 +248,11 @@ export function CreateAgentModal({ onClose, edit }: Props) {
               </select>
             </label>
           )}
-          {effectiveProvider === "claude-session" && (sessionChoice === NEW_SESSION || mismatch || !sessionChoice) && (
+          {isSession && (
             <div className="field field-full">
+              <p className="field-hint session-inherit" data-testid="session-inherit">
+                {inheritLine}
+              </p>
               {sessionChoice === NEW_SESSION && (
                 <>
                   <NewSessionLink agentName={name.trim() || undefined} className="btn btn-ghost btn-sm" label={name.trim() ? `Open a Claude Code session for ${name.trim()}` : "Open a new Claude Code session"} />
@@ -248,20 +260,15 @@ export function CreateAgentModal({ onClose, edit }: Props) {
                 </>
               )}
               {!sessionChoice && <p className="field-hint">The first free session to pick up a task keeps this agent from then on.</p>}
-              {mismatch && (
-                <p className="field-hint session-mismatch" data-testid="model-mismatch">
-                  {mismatch}
-                </p>
-              )}
             </div>
           )}
-          {modelChoice === CUSTOM && (
+          {!isSession && modelChoice === CUSTOM && (
             <label className="field">
               <span>Custom model id</span>
               <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="exact model id" autoComplete="off" required />
             </label>
           )}
-          {efforts.length > 0 && (
+          {!isSession && efforts.length > 0 && (
             <div className="field field-full">
               <span id={`${uid}-effort`}>Reasoning effort</span>
               <div className="segmented" role="radiogroup" aria-labelledby={`${uid}-effort`}>
@@ -278,7 +285,6 @@ export function CreateAgentModal({ onClose, edit }: Props) {
                   </button>
                 ))}
               </div>
-              {effectiveProvider === "claude-session" && <p className="field-hint">A session runs on its own model (only /model in that session changes it): the model picked here is a request the office checks against the session. Effort tells it how thorough to be.</p>}
             </div>
           )}
         </div>
