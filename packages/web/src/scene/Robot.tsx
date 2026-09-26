@@ -171,6 +171,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     x: number; z: number; yaw: number;
     path: Point[]; key: string;
     walk: number; phase: number; lift: number;
+    seat: number; // eased seat height: target.yOffset once arrived, 0 while walking
     vx: number; vz: number; // current velocity for smooth path transitions
   } | null>(null);
   if (!motion.current) {
@@ -178,7 +179,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     motion.current = {
       x: start.x, z: start.z, yaw: target.yaw,
       path: [], key: spawnAt ? "" : `${target.x.toFixed(3)},${target.z.toFixed(3)}`,
-      walk: 0, phase: 0, lift: 0,
+      walk: 0, phase: 0, lift: 0, seat: spawnAt ? 0 : (target.yOffset ?? 0),
       vx: 0, vz: 0,
     };
   }
@@ -262,7 +263,10 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
       st.yaw += angleDiff(desired, st.yaw) * Math.min(1, dt * TURN_RATE);
     }
     livePositions.set(agent.id, { x: st.x, z: st.z, walking: st.path.length > 0, waiting: status === "waiting" });
-    g.position.set(st.x, st.lift + (target.yOffset ?? 0), st.z);
+    // Hop onto the seat only once arrived; walk on the floor.
+    const seatGoal = !held && st.path.length === 0 && Math.abs(target.x - st.x) + Math.abs(target.z - st.z) < 0.1 ? (target.yOffset ?? 0) : 0;
+    st.seat += (seatGoal - st.seat) * Math.min(1, dt * 8);
+    g.position.set(st.x, st.lift + st.seat, st.z);
 
     // Walk cycle: feet step, arms swing, the body bobs and leans into the stride.
     const w = st.walk;

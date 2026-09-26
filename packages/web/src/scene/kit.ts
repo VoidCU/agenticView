@@ -136,6 +136,19 @@ export function desk(k: Kit, screen?: string, seed = 0) {
 }
 
 /** Swivel chair; the sitter faces +z. */
+/** Top of the desk-chair seat cushion (seat box y 0.47 + half height 0.04). Seated robots rest here. */
+export const CHAIR_SEAT_TOP = 0.51;
+/** An assigned seat whose owner stepped away: the chair is swivelled off the desk and rolled back. */
+export const AWAY_CHAIR_SWIVEL = 70 * (Math.PI / 180);
+export const AWAY_CHAIR_ROLLBACK = 0.18;
+/**
+ * A seated robot sits on the front of its chair: the chair is drawn this far behind the seat point
+ * so the backrest (0.25 + this, minus half its 0.07 depth) clears the 0.43-radius robot body.
+ */
+export const SEATED_CHAIR_BACK = 0.25;
+/** The manager sits this much farther back from the executive desk than managerHome() so the raised body clears the desktop. */
+export const MANAGER_DESK_CLEARANCE = 0.15;
+
 export function chair(k: Kit) {
   k.rbox("chair", [0, 0.47, 0], [0.5, 0.08, 0.48]);
   k.rbox("chair", [0, 0.82, -0.25], [0.46, 0.52, 0.07], { rx: -0.1 });
@@ -267,6 +280,8 @@ function corner(k: Kit, angleDeg: number, at = 4.55): Kit {
 export interface RoomOccupancy {
   /** seat -> screen/tint colour for an occupied seat. */
   seats: Map<number, string>;
+  /** Assigned seats whose owner is currently elsewhere (lounge, meeting, visiting, walking). */
+  away?: Set<number>;
 }
 
 function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
@@ -274,7 +289,10 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
     const l = seatLocal("pod", seat);
     const dz = l.z < 0 ? -0.36 : 0.36;
     desk(k.frame(l.x, dz, l.z < 0 ? Math.PI : 0), occ.seats.get(seat), seed + seat);
-    if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + (l.z < 0 ? -0.1 : 0.1), l.yaw));
+    const back = l.z < 0 ? -1 : 1;
+    if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + back * 0.1, l.yaw));
+    else if (occ.away?.has(seat)) chair(k.frame(l.x, l.z + back * (SEATED_CHAIR_BACK + AWAY_CHAIR_ROLLBACK), l.yaw + AWAY_CHAIR_SWIVEL));
+    else chair(k.frame(l.x, l.z + back * SEATED_CHAIR_BACK, l.yaw));
   }
   // Felt privacy screen along the spine of the cluster, with an aluminium cap.
   k.rbox("felt", [0, DESK_H + 0.2, 0], [3.8, 0.4, 0.05]);
@@ -289,7 +307,7 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
   credenza(corner(k, 60, 4.7), seed + 1);
 }
 
-function officeRoom(k: Kit, s: Space) {
+function officeRoom(k: Kit, s: Space, occ: RoomOccupancy = { seats: new Map() }) {
   const home = managerHome({ ...s, x: 0, z: 0 });
   // Rug, then the executive desk between the manager and the room.
   k.cyl("rugOffice", [0, 0.006, 0], 6.0, 0.012);
@@ -315,6 +333,14 @@ function officeRoom(k: Kit, s: Space) {
     const p = { x: front.x + side * toCam.z, z: front.z - side * toCam.x };
     chair(k.frame(p.x, p.z, yawToward(p, home)));
   }
+  // Manager desk chair (seat 0 = manager): under the seated manager, or swivelled and rolled back
+  // when they stepped out.
+  if (occ.seats.has(0)) {
+    const away = occ.away?.has(0) ?? false;
+    const d = MANAGER_DESK_CLEARANCE + SEATED_CHAIR_BACK + (away ? AWAY_CHAIR_ROLLBACK : 0);
+    const fx = Math.sin(home.yaw), fz = Math.cos(home.yaw);
+    chair(k.frame(home.x - fx * d, home.z - fz * d, home.yaw + (away ? AWAY_CHAIR_SWIVEL : 0)));
+  }
   bookshelf(corner(k, 180, 4.5), 3, 1.9);
   whiteboard(corner(k, WHITEBOARD_SLOT.pod.angleDeg, WHITEBOARD_SLOT.pod.at));
   credenza(corner(k, 300), 2);
@@ -332,11 +358,13 @@ function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
   k.cyl("pot", [0, 0.86, 0], 0.18, 0.18);
   k.add("ico", "leaf2", [0, 1.02, 0], [0.26, 0.24, 0.26]);
   for (let seat = 0; seat < s.seats; seat++) {
-    if (occ.seats.has(seat)) continue;
+    const taken = occ.seats.has(seat);
+    const away = taken && (occ.away?.has(seat) ?? false);
     const l = seatLocal("meeting", seat);
-    const back = Math.hypot(l.x, l.z) + 0.12;
+    const r = Math.hypot(l.x, l.z);
+    const back = !taken ? r + 0.12 : r + SEATED_CHAIR_BACK + (away ? AWAY_CHAIR_ROLLBACK : 0);
     const a = Math.atan2(l.z, l.x);
-    chair(k.frame(back * Math.cos(a), back * Math.sin(a), l.yaw));
+    chair(k.frame(back * Math.cos(a), back * Math.sin(a), l.yaw + (away ? AWAY_CHAIR_SWIVEL : 0)));
   }
   tvStand(corner(k, 240, 4.5));
   whiteboard(corner(k, WHITEBOARD_SLOT.meeting.angleDeg, WHITEBOARD_SLOT.meeting.at));
@@ -389,7 +417,7 @@ export function furnishSpace(kit: Kit, s: Space, occ: RoomOccupancy) {
   const k = kit.frame(s.x, s.z);
   const seed = Math.abs(s.q * 7 + s.r * 13);
   if (s.kind === "pod") podRoom(k, s, occ, seed);
-  else if (s.kind === "office") officeRoom(k, s);
+  else if (s.kind === "office") officeRoom(k, s, occ);
   else if (s.kind === "meeting") meetingRoom(k, s, occ);
   else loungeRoom(k, s, occ);
 }

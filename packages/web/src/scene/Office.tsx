@@ -6,7 +6,7 @@ import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, loungeSpot
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
 import { useLoungeBreaks, agentRevivePhase } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
-import { layoutFor, seatKey, type OfficeLayout } from "./layout";
+import { awaySeatSignature, layoutFor, seatKey, type OfficeLayout } from "./layout";
 import { Robot, type RobotTarget } from "./Robot";
 import { Beam } from "./Beam";
 import { Confetti } from "./Confetti";
@@ -21,7 +21,7 @@ import { keyToRoom } from "./roomKeys";
 
 import { MiniMap } from "./MiniMap";
 import { WalkMode } from "./WalkMode";
-import { Whiteboard } from "./Whiteboard";
+import { Whiteboard, whiteboardPose } from "./Whiteboard";
 import { AllDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
 import { LoungeScoreboard } from "./LoungeScoreboard";
@@ -235,15 +235,17 @@ function Floors({ spaces, palette, layout, managerName }: { spaces: Space[]; pal
 
 // ---------- furniture ----------
 
-function Furniture({ spaces, layout, agents, palette }: { spaces: Space[]; layout: OfficeLayout; agents: Record<string, Agent>; palette: Palette }) {
+function Furniture({ spaces, layout, agents, palette, away = "" }: { spaces: Space[]; layout: OfficeLayout; agents: Record<string, Agent>; palette: Palette; away?: string }) {
   const materials = useMaterials(palette);
   // Only rebuild when the floor plan or who-sits-where changes, not on every stats update.
   const signature = useMemo(() => {
     const occ = [...layout.occupied.entries()].map(([k, id]) => `${k}=${agents[id]?.appearance.color ?? ""}`).sort();
-    return `${spaces.map((s) => s.id).join(",")}|${occ.join(",")}`;
-  }, [spaces, layout, agents]);
+    const manager = Object.values(agents).find((a) => a.role === "manager");
+    return `${spaces.map((s) => s.id).join(",")}|${occ.join(",")}|m=${manager?.appearance.color ?? ""}|away=${away}`;
+  }, [spaces, layout, agents, away]);
   const items = useMemo(() => {
     const kit = new Kit();
+    const awayKeys = away ? away.split(",") : [];
     buildWalls(kit, spaces);
     const bg = new THREE.Color(palette.screenOff);
     for (const s of spaces) {
@@ -253,7 +255,13 @@ function Furniture({ spaces, layout, agents, palette }: { spaces: Space[]; layou
         const color = id ? agents[id]?.appearance.color : undefined;
         if (color) seats.set(seat, `#${new THREE.Color(color).lerp(bg, 0.25).getHexString()}`);
       }
-      furnishSpace(kit, s, { seats });
+      if (s.kind === "office") {
+        const manager = Object.values(agents).find((a) => a.role === "manager");
+        if (manager) seats.set(0, manager.appearance.color);
+      }
+      const awaySeats = new Set<number>();
+      for (const key of awayKeys) if (key.startsWith(`${s.id}#`)) awaySeats.add(Number(key.slice(s.id.length + 1)));
+      furnishSpace(kit, s, { seats, away: awaySeats });
     }
     // Screens without anyone at them are dark.
     for (const it of kit.items) if (it.mat === "screen" && !it.color) it.color = palette.screenOff;
@@ -717,6 +725,8 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
 
     return out;
   }, [layout, manager, visiting, spaces, loungeBreaks, lounge, list, gameAnimation, activeRpsMatch]);
+  // Owners who stepped away leave their chair swivelled (plain string so furniture only rebuilds on change).
+  const awaySeats = useMemo(() => awaySeatSignature(layout, targets), [layout, targets]);
 
   const youPose = useMemo(() => {
     const a = 45 * DEG;
@@ -828,7 +838,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       <Lights palette={palette} spaces={spaces} />
       <Ground palette={palette} />
       <Floors spaces={spaces} palette={palette} layout={layout} managerName={manager?.name} />
-      <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} />
+      <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} away={awaySeats} />
       {spaces.filter(s => s.kind !== "lounge").map(s => <Whiteboard key={s.id} space={s} onOpen={onBoard} />)}
       {spaces.filter(s => s.kind === "meeting").map(s => <MeetingTV key={`tv-${s.id}`} space={s} />)}
       <DropMarker spaces={spaces} />
@@ -922,6 +932,20 @@ export function Office({ onCreate }: { onCreate: () => void }) {
     (window as unknown as Record<string, unknown>).__setWalking = setWalking;
     return () => { delete (window as unknown as Record<string, unknown>).__setWalking; };
   }, [setWalking]);
+
+  // Read-only probes for Playwright screenshot specs (store, live robot positions, board poses).
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).__agenticviewTest = {
+      store: useStore,
+      agentPos: (id: string) => livePositions.get(id),
+      boardPose: (spaceId: string) => {
+        const state = useStore.getState();
+        const space = layoutFor(Object.values(state.agents), state.spaceNames).spaces.find((s) => s.id === spaceId);
+        return space ? whiteboardPose(space) : undefined;
+      },
+    };
+    return () => { delete (window as unknown as Record<string, unknown>).__agenticviewTest; };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
