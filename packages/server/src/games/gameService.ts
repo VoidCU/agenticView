@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { randomInt as cryptoRandomInt } from "node:crypto";
 import { z } from "zod";
-import { newId } from "@agenticview/shared";
+import { newId, loungeAssignmentFor, nearbyRpsPairs } from "@agenticview/shared";
 import { MoveSchema, MatchSchema } from "@agenticview/shared";
 import type { Move, Match, GamesData, GameRoundResult, PlayerStats } from "@agenticview/shared";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
@@ -64,7 +64,12 @@ export interface GameServiceDeps {
   randomInt?: (max: number) => number;
   /** Override for tests: returns auto-match delay ms (default 45000-120000). */
   randomDelay?: () => number;
+  /** Walk-and-play time between game.started and game.result (default MATCH_PLAY_MS). */
+  matchPlayMs?: number;
 }
+
+/** Time the scene gets to walk both players to the game spots and play. */
+export const MATCH_PLAY_MS = 6000;
 
 const MAX_RECENT = 50;
 const MIN_DELAY_MS = 45_000;
@@ -84,6 +89,8 @@ export class GameService {
   private readonly userMatches = new Map<string, UserMatchState>();
 
   private autoMatchTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Last lounge spot assignment, so spots stay stable like in the scene. */
+  private loungePrior: Record<string, string> = {};
   private stopped = false;
 
   constructor(private readonly deps: GameServiceDeps) {
@@ -244,18 +251,33 @@ export class GameService {
     if (this.stopped) return null;
     const lounging = await this.loungingAgents();
     if (lounging.length < 2) return null;
-    // Pick two distinct random indices.
-    const idxA = this.getRandomInt(lounging.length);
-    let idxB = this.getRandomInt(lounging.length - 1);
-    if (idxB >= idxA) idxB++;
-    const a = lounging[idxA]!;
-    const b = lounging[idxB]!;
+    // Only neighbours (spots within RPS_PAIR_MAX_DIST) may play each other.
+    const { layout, assignment } = loungeAssignmentFor(lounging.map((l) => l.id), this.loungePrior);
+    this.loungePrior = assignment;
+    const pairs = nearbyRpsPairs(assignment, layout.spots);
+    if (pairs.length === 0) return null;
+    const pair = pairs[this.getRandomInt(pairs.length)]!;
+    const a = { id: pair.a };
+    const b = { id: pair.b };
+    const matchId = newId("gm");
+    const game = layout.gameSpots[0]!;
+    const playMs = this.deps.matchPlayMs ?? MATCH_PLAY_MS;
+    this.deps.bus.emit({
+      type: "game.started",
+      matchId,
+      players: [a.id, b.id],
+      spotIds: [game[0].id, game[1].id],
+      seatSpotIds: [assignment[a.id]!, assignment[b.id]!],
+      playMs,
+    });
+    if (playMs > 0) await new Promise((r) => setTimeout(r, playMs));
+    if (this.stopped) return null;
     const moveA = this.randomMove();
     const moveB = this.randomMove();
     const res = rpsResult(moveA, moveB);
     const winner = res === "a" ? a.id : res === "b" ? b.id : null;
     const match: Match = {
-      id: newId("gm"),
+      id: matchId,
       at: new Date(this.getNow()).toISOString(),
       players: [a.id, b.id],
       moves: [moveA, moveB],

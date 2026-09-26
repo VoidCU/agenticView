@@ -37,22 +37,47 @@ export interface LoungeSpot {
 }
 
 export interface LoungeFurniturePiece {
+  /** Stable id, e.g. "sofa-0". */
+  id: string;
   kind: LoungeSpotKind;
   /** Centre of the furniture piece, relative to the lounge room centre. */
   x: number;
   z: number;
-  /** Yaw of the whole piece (which way it "faces"). */
+  /** Yaw of the whole piece: its front (local +z) faces this way (three.js convention). */
   yaw: number;
   /** Number of seats this piece provides. */
   seats: number;
+  /** Footprint width along the piece's local x axis (world units). */
+  w: number;
+  /** Footprint depth along the piece's local z axis (world units). */
+  d: number;
+}
+
+/** Standing spot used while two agents play rock-paper-scissors. */
+export interface LoungeGameSpot {
+  /** "game-<pair>-a" / "game-<pair>-b". */
+  id: string;
+  x: number;
+  z: number;
+  /** Faces the partner spot of the same pair. */
+  yaw: number;
 }
 
 export interface LoungeLayout {
   /** All spots, ordered: sofas → armchairs → counter → beanbags → standing → waiting. */
   spots: LoungeSpot[];
-  /** Furniture pieces Pixel uses to render meshes.  Positions match the spots above. */
+  /** Furniture pieces Pixel uses to render meshes and colliders (same footprints). */
   furniture: LoungeFurniturePiece[];
+  /** Facing pairs of standing spots across the coffee table: [a, b] per pair. */
+  gameSpots: [LoungeGameSpot, LoungeGameSpot][];
+  /** Coffee table radius (table at the room centre). */
+  tableR: number;
+  /** Doorway direction (radians, local) whose walkway to the centre is kept clear. */
+  doorAngle: number;
 }
+
+/** Max distance (world units) between two lounging agents' spots for an auto RPS match. */
+export const RPS_PAIR_MAX_DIST = 1.5;
 
 // ─── Internals ────────────────────────────────────────────────────────────────
 
@@ -95,8 +120,16 @@ function spot(
  */
 export function loungeSpots(capacityHint = 0, hexR = HEX_R): LoungeLayout {
   const s = hexR / 7; // scale factor (1.0 at default HEX_R=7)
+  const apothem = (hexR * Math.sqrt(3)) / 2;
   const spots: LoungeSpot[] = [];
   const furniture: LoungeFurniturePiece[] = [];
+  const D = Math.PI / 180;
+  const polar = (deg: number, r: number) => ({ x: r * Math.cos(deg * D), z: r * Math.sin(deg * D) });
+  /** Local (lx along the piece's width, lz toward its front) → room coords. */
+  const local = (p: { x: number; z: number }, yaw: number, lx: number, lz: number) => ({
+    x: p.x + lx * Math.cos(yaw) + lz * Math.sin(yaw),
+    z: p.z - lx * Math.sin(yaw) + lz * Math.cos(yaw),
+  });
 
   let sofaIdx = 0;
   let armIdx = 0;
@@ -104,80 +137,59 @@ export function loungeSpots(capacityHint = 0, hexR = HEX_R): LoungeLayout {
   let beanIdx = 0;
   let standIdx = 0;
 
-  // ── Sofas: two units of 3 seats each ──────────────────────────────────────
-  // Sofa A: behind the low table, occupants face +x (toward the room).
-  // Seats arranged along z at z = +2.0 s.
-  {
-    const sz = 2.0 * s;
-    const sxBase = -0.8 * s;
-    const seatSpacing = 0.9 * s;
-    const yaw = Math.PI / 2; // face +x
-    for (let c = 0; c < 3; c++) {
-      spots.push(spot(sofaIdx++, "sofa", sxBase + c * seatSpacing - seatSpacing, sz, yaw, "sit", 0.45 * s));
-    }
-    furniture.push({ kind: "sofa", x: sxBase, z: sz, yaw, seats: 3 });
-  }
-  // Sofa B: facing −x (back to wall), z = −2.0 s.
-  {
-    const sz = -2.0 * s;
-    const sxBase = -0.8 * s;
-    const seatSpacing = 0.9 * s;
-    const yaw = -Math.PI / 2; // face −x
-    for (let c = 0; c < 3; c++) {
-      spots.push(spot(sofaIdx++, "sofa", sxBase + c * seatSpacing - seatSpacing, sz, yaw, "sit", 0.45 * s));
-    }
-    furniture.push({ kind: "sofa", x: sxBase, z: sz, yaw, seats: 3 });
-  }
+  // The coffee table sits at the centre (radius tableR). Every wall midpoint
+  // (30° + k·60°) can hold a doorway, so all six walkways door→centre stay
+  // clear and furniture lives in the six corner sectors (0°, 60°, …, 300°):
+  //   180° sofa A · 300° sofa B · 240° two armchairs · 60° counter ·
+  //   0° / 120° beanbags (in front of the corner plants/lamp).
 
-  // ── Armchairs: two in opposite corners ────────────────────────────────────
-  {
-    const pairs: [number, number][] = [
-      [2.4 * s, 2.4 * s],
-      [2.4 * s, -2.4 * s],
-    ];
-    for (const [cx, cz] of pairs) {
-      const yaw = yawToward({ x: cx, z: cz }, { x: 0, z: 0 });
-      spots.push(spot(armIdx++, "armchair", cx, cz, yaw, "sit", 0.5 * s));
-      furniture.push({ kind: "armchair", x: cx, z: cz, yaw, seats: 1 });
+  // ── Sofas: 3-seaters in the 180° and 300° corners, facing the table ──────
+  for (const deg of [180, 300]) {
+    const c = polar(deg, 4.6 * s);
+    const yaw = yawToward(c, { x: 0, z: 0 });
+    furniture.push({ id: `sofa-${sofaIdx / 3}`, kind: "sofa", x: c.x, z: c.z, yaw, seats: 3, w: 2.6 * s, d: 0.9 * s });
+    for (const lx of [-0.85, 0, 0.85]) {
+      const p = local(c, yaw, lx * s, 0.1 * s);
+      spots.push(spot(sofaIdx++, "sofa", p.x, p.z, yaw, "sit", 0.45 * s));
     }
   }
 
-  // ── Coffee counter: 3 standing spots along a back wall at x = −3.5 s ──────
+  // ── Armchairs: a side-by-side pair in the 240° corner ─────────────────────
   {
-    const cx = -3.5 * s;
-    const zOffsets = [-0.7 * s, 0, 0.7 * s];
-    const yaw = Math.PI / 2; // face +x (toward room)
-    for (const cz of zOffsets) {
-      spots.push(spot(ctrIdx++, "counter", cx, cz, yaw, "stand", 0));
-    }
-    furniture.push({ kind: "counter", x: cx - 0.25 * s, z: 0, yaw: 0, seats: 3 });
-  }
-
-  // ── Beanbags / floor cushions: 2 near the centre ─────────────────────────
-  {
-    const pairs: [number, number][] = [
-      [0.8 * s, 0.8 * s],
-      [-0.4 * s, -1.0 * s],
-    ];
-    for (const [bx, bz] of pairs) {
-      const yaw = yawToward({ x: bx, z: bz }, { x: 0, z: 0 });
-      spots.push(spot(beanIdx++, "beanbag", bx, bz, yaw, "floor", 0.2 * s));
-      furniture.push({ kind: "beanbag", x: bx, z: bz, yaw, seats: 1 });
+    const c = polar(240, 4.5 * s);
+    const yaw = yawToward(c, { x: 0, z: 0 });
+    for (const lx of [-0.55, 0.55]) {
+      const a = local(c, yaw, lx * s, 0);
+      furniture.push({ id: `armchair-${armIdx}`, kind: "armchair", x: a.x, z: a.z, yaw, seats: 1, w: 1.0 * s, d: 0.9 * s });
+      const p = local(a, yaw, 0, 0.1 * s);
+      spots.push(spot(armIdx++, "armchair", p.x, p.z, yaw, "sit", 0.5 * s));
     }
   }
 
-  // ── Standing spots near window / scoreboard wall ─────────────────────────
-  // Placed near the +x wall which faces the main area.
+  // ── Coffee counter in the 60° corner; people stand in front facing it ────
   {
-    const triples: [number, number][] = [
-      [3.2 * s, 0],
-      [2.8 * s, 1.6 * s],
-      [2.8 * s, -1.6 * s],
-    ];
-    for (const [wx, wz] of triples) {
-      const yaw = yawToward({ x: wx, z: wz }, { x: 0, z: 0 });
-      spots.push(spot(standIdx++, "standing", wx, wz, yaw, "stand", 0));
+    const d = 0.7 * s;
+    const c = polar(60, 5.0 * s);
+    const yaw = yawToward(c, { x: 0, z: 0 }); // counter front faces the room
+    furniture.push({ id: "counter-0", kind: "counter", x: c.x, z: c.z, yaw, seats: 3, w: 2.4 * s, d });
+    for (const lx of [-0.75, 0, 0.75]) {
+      const p = local(c, yaw, lx * s, d / 2 + 0.45 * s);
+      spots.push(spot(ctrIdx++, "counter", p.x, p.z, yaw + Math.PI, "stand", 0));
     }
+  }
+
+  // ── Beanbags: 0° and 120° corners, in front of the decor ─────────────────
+  for (const deg of [0, 120]) {
+    const c = polar(deg, 4.0 * s);
+    const yaw = yawToward(c, { x: 0, z: 0 });
+    furniture.push({ id: `beanbag-${beanIdx}`, kind: "beanbag", x: c.x, z: c.z, yaw, seats: 1, w: 0.64 * s, d: 0.64 * s });
+    spots.push(spot(beanIdx++, "beanbag", c.x, c.z, yaw, "floor", 0.2 * s));
+  }
+
+  // ── Standing spots: open floor between the corners and the table ─────────
+  for (const deg of [0, 120, 240]) {
+    const p = polar(deg, 3.0 * s);
+    spots.push(spot(standIdx++, "standing", p.x, p.z, yawToward(p, { x: 0, z: 0 }), "stand", 0));
   }
 
   // Base count: 3+3+2+3+2+3 = 16
@@ -192,8 +204,7 @@ export function loungeSpots(capacityHint = 0, hexR = HEX_R): LoungeLayout {
     // Doorway local position (at the wall).
     const doorAngle = Math.PI / 6; // 30°
     const doorX = HEX_APOTHEM * Math.cos(doorAngle) * s;
-    const doorZ = HEX_APOTHEM * Math.sin(doorAngle) * s;
-    // Place waiting spots in a small arc just beyond the door.
+    const doorZ = HEX_APOTHEM * Math.sin(doorAngle) * s;    // Place waiting spots in a small arc just beyond the door.
     // Continue the standIdx so waiting spot IDs don't collide with the 3 regular standing spots.
     const outwardStep = 1.2 * s;
     for (let i = 0; i < needed; i++) {
@@ -207,7 +218,57 @@ export function loungeSpots(capacityHint = 0, hexR = HEX_R): LoungeLayout {
     }
   }
 
-  return { spots, furniture };
+  // ── Game spots: facing pairs across the coffee table, perpendicular to the walkway ──
+  const gameSpots: [LoungeGameSpot, LoungeGameSpot][] = [];
+  [[0, 180]].forEach(([da, db], i) => {
+    const a = polar(da!, 1.35 * s);
+    const b = polar(db!, 1.35 * s);
+    const f = rpsFacing(a, b);
+    gameSpots.push([
+      { id: `game-${i}-a`, x: a.x, z: a.z, yaw: f.yawA },
+      { id: `game-${i}-b`, x: b.x, z: b.z, yaw: f.yawB },
+    ]);
+  });
+
+  return { spots, furniture, gameSpots, tableR: 0.75 * s, doorAngle: 30 * D };
+}
+
+// ─── RPS pairing ──────────────────────────────────────────────────────────────
+
+/**
+ * Pairs of lounging agents whose assigned spots are within `maxDist` of each
+ * other (default RPS_PAIR_MAX_DIST). Waiting (overflow) spots never pair.
+ * Deterministic: sorted by distance, then agent ids. Each pair is [a, b] with a < b.
+ */
+export function nearbyRpsPairs(
+  assignment: Record<string, string>,
+  spots: LoungeSpot[],
+  maxDist = RPS_PAIR_MAX_DIST,
+): { a: string; b: string; dist: number }[] {
+  const byId = new Map(spots.map((sp) => [sp.id, sp]));
+  const ids = Object.keys(assignment).sort();
+  const out: { a: string; b: string; dist: number }[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const sa = byId.get(assignment[ids[i]!]!);
+    if (!sa || sa.waiting) continue;
+    for (let j = i + 1; j < ids.length; j++) {
+      const sb = byId.get(assignment[ids[j]!]!);
+      if (!sb || sb.waiting) continue;
+      const dist = Math.hypot(sa.x - sb.x, sa.z - sb.z);
+      if (dist <= maxDist) out.push({ a: ids[i]!, b: ids[j]!, dist });
+    }
+  }
+  out.sort((p, q) => p.dist - q.dist || p.a.localeCompare(q.a) || p.b.localeCompare(q.b));
+  return out;
+}
+
+/** The layout + assignment the scene uses for a set of lounging agents (same call as Office.tsx). */
+export function loungeAssignmentFor(
+  agentIds: string[],
+  prior: Record<string, string> = {},
+): { layout: LoungeLayout; assignment: Record<string, string> } {
+  const layout = loungeSpots(Math.max(16, agentIds.length + 2));
+  return { layout, assignment: assignLoungeSpots(agentIds, layout.spots, prior) };
 }
 
 // ─── Assignment ───────────────────────────────────────────────────────────────

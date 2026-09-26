@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Html, OrbitControls, useCursor } from "@react-three/drei";
+import { Html, OrbitControls, PerformanceMonitor, useCursor } from "@react-three/drei";
 import * as THREE from "three";
 import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, loungeSpots, assignLoungeSpots, rpsFacing, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
@@ -21,6 +21,7 @@ import { keyToRoom } from "./roomKeys";
 
 import { MiniMap } from "./MiniMap";
 import { WalkMode } from "./WalkMode";
+import { Whiteboard } from "./Whiteboard";
 import { AllDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
 import { LoungeScoreboard } from "./LoungeScoreboard";
@@ -262,38 +263,6 @@ function Furniture({ spaces, layout, agents, palette }: { spaces: Space[]; layou
   return <Batches items={items} materials={materials} />;
 }
 
-/** Matches the scaled corner transform used by kit.ts. */
-function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Space) => void }) {
-  const [hovered, setHovered] = useState(false);
-  useCursor(hovered);
-  const agents = useStore(s => s.agents);
-  const tasks = useStore(s => s.tasks);
-  const board = useMemo(() => podBoard(space.id, Object.values(agents), Object.values(tasks)), [space.id, agents, tasks]);
-  const active = (["queued", "running", "waiting", "failed"] as const).flatMap(status => board.columns[status].map(task => ({ task, status })));
-  const angle = (space.kind === "meeting" ? 180 : 240) * DEG;
-  const x = (4.4 * HEX_R / 6) * Math.cos(angle);
-  const z = (4.4 * HEX_R / 6) * Math.sin(angle);
-  const cols = Math.max(6, Math.ceil(Math.sqrt(active.length * 1.7)));
-  const rows = Math.max(3, Math.ceil(active.length / cols));
-  return <group position={[space.x + x, 0, space.z + z]} rotation={[0, yawToward({ x, z }, { x: 0, z: 0 }), 0]}>
-    <mesh position={[0, 1.12, 0.04]}
-      userData={{ boardSpaceId: space.id }}
-      onPointerOver={e => { e.stopPropagation(); setHovered(true); }} onPointerOut={() => setHovered(false)}
-      onClick={e => { e.stopPropagation(); if (e.delta <= 4) { setHovered(false); onOpen(space); } }}>
-      <boxGeometry args={[1.72, 1.02, 0.055]} />
-      <meshBasicMaterial color="#78baff" transparent opacity={hovered ? 0.24 : 0} depthWrite={false} />
-    </mesh>
-    {space.kind === "pod" && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + (i % cols + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, 0.076]} raycast={() => null}>
-      <planeGeometry args={[1.12 / cols, 0.57 / rows]} /><meshBasicMaterial color={BOARD_COLORS[status]} side={THREE.DoubleSide} />
-    </mesh>)}
-    <Html center position={[0, 1.9, 0]} distanceFactor={14} zIndexRange={[9, 0]}>
-      <button type="button" className={`board-open ${hovered ? "is-hover" : ""}`} aria-label={space.kind === "pod" ? `Open ${space.name} board` : `Open Manager board from ${space.name}`}
-        onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} onClick={() => { setHovered(false); onOpen(space); }}>
-        {space.kind === "pod" ? `Tasks · ${active.length}` : "Manager board"}
-      </button>
-    </Html>
-  </group>;
-}
 
 // ---------- lights and ground ----------
 
@@ -320,7 +289,7 @@ function Lights({ palette, spaces }: { palette: Palette; spaces: Space[] }) {
         position={[16, 30, 10]}
         intensity={palette.sunIntensity}
         color={palette.sun}
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.04}
       />
@@ -629,6 +598,7 @@ const FRESH_MS = 10_000;
 
 function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: Palette; onBoard: (space: Space) => void }) {
   const walking = useWalk((s) => s.walking);
+  const walkExitAt = useWalk((s) => s.exitAt);
   const agents = useStore((s) => s.agents);
   const tasks = useStore((s) => s.tasks);
   const beams = useStore((s) => s.beams);
@@ -637,6 +607,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const spaceNames = useStore((s) => s.spaceNames);
   const settings = useStore((s) => s.settings);
   const gameAnimation = useStore((s) => s.gameAnimation);
+  const activeRpsMatch = useStore((s) => s.activeRpsMatch);
   const list = useMemo(() => sortedAgents(agents), [agents]);
   const layout = useMemo(() => layoutFor(list, spaceNames), [list, spaceNames]);
   const { spaces } = layout;
@@ -709,7 +680,30 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       if (s && p) out[manager.id] = visitPose(s, p.seat);
     }
 
-    // RPS: make both players face each other during an active match (< 3 s old).
+    // RPS game.started: walk both players to the designated game spots and face each other.
+    // This overrides their lounge seat assignment while the match is active.
+    if (activeRpsMatch && lounge) {
+      const gameLayout = loungeSpots();
+      for (let i = 0; i < 2; i++) {
+        const playerId = activeRpsMatch.players[i]!;
+        const spotId = activeRpsMatch.spotIds[i]!;
+        // Search all game spot pairs for the matching id
+        for (const [gsa, gsb] of gameLayout.gameSpots) {
+          const gs = gsa.id === spotId ? gsa : gsb.id === spotId ? gsb : null;
+          if (gs) {
+            out[playerId] = {
+              x: lounge.x + gs.x,
+              z: lounge.z + gs.z,
+              yaw: gs.yaw,
+              yOffset: 0,
+            };
+            break;
+          }
+        }
+      }
+    }
+
+    // RPS game.result: after the match ends, make both players face each other for the badge (~3 s).
     if (gameAnimation && Date.now() - gameAnimation.at < 3000) {
       const [playerA, playerB] = gameAnimation.match.players;
       const posA = out[playerA];
@@ -722,7 +716,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
     }
 
     return out;
-  }, [layout, manager, visiting, spaces, loungeBreaks, lounge, list, gameAnimation]);
+  }, [layout, manager, visiting, spaces, loungeBreaks, lounge, list, gameAnimation, activeRpsMatch]);
 
   const youPose = useMemo(() => {
     const a = 45 * DEG;
@@ -864,7 +858,10 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
         );
       })}
 
-      {mirrorLatest && <Robot agent={YOU} target={youPose} spaces={spaces} bubbleOverride={mirrorLatest.text.slice(0, 90)} />}
+      {/* 'You': hidden while walking (the camera is you); on exit it remounts at the exit spot and walks home. */}
+      {!walking && (mirrorLatest || walkExitAt) && <Robot key={walkExitAt ? `you-${walkExitAt.at}` : "you"} agent={YOU} target={youPose} spaces={spaces}
+        spawnAt={walkExitAt && Date.now() - walkExitAt.at < 2000 ? walkExitAt : undefined}
+        bubbleOverride={mirrorLatest?.text.slice(0, 90)} />}
 
       {nextPose && <NewAgentPad at={nextPose} onCreate={onCreate} />}
 
@@ -911,6 +908,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
 
 export function Office({ onCreate }: { onCreate: () => void }) {
   const [boardSpace, setBoardSpace] = useState<Space>();
+  const [dpr, setDpr] = useState(1.5);
   const closeBoard = useCallback(() => setBoardSpace(undefined), []);
   const select = useStore((s) => s.select);
   const focus = useFocus((s) => s.focus);
@@ -956,7 +954,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="office" data-scene-theme={theme}>
       <Canvas
-        dpr={[1, 1.75]}
+        dpr={dpr}
         camera={{ position: [30, 36, 30], fov: 38, near: 0.5, far: 220 }}
         shadows
         gl={{ antialias: true, powerPreference: "high-performance" }}
@@ -965,6 +963,14 @@ export function Office({ onCreate }: { onCreate: () => void }) {
           useFocus.getState().setHover(undefined);
         }}
       >
+        {/* Adaptive resolution: render at 1.5x normally, step down toward 1x when the GPU can't keep
+            up and back up to 1.75x when it's coasting. Cheaper than any per-object tuning. */}
+        <PerformanceMonitor
+          onIncline={() => setDpr((d) => Math.min(1.75, d + 0.25))}
+          onDecline={() => setDpr((d) => Math.max(1, d - 0.25))}
+          flipflops={4}
+          onFallback={() => setDpr(1)}
+        />
         <Suspense fallback={null}>
           <Scene onCreate={onCreate} palette={palette} onBoard={setBoardSpace} />
         </Suspense>

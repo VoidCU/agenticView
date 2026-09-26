@@ -28,6 +28,11 @@ if (mode === "crash") {
 }
 if (mode === "hang") {
   process.stdout.write(JSON.stringify({ event: "init", conversation_id: "c-hang", init: {} }) + "\n");
+  // A tool step so the abort test can wait for an observable event before aborting (a bare init
+  // produces none, and under load the 300 ms abort could beat process startup).
+  process.stdout.write(
+    JSON.stringify({ event: "step_update", step_update: { conversation_id: "c-hang", step_index: 1, state: "ACTIVE", step_type: "tool", tool_name: "wait", tool_info: { name: "wait", parameters: {} } } }) + "\n",
+  );
   setInterval(() => undefined, 1000);
 } else {
   process.stdout.write(readFileSync(join(here, process.env.FAKE_AGY_FIXTURE ?? "agy-edit-run.ndjson"), "utf8"));

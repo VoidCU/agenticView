@@ -180,23 +180,23 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
       }
 
       case "lounge": {
-        // Coffee table at center (radius 0.75)
-        solids.push({ kind: "table", x: s.x, z: s.z, r: 0.75 });
+        // Coffee table at center — use tableR from layout to match rendering
+        const { furniture: loungeFurniture, tableR } = loungeSpots();
+        solids.push({ kind: "table", x: s.x, z: s.z, r: tableR });
 
-        // Use loungeSpots furniture for collision obstacles (matches kit.ts rendering exactly)
-        const { furniture: loungeFurniture } = loungeSpots();
+        // Use loungeSpots furniture for collision obstacles (matches kit.ts rendering exactly).
+        // fp.w and fp.d are the layout footprint dimensions at the current scale.
         for (const fp of loungeFurniture) {
           const wx = s.x + fp.x;
           const wz = s.z + fp.z;
           if (fp.kind === "sofa") {
-            const sofaW = fp.seats >= 3 ? 2.6 : 1.9;
-            solids.push({ kind: "sofa", x: wx, z: wz, w: sofaW, d: 0.86, rot: fp.yaw });
+            solids.push({ kind: "sofa", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
           } else if (fp.kind === "armchair") {
-            solids.push({ kind: "sofa", x: wx, z: wz, w: 0.95, d: 0.86, rot: fp.yaw });
+            solids.push({ kind: "sofa", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
           } else if (fp.kind === "counter") {
-            solids.push({ kind: "credenza", x: wx, z: wz, w: 1.94, d: 0.66, rot: fp.yaw });
+            solids.push({ kind: "credenza", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
           } else if (fp.kind === "beanbag") {
-            solids.push({ kind: "chair", x: wx, z: wz, w: 0.64, d: 0.64, rot: fp.yaw });
+            solids.push({ kind: "chair", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
           }
         }
 

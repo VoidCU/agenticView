@@ -33,21 +33,44 @@ export interface LoungeSpot {
     waiting?: boolean;
 }
 export interface LoungeFurniturePiece {
+    /** Stable id, e.g. "sofa-0". */
+    id: string;
     kind: LoungeSpotKind;
     /** Centre of the furniture piece, relative to the lounge room centre. */
     x: number;
     z: number;
-    /** Yaw of the whole piece (which way it "faces"). */
+    /** Yaw of the whole piece: its front (local +z) faces this way (three.js convention). */
     yaw: number;
     /** Number of seats this piece provides. */
     seats: number;
+    /** Footprint width along the piece's local x axis (world units). */
+    w: number;
+    /** Footprint depth along the piece's local z axis (world units). */
+    d: number;
+}
+/** Standing spot used while two agents play rock-paper-scissors. */
+export interface LoungeGameSpot {
+    /** "game-<pair>-a" / "game-<pair>-b". */
+    id: string;
+    x: number;
+    z: number;
+    /** Faces the partner spot of the same pair. */
+    yaw: number;
 }
 export interface LoungeLayout {
     /** All spots, ordered: sofas → armchairs → counter → beanbags → standing → waiting. */
     spots: LoungeSpot[];
-    /** Furniture pieces Pixel uses to render meshes.  Positions match the spots above. */
+    /** Furniture pieces Pixel uses to render meshes and colliders (same footprints). */
     furniture: LoungeFurniturePiece[];
+    /** Facing pairs of standing spots across the coffee table: [a, b] per pair. */
+    gameSpots: [LoungeGameSpot, LoungeGameSpot][];
+    /** Coffee table radius (table at the room centre). */
+    tableR: number;
+    /** Doorway direction (radians, local) whose walkway to the centre is kept clear. */
+    doorAngle: number;
 }
+/** Max distance (world units) between two lounging agents' spots for an auto RPS match. */
+export declare const RPS_PAIR_MAX_DIST = 1.5;
 /**
  * Generate a full lounge layout scaled to `hexR` (default `HEX_R`).
  *
@@ -59,6 +82,21 @@ export interface LoungeLayout {
  * the room's world (x, z) to get world coordinates.
  */
 export declare function loungeSpots(capacityHint?: number, hexR?: number): LoungeLayout;
+/**
+ * Pairs of lounging agents whose assigned spots are within `maxDist` of each
+ * other (default RPS_PAIR_MAX_DIST). Waiting (overflow) spots never pair.
+ * Deterministic: sorted by distance, then agent ids. Each pair is [a, b] with a < b.
+ */
+export declare function nearbyRpsPairs(assignment: Record<string, string>, spots: LoungeSpot[], maxDist?: number): {
+    a: string;
+    b: string;
+    dist: number;
+}[];
+/** The layout + assignment the scene uses for a set of lounging agents (same call as Office.tsx). */
+export declare function loungeAssignmentFor(agentIds: string[], prior?: Record<string, string>): {
+    layout: LoungeLayout;
+    assignment: Record<string, string>;
+};
 /**
  * Deterministically assign each agentId to a unique LoungeSpot.
  *

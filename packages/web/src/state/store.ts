@@ -60,6 +60,8 @@ export interface Store {
   games?: GamesData;
   /** Latest finished match for RPS animation overlay (~3 s display). */
   gameAnimation?: { match: Match; at: number };
+  /** Active agent auto-match: players walk to game spots for `playMs` ms, then return on game.result. */
+  activeRpsMatch?: { matchId: string; players: [string, string]; spotIds: [string, string]; seatSpotIds: [string, string]; playMs: number; at: number };
   /** Latest round result (user vs agent best-of-3). */
   lastGameRound?: GameRoundResult;
 
@@ -131,6 +133,7 @@ const initial = () => ({
   brainstorm: undefined as BrainstormState | undefined,
   games: undefined as GamesData | undefined,
   gameAnimation: undefined as { match: Match; at: number } | undefined,
+  activeRpsMatch: undefined as { matchId: string; players: [string, string]; spotIds: [string, string]; seatSpotIds: [string, string]; playMs: number; at: number } | undefined,
   lastGameRound: undefined as GameRoundResult | undefined,
 });
 
@@ -278,8 +281,14 @@ export const useStore = create<Store>()((set, get) => ({
           return {
             games: { leaderboard, recent: newRecent },
             gameAnimation: { match, at: now },
+            // Clear the active match when its result arrives
+            activeRpsMatch: s.activeRpsMatch?.matchId === match.id ? undefined : s.activeRpsMatch,
           };
         });
+        return;
+      }
+      case "game.started": {
+        set({ activeRpsMatch: { matchId: msg.matchId, players: msg.players, spotIds: msg.spotIds, seatSpotIds: msg.seatSpotIds, playMs: msg.playMs, at: now } });
         return;
       }
       case "game.round": {

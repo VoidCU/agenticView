@@ -202,7 +202,7 @@ export function ChatPanel({ collapsed = false, onCollapseChange }: { collapsed?:
     }
   };
 
-  if (collapsed) return <button type="button" className="panel-tab panel-tab-chat" aria-expanded="false" onClick={() => onCollapseChange?.(false)}>Chat <span aria-hidden="true">‹</span></button>;
+  if (collapsed) return <button type="button" className="panel-tab panel-tab-chat" aria-expanded="false" aria-label="Expand chat" onClick={() => onCollapseChange?.(false)}>Chat <span aria-hidden="true">‹</span></button>;
 
   if (!agent) {
     return (

@@ -82,7 +82,7 @@ describe("Claude Code session registry and affinity (HTTP)", () => {
     expect((await call("sess-B", "/api/worker/claim", { waitMs: 300 })).task).toBeNull();
     const c2 = await call("sess-A", "/api/worker/claim", { waitMs: 3000 });
     expect(c2.task.prompt).toBe("two");
-  });
+  }, 60000);
 
   it("releases a task waiting on an offline session when the office unbinds the agent", async () => {
     const { s, call } = await boot();

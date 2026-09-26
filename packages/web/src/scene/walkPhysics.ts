@@ -42,7 +42,8 @@ export function movePlayer(
 
 /**
  * Compute WASD/arrow-key movement direction given key state and yaw (radians).
- * yaw: camera facing direction (0 = +z, increasing CW around Y).
+ * yaw: camera Y rotation (0 = looking toward -z, π/2 = looking toward -x),
+ * so W always moves where the camera looks.
  * Returns the unscaled unit-direction vector (or zero).
  */
 export function walkDelta(
@@ -59,12 +60,13 @@ export function walkDelta(
   const len = Math.hypot(fwd, right);
   const nf = fwd / len;
   const nr = right / len;
-  // yaw=0 means facing +z, yaw=π/2 means facing +x
+  // Matches the three.js camera (Euler YXZ): yaw=0 looks down -z, yaw=π/2 looks down -x.
+  // forward = (-sin, -cos), right = (cos, -sin).
   const sin = Math.sin(yaw);
   const cos = Math.cos(yaw);
   return {
-    dx: nf * sin + nr * cos,
-    dz: nf * cos - nr * sin,
+    dx: -nf * sin + nr * cos,
+    dz: -nf * cos - nr * sin,
   };
 }
 

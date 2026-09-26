@@ -204,12 +204,25 @@ describe("AntigravityRuntime.run", () => {
 
   it("aborts a hanging run", async () => {
     const ac = new AbortController();
-    const p = rt(fakeSpawn("hang"), { platform: "linux" }).run(req(), () => {}, ac.signal);
-    setTimeout(() => ac.abort(), 300);
+    // Abort only after the run has demonstrably started (first event mapped), so the init line
+    // carrying the conversation id has been parsed even on a slow, loaded machine.
+    let sinkHook: (() => void) | undefined;
+    const started = new Promise<void>((r) => {
+      let done = false;
+      sinkHook = () => {
+        if (!done) {
+          done = true;
+          r();
+        }
+      };
+    });
+    const p = rt(fakeSpawn("hang"), { platform: "linux" }).run(req(), () => sinkHook?.(), ac.signal);
+    await started;
+    ac.abort();
     const res = await p;
     expect(res.stopReason).toBe("aborted");
     expect(res.sessionId).toBe("c-hang");
-  });
+  }, 20000);
 
   it("installs the bridge and deny hooks as a workspace plugin only for the run", async () => {
     const seen: Seen[] = [];
