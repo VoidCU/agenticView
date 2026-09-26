@@ -166,6 +166,34 @@ The *Claude Code session* provider uses sessions you start yourself; AgenticView
 - **Models.** A subagent runs on its own model setting, so the model picked for the agent in the office (opus, sonnet, haiku, fable) applies. An agent without a model inherits the session's model, which only you can switch with `/model` in that session; when a picked model cannot apply (no subagent), the office shows *Session X is on Y; run /model Z in that session to switch*.
 - **Managers on a session.** A Manager's `await_tasks` over a session returns about every 4 minutes with the tasks still running, and the session calls it again, so long waits are never cut off by a timeout. A Manager and its workers can share one session: the workers run in their own subagents next to the Manager's. Only when every slot of that session is held by the waiting Manager (capacity 1) do `assign_task` and `await_tasks` refuse with a message, since the worker could never start; raise the capacity, or open another session for that worker.
 
+## Rate-limit status line (Pro/Max plans)
+
+Claude Code's `statusLine` hook fires after every response and carries the current rate-limit counters — how many tokens and requests are left in the 5-hour and weekly windows — but only on Pro and Max plans, and only after the first response in a session. Plugins cannot install a `statusLine` command themselves (Claude Code writes the hook into `~/.claude/settings.json`, which is outside any project's plugin scope), so AgenticView ships an opt-in skill instead.
+
+Running `/agenticview-statusline` installs the relay: it sets `statusLine` in `~/.claude/settings.json` to invoke `bin/statusline.mjs`, which posts the counters to the office (so the office can show them) and then exits. If you already have a status-line command configured, the relay saves it as a backup and wraps it: the original command is stored in `~/.agenticview/statusline-backup.json` and passed to the relay via the `AGENTICVIEW_STATUSLINE_WRAP` environment variable (set through the settings `env` key, which is cross-platform and needs no shell prefix). The relay then runs it and forwards its output, so your existing status line keeps working unchanged.
+
+### Turning the relay on
+
+```
+/agenticview-statusline
+```
+
+The skill reads `~/.claude/settings.json`, shows you the before and after of the `statusLine` key, and asks for confirmation before writing. It never touches any other key.
+
+### Turning the relay off
+
+```
+/agenticview-statusline off
+```
+
+The skill restores the original `statusLine` value from the backup (or removes `statusLine` entirely if there was none before), shows the diff, and asks for confirmation.
+
+### Notes
+
+- Rate-limit data is only available on Claude Pro and Max plans. On other plans the hook fires but carries no counters; the office simply receives nothing.
+- The data arrives after the first response in each window, not before it. The office shows counters as soon as Claude Code delivers them.
+- The relay is a lightweight Node.js script with no extra dependencies. The office does not need the relay to function; turning it off has no other effect.
+
 ## Scopes and where data lives
 
 | | Project agents | Global agents |
