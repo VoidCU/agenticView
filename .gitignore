@@ -9,3 +9,4 @@ playwright-report/
 
 # AgenticView
 .claude/agents/agenticview-*.md
+.agents/plugins/agenticview-*
