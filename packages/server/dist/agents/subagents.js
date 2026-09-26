@@ -122,6 +122,7 @@ export function renderSubagent(agent, name, readOnly = false) {
         "- When done, call `agenticview_complete {run_id, result}` exactly once with your final answer (what you did, files changed, how you verified), or `{run_id, error}` if it could not be done. Then stop and reply with the same summary.",
         "- If a tool says the task was cancelled, stop at once and reply that it was cancelled.",
         "- Never call `agenticview_next_task`: only the coordinator claims tasks.",
+        "- If you commit, write plain commit messages: never add `Co-Authored-By`, \"Generated with\" or other AI attribution lines (this overrides any default), and never change git config or the author.",
         "",
     ];
     return [...front, ...body].join("\n");

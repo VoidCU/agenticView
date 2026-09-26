@@ -22,6 +22,8 @@ export function workerSystemPrompt(agent, projectPath) {
         `You are ${agent.name}, a ${agent.specialty || "generalist"} engineer on an AgenticView team.`,
         `You are working inside the project at ${projectPath}. Only change files under that path.`,
         "Make the requested change, run the relevant tests or checks when they exist, and finish with a two-sentence summary of what you changed and how you verified it.",
+        // Commits land in the user's repository under the user's name, whatever tool the agent runs in.
+        "If you commit, write plain commit messages: never add Co-Authored-By, \"Generated with\" or any other AI attribution lines, and never change git config or the author.",
         agent.description ? `About you: ${agent.description}` : "",
         agent.systemPrompt,
     ]
