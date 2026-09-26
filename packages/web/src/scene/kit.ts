@@ -116,8 +116,9 @@ function hashColor(list: string[], n: number): string {
 
 /** A desk whose front (+z) faces the person sitting at it. */
 export function desk(k: Kit, screen?: string, seed = 0) {
-  k.rbox("deskTop", [0, DESK_H - 0.025, 0], [1.24, 0.05, 0.66]);
-  for (const x of [-0.57, 0.57]) k.box("deskLeg", [x, (DESK_H - 0.05) / 2, 0], [0.05, DESK_H - 0.05, 0.58]);
+  // Width 1.18 gives a comfortable 0.02 gap to adjacent desks at 1.2-unit column spacing.
+  k.rbox("deskTop", [0, DESK_H - 0.025, 0], [1.18, 0.05, 0.66]);
+  for (const x of [-0.54, 0.54]) k.box("deskLeg", [x, (DESK_H - 0.05) / 2, 0], [0.05, DESK_H - 0.05, 0.58]);
   k.box("deskLeg", [0, 0.5, -0.22], [1.1, 0.16, 0.02]);
   // Monitor: bezel, glowing screen, neck, foot.
   k.box("bezel", [0, 1.06, -0.18], [0.66, 0.4, 0.03], { rx: -0.08 });
@@ -313,9 +314,10 @@ function officeRoom(k: Kit, s: Space) {
 }
 
 function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
-  k.cyl("walnut", [0, 0.74, 0], 3.4, 0.07);
-  k.cyl("deskLeg", [0, 0.37, 0], 0.4, 0.7);
-  k.cyl("deskLeg", [0, 0.02, 0], 1.4, 0.04);
+  // Table diameter 4.2 (radius 2.1) suits the 40% bigger rooms; seats are at radius 2.7.
+  k.cyl("walnut", [0, 0.74, 0], 4.2, 0.07);
+  k.cyl("deskLeg", [0, 0.37, 0], 0.48, 0.7);
+  k.cyl("deskLeg", [0, 0.02, 0], 1.6, 0.04);
   for (let i = 0; i < 3; i++) k.box("book", [Math.cos(i * 2.1) * 0.5, 0.79, Math.sin(i * 2.1) * 0.5], [0.22, 0.01, 0.3], { yaw: i, color: "#efe7da" });
   k.cyl("pot", [0, 0.86, 0], 0.18, 0.18);
   k.add("ico", "leaf2", [0, 1.02, 0], [0.26, 0.24, 0.26]);

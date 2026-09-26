@@ -104,7 +104,7 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
           const l = seatLocal("pod", seat);
           const dz = l.z < 0 ? -0.36 : 0.36;
           const deskRot = l.z < 0 ? Math.PI : 0;
-          solids.push({ kind: "desk", x: s.x + l.x, z: s.z + dz, w: 1.24, d: 0.66, rot: deskRot });
+          solids.push({ kind: "desk", x: s.x + l.x, z: s.z + dz, w: 1.18, d: 0.66, rot: deskRot });
           solids.push({ kind: "chair", x: s.x + l.x, z: s.z + l.z + (l.z < 0 ? -0.1 : 0.1), w: 0.5, d: 0.5, rot: l.yaw });
         }
         // Felt privacy screen partition
@@ -155,8 +155,8 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
       }
 
       case "meeting": {
-        // Walnut meeting table (radius 1.7)
-        solids.push({ kind: "table", x: s.x, z: s.z, r: 1.7 });
+        // Walnut meeting table (radius 2.1) — scaled up for bigger rooms
+        solids.push({ kind: "table", x: s.x, z: s.z, r: 2.1 });
         for (let seat = 0; seat < s.seats; seat++) {
           const l = seatLocal("meeting", seat);
           const back = Math.hypot(l.x, l.z) + 0.12;
