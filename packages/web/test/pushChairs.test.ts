@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSpaces } from "@agenticview/shared";
-import { ChairField, CHAIR_HD, circleVsChair, moveChairClamped, type ChairState } from "../src/scene/pushChairs";
+import { CHAIR_HOME_AFTER_MS, CHAIR_HOME_CHECK_MS, CHAIR_HOME_GLIDE_MS, CHAIR_MAX_SPIN, ChairField, CHAIR_HD, circleVsChair, homeGlidePose, isDisplaced, moveChairClamped, shouldGlideHome, type ChairState } from "../src/scene/pushChairs";
 import { PLAYER_RADIUS, buildColliders, type Solid } from "../src/scene/colliders";
 import { Kit, furnishSpace, type ChairInfo } from "../src/scene/kit";
 import { layoutFor } from "../src/scene/layout";
@@ -159,5 +159,100 @@ describe("fixed / pushable rules", () => {
     const clear = f.clearFn(statics, (x, z) => isWalkable(layout.spaces, x, z));
     expect(f.chairs.length).toBeGreaterThan(20);
     for (const c of f.chairs.filter((ch) => ch.pushable)) expect({ id: c.id, clear: clear(c, c.x, c.z) }).toEqual({ id: c.id, clear: true });
+  });
+});
+
+describe("pushed chairs glide home after a while", () => {
+  const SIX = 1000 / 60;
+  function pushed(f: ChairField, dx = 0.6, dz = 0.2, spin = 0.3, at = 0) {
+    const c = f.chairs[0]!;
+    c.x += dx;
+    c.z += dz;
+    c.spin = spin;
+    c.touchedAt = at;
+    return c;
+  }
+
+  it("the glide pose eases from where the chair was left to exactly its base pose", () => {
+    const out = { x: 0, z: 0, spin: 0 };
+    expect(homeGlidePose(1, 2, 0.4, 0, 0, 0, out)).toEqual({ x: 1, z: 2, spin: 0.4 });
+    expect(homeGlidePose(1, 2, 0.4, 0, 0, 1, out)).toEqual({ x: 0, z: 0, spin: 0 });
+    expect(homeGlidePose(1, 2, 0.4, 0, 0, 7, out)).toEqual({ x: 0, z: 0, spin: 0 });
+    const mid = homeGlidePose(1, 2, 0.4, 0, 0, 0.5, out);
+    expect(mid.x).toBeCloseTo(0.5, 6);
+    expect(mid.z).toBeCloseTo(1, 6);
+    // Smooth: no frame of a 1.5 s glide at 60 fps moves more than a few centimetres, and it never
+    // overshoots the base.
+    let prev = { x: 1, z: 2 };
+    for (let t = 0; t <= CHAIR_HOME_GLIDE_MS; t += SIX) {
+      const p = homeGlidePose(1, 2, 0.4, 0, 0, t / CHAIR_HOME_GLIDE_MS, out);
+      expect(Math.hypot(p.x - prev.x, p.z - prev.z)).toBeLessThan(0.08); // peak speed of the ease: 3x the mean
+      expect(p.x).toBeGreaterThanOrEqual(-1e-9);
+      prev = { x: p.x, z: p.z };
+    }
+    expect(CHAIR_HOME_GLIDE_MS).toBeGreaterThanOrEqual(1000);
+    expect(CHAIR_HOME_GLIDE_MS).toBeLessThanOrEqual(2000);
+  });
+
+  it("starts only after CHAIR_HOME_AFTER_MS untouched (5 minutes), checked about once a second", () => {
+    expect(CHAIR_HOME_AFTER_MS).toBe(5 * 60_000);
+    const f = field(info("c", true));
+    const c = pushed(f);
+    f.tick(CHAIR_HOME_AFTER_MS - 1);
+    expect(Number.isNaN(c.glideT0)).toBe(true);
+    // Eligible 1 ms later, but the next check is a second after the last one.
+    f.tick(CHAIR_HOME_AFTER_MS + 500);
+    expect(Number.isNaN(c.glideT0)).toBe(true);
+    f.tick(CHAIR_HOME_AFTER_MS - 1 + CHAIR_HOME_CHECK_MS);
+    expect(c.glideT0).toBe(CHAIR_HOME_AFTER_MS - 1 + CHAIR_HOME_CHECK_MS);
+    const t0 = c.glideT0;
+    f.tick(t0 + CHAIR_HOME_GLIDE_MS / 2);
+    expect(c.x).toBeGreaterThan(0);
+    expect(c.x).toBeLessThan(0.6);
+    f.tick(t0 + CHAIR_HOME_GLIDE_MS + 1);
+    expect([c.x, c.z, c.spin]).toEqual([c.baseX, c.baseZ, 0]);
+    expect(Number.isNaN(c.glideT0)).toBe(true);
+    expect(isDisplaced(c)).toBe(false);
+  });
+
+  it("a new push during the glide cancels it and restarts the timer", () => {
+    const f = field(info("c", true));
+    const c = pushed(f, 0, 0.6, 0);
+    f.tick(CHAIR_HOME_AFTER_MS);
+    const t0 = c.glideT0;
+    expect(Number.isNaN(t0)).toBe(false);
+    f.tick(t0 + 400);
+    // Walk into it from -z.
+    const pushAt = t0 + 420;
+    const p = { x: c.x, z: c.z - (CHAIR_HD + PLAYER_RADIUS - 0.05) };
+    f.interact(p, PLAYER_RADIUS, DT, everywhere, pushAt);
+    expect(Number.isNaN(c.glideT0)).toBe(true);
+    expect(c.touchedAt).toBe(pushAt);
+    // Let the shove's coast settle, then: no glide again until five minutes after the push.
+    for (let i = 0; i < 120; i++) f.interact({ x: 50, z: 50 }, PLAYER_RADIUS, DT, everywhere, pushAt + i);
+    f.tick(pushAt + CHAIR_HOME_AFTER_MS - 10);
+    expect(Number.isNaN(c.glideT0)).toBe(true);
+    f.tick(pushAt + CHAIR_HOME_AFTER_MS + CHAIR_HOME_CHECK_MS);
+    expect(Number.isNaN(c.glideT0)).toBe(false);
+  });
+
+  it("fixed chairs, chairs still coasting and chairs at home never glide", () => {
+    const f = field(info("fixed", false), info("coast", true, 3, 0), info("home", true, 6, 0));
+    const [fixed, coast, home] = f.chairs as [ChairState, ChairState, ChairState];
+    fixed.x += 0.5;
+    coast.x += 0.5;
+    coast.vx = 1;
+    expect(shouldGlideHome(fixed, 1e9)).toBe(false);
+    expect(shouldGlideHome(coast, 1e9)).toBe(false);
+    expect(shouldGlideHome(home, 1e9)).toBe(false);
+  });
+
+  it("an off-centre shove swivels the chair a little, within CHAIR_MAX_SPIN", () => {
+    const f = field(info("c", true));
+    const c = f.chairs[0]!;
+    // Hit the seat's side, off its centre line.
+    for (let i = 0; i < 40; i++) f.interact({ x: c.x + 0.2, z: c.z - (CHAIR_HD + PLAYER_RADIUS - 0.04) }, PLAYER_RADIUS, DT, everywhere, i);
+    expect(c.spin).not.toBe(0);
+    expect(Math.abs(c.spin)).toBeLessThanOrEqual(CHAIR_MAX_SPIN);
   });
 });

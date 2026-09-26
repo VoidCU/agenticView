@@ -84,6 +84,15 @@ export interface ChairState {
   pushable: boolean;
   first: number;
   count: number;
+  /** Swivel (yaw offset, radians) picked up from off-centre shoves; collisions and drawing use yaw + spin. */
+  spin: number;
+  /** Clock (ms) of the last shove; the glide home starts CHAIR_HOME_AFTER_MS after it. */
+  touchedAt: number;
+  /** Clock when the glide home started, NaN when not gliding; gx/gz/gspin: the pose it started from. */
+  glideT0: number;
+  gx: number;
+  gz: number;
+  gspin: number;
   /** Pose changed since the renderer last applied it. */
   dirty: boolean;
 }
@@ -115,6 +124,53 @@ export function moveChairClamped(chair: ChairState, dx: number, dz: number, clea
 
 const scratch: Vec2 = { x: 0, z: 0 };
 
+// ---- Gliding home: a pushed chair left alone returns to its desk ----
+
+/** A pushed chair untouched this long glides back to its canonical pose. */
+export const CHAIR_HOME_AFTER_MS = 5 * 60_000;
+/** Length of the glide home. */
+export const CHAIR_HOME_GLIDE_MS = 1500;
+/** How often idle chairs are checked for the glide home (not every frame). */
+export const CHAIR_HOME_CHECK_MS = 1000;
+/** Most a shove can turn a chair (radians either way). */
+export const CHAIR_MAX_SPIN = 0.5;
+
+/** Pose on the way home (reused scratch; no allocation). */
+export interface GlidePose { x: number; z: number; spin: number }
+
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
+/**
+ * Pose of a chair gliding home, `t` in [0, 1] of the glide: position eases in and out from where it was
+ * left to its base; the swivel settles back to square with a small damped wobble. Exactly the base
+ * pose at t = 1. Writes into `out` and returns it.
+ */
+export function homeGlidePose(fromX: number, fromZ: number, fromSpin: number, baseX: number, baseZ: number, t: number, out: GlidePose): GlidePose {
+  const k = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  const e = easeInOutCubic(k);
+  out.x = fromX + (baseX - fromX) * e;
+  out.z = fromZ + (baseZ - fromZ) * e;
+  out.spin = fromSpin * (1 - e) + 0.04 * Math.sin(k * Math.PI * 3) * (1 - k) * (1 - k);
+  if (k === 1) {
+    out.x = baseX;
+    out.z = baseZ;
+    out.spin = 0;
+  }
+  return out;
+}
+
+/** Is the chair away from its canonical pose? */
+export function isDisplaced(c: ChairState): boolean {
+  return Math.abs(c.x - c.baseX) > 1e-4 || Math.abs(c.z - c.baseZ) > 1e-4 || Math.abs(c.spin) > 1e-4;
+}
+
+/** Should this chair start gliding home now? (Pushable, displaced, at rest, and untouched long enough.) */
+export function shouldGlideHome(c: ChairState, now: number): boolean {
+  return c.pushable && Number.isNaN(c.glideT0) && c.vx === 0 && c.vz === 0 && isDisplaced(c) && now - c.touchedAt >= CHAIR_HOME_AFTER_MS;
+}
+
+const glide: GlidePose = { x: 0, z: 0, spin: 0 };
+
 /**
  * All chairs of the office. `sync` takes the chairs as drawn (after every furniture rebuild), `interact`
  * runs once per walk-mode frame. Offsets survive rebuilds while a chair stays pushable at the same base
@@ -134,14 +190,56 @@ export class ChairField {
       const keep = prev && prev.pushable && c.pushable && Math.abs(prev.baseX - c.x) < 1e-6 && Math.abs(prev.baseZ - c.z) < 1e-6 && Math.abs(prev.yaw - c.yaw) < 1e-6;
       const st: ChairState = keep
         ? { ...prev!, first: c.first, count: c.count, dirty: true }
-        : { id: c.id, baseX: c.x, baseZ: c.z, yaw: c.yaw, x: c.x, z: c.z, vx: 0, vz: 0, pushable: c.pushable, first: c.first, count: c.count, dirty: false };
+        : { id: c.id, baseX: c.x, baseZ: c.z, yaw: c.yaw, x: c.x, z: c.z, vx: 0, vz: 0, pushable: c.pushable, first: c.first, count: c.count, dirty: false, spin: 0, touchedAt: -Infinity, glideT0: NaN, gx: c.x, gz: c.z, gspin: 0 };
       next.push(st);
       nextById.set(c.id, st);
     }
     this.chairs = next;
+    this.gliding = next.reduce((n, c) => n + (Number.isNaN(c.glideT0) ? 0 : 1), 0);
     this.byId = nextById;
   }
 
+
+  private lastHomeCheck = -Infinity;
+  private gliding = 0;
+
+  /** Stop a chair's glide home (it stays where it is). */
+  private cancelGlide(c: ChairState): void {
+    if (Number.isNaN(c.glideT0)) return;
+    c.glideT0 = NaN;
+    this.gliding--;
+  }
+
+  /**
+   * Every frame, walking or not: about once a second look for pushed chairs left alone for
+   * CHAIR_HOME_AFTER_MS and start their glide home; advance chairs already gliding. Nearly free when
+   * nothing glides (one comparison). No allocations.
+   */
+  tick(now: number): void {
+    if (now - this.lastHomeCheck >= CHAIR_HOME_CHECK_MS) {
+      this.lastHomeCheck = now;
+      for (const c of this.chairs) {
+        if (!shouldGlideHome(c, now)) continue;
+        c.glideT0 = now;
+        c.gx = c.x;
+        c.gz = c.z;
+        c.gspin = c.spin;
+        this.gliding++;
+      }
+    }
+    if (this.gliding <= 0) return;
+    for (const c of this.chairs) {
+      if (Number.isNaN(c.glideT0)) continue;
+      const t = (now - c.glideT0) / CHAIR_HOME_GLIDE_MS;
+      homeGlidePose(c.gx, c.gz, c.gspin, c.baseX, c.baseZ, t, glide);
+      c.x = glide.x;
+      c.z = glide.z;
+      c.spin = glide.spin;
+      c.dirty = true;
+      if (t >= 1) this.cancelGlide(c);
+    }
+    this.lastMove = now;
+  }
   get(id: string): ChairState | undefined {
     return this.byId.get(id);
   }
@@ -188,20 +286,26 @@ export class ChairField {
       const dx = c.x - player.x;
       const dz = c.z - player.z;
       if (dx > PUSH_NEAR || dx < -PUSH_NEAR || dz > PUSH_NEAR || dz < -PUSH_NEAR) continue;
-      if (!circleVsChair(player.x, player.z, r, c.x, c.z, c.yaw, scratch)) continue;
+      if (!circleVsChair(player.x, player.z, r, c.x, c.z, c.yaw + c.spin, scratch)) continue;
       if (c.pushable) {
         // The chair takes the whole overlap (it moves opposite to the walker's push-out vector).
         const got = moveChairClamped(c, -scratch.x, -scratch.z, clear);
         if (got > 0) {
           c.dirty = true;
           moved = true;
+          // A fresh shove cancels any glide home and restarts the idle timer.
+          this.cancelGlide(c);
+          c.touchedAt = now;
+          // An off-centre shove swivels the chair a little (torque of the push about the seat centre).
+          const torque = (player.z - c.z) * -scratch.x - (player.x - c.x) * -scratch.z;
+          c.spin = Math.max(-CHAIR_MAX_SPIN, Math.min(CHAIR_MAX_SPIN, c.spin + torque * 2));
           if (dt > 0) {
             const k = Math.min(1, CHAIR_MAX_SPEED / (Math.hypot(scratch.x, scratch.z) / dt || 1));
             c.vx = (-scratch.x / dt) * k * 0.6;
             c.vz = (-scratch.z / dt) * k * 0.6;
           }
           // Whatever the chair could not absorb (blocked), the walker keeps.
-          if (!circleVsChair(player.x, player.z, r, c.x, c.z, c.yaw, scratch)) continue;
+          if (!circleVsChair(player.x, player.z, r, c.x, c.z, c.yaw + c.spin, scratch)) continue;
         }
       }
       // Ease the walker out (at most maxPush per frame): a chair gliding into a standing walker must
