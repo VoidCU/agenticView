@@ -10,3 +10,6 @@ playwright-report/
 # AgenticView
 .claude/agents/agenticview-*.md
 .agents/plugins/agenticview-*
+
+# E2E screenshots (generated, not committed)
+e2e/screenshots/

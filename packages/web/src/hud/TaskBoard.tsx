@@ -1,6 +1,6 @@
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { planOffice, type Task, type TaskStatus } from "@agenticview/shared";
-import { useStore } from "../state/store";
+import { useStore, useAgentStatus } from "../state/store";
 import { filterTasksByRoom, groupTasksByAgent, isTaskInProject } from "../state/taskGroups";
 import { RetryButton } from "./LimitChip";
 import { timeAgo } from "./ui";
@@ -109,6 +109,91 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
   );
 }
 
+// ── Agent group status helpers ────────────────────────────────────────────────
+
+type GroupStatus = "working" | "waiting" | "break" | "limited" | "error" | "idle";
+
+const GROUP_STATUS_LABEL: Record<GroupStatus, string> = {
+  working: "Working",
+  waiting: "Waiting on you",
+  break: "On a break",
+  limited: "Limited",
+  error: "Error",
+  idle: "Idle",
+};
+
+const GROUP_STATUS_COLOR: Record<GroupStatus, string> = {
+  working: "var(--thinking)",
+  waiting: "var(--waiting)",
+  break: "#ff8a65",
+  limited: "var(--error)",
+  error: "var(--error)",
+  idle: "var(--idle)",
+};
+
+function AgentGroupHeader({
+  agentId,
+  count,
+  collapsed,
+  onToggle,
+}: {
+  agentId: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const agent = useStore((s) => s.agents[agentId]);
+  const sessions = useStore((s) => s.sessions);
+  const spaceNames = useStore((s) => s.spaceNames);
+  const limits = useStore((s) => s.limits);
+  const agentStatusVal = useAgentStatus(agentId);
+
+  const session = agent ? sessions.find((s) => s.agentIds.includes(agentId)) : undefined;
+  const model = session?.model ?? null;
+  const spaceId = agent?.placement?.space;
+  const room = spaceId ? (spaceNames[spaceId]?.trim() || spaceId) : undefined;
+
+  const isLimited = limits.some((l) => l.agentId === agentId);
+  const isLounge = !!agent?.lounging;
+
+  let groupStatus: GroupStatus;
+  if (isLimited) groupStatus = "limited";
+  else if (agentStatusVal === "waiting") groupStatus = "waiting";
+  else if (agentStatusVal === "thinking" || agentStatusVal === "editing") groupStatus = "working";
+  else if (isLounge) groupStatus = "break";
+  else if (agentStatusVal === "error") groupStatus = "error";
+  else groupStatus = "idle";
+
+  const label = agent?.name ?? (agentId ? `Unknown agent (${agentId})` : "Unassigned");
+  const statusColor = GROUP_STATUS_COLOR[groupStatus];
+  const statusLabel = GROUP_STATUS_LABEL[groupStatus];
+
+  return (
+    <button
+      type="button"
+      className="task-agent-group-btn"
+      aria-expanded={!collapsed}
+      onClick={onToggle}
+      aria-label={`${label} — ${statusLabel}`}
+    >
+      <span
+        className="task-dot"
+        aria-hidden="true"
+        style={agent ? { background: agent.appearance.color } : undefined}
+      />
+      <span className="task-group-label">{label}</span>
+      <span className="panel-count">{count}</span>
+      <span className="task-group-status-dot" aria-hidden="true" style={{ background: statusColor }} />
+      <span className="task-group-status-word" style={{ color: statusColor }}>{statusLabel}</span>
+      {model && <span className="task-group-model" title={model}>{model.split("/").pop() ?? model}</span>}
+      {room && <span className="task-group-room">{room}</span>}
+      <span className="task-group-chevron" aria-hidden="true">{collapsed ? "▶" : "▼"}</span>
+    </button>
+  );
+}
+
+// ── TaskBoard export ──────────────────────────────────────────────────────────
+
 export function TaskBoard({
   onOpenInbox,
   externalCollapsed,
@@ -132,6 +217,30 @@ export function TaskBoard({
   };
   const bodyId = useId();
   const roomSelectId = useId();
+
+  // Per-group collapse state — persisted in localStorage
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try {
+      const v = localStorage.getItem("av:task-groups-collapsed");
+      return v ? new Set<string>(JSON.parse(v) as string[]) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("av:task-groups-collapsed", JSON.stringify([...collapsedGroups]));
+    } catch { /* ignore */ }
+  }, [collapsedGroups]);
+
+  const toggleGroup = (agentId: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId); else next.add(agentId);
+      return next;
+    });
+  };
 
   const agentList = useMemo(() => Object.values(agents), [agents]);
   const plan = useMemo(() => planOffice(agentList), [agentList]);
@@ -174,6 +283,9 @@ export function TaskBoard({
 
   const total = filteredTasks.length;
 
+  const collapseAll = () => setCollapsedGroups(new Set(agentGroups.map(([id]) => id)));
+  const expandAll = () => setCollapsedGroups(new Set());
+
   return (
     <aside className={`panel panel-tasks${collapsed ? " panel-tasks-collapsed" : ""}`} aria-label="Task board">
       <div className="panel-head">
@@ -215,28 +327,40 @@ export function TaskBoard({
         ) : filteredTasks.length === 0 ? (
           <p className="empty">No tasks in this room.</p>
         ) : (
-          agentGroups.map(([agentId, assigned]) => {
-            const agent = agents[agentId];
-            const label = agent?.name ?? (agentId ? `Unknown agent (${agentId})` : "Unassigned");
-            return (
-              <details key={agentId} className="task-agent-group" open>
-                <summary aria-label={`Agent: ${label}`}>
-                  <span
-                    className="task-dot"
-                    aria-hidden="true"
-                    style={agent ? { background: agent.appearance.color } : undefined}
+          <>
+            {agentGroups.length > 1 && (
+              <div className="task-groups-toolbar" role="toolbar" aria-label="Group controls">
+                <button type="button" className="btn btn-ghost btn-xs" onClick={collapseAll}>
+                  Collapse all
+                </button>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={expandAll}>
+                  Expand all
+                </button>
+              </div>
+            )}
+            {agentGroups.map(([agentId, assigned]) => {
+              const isGroupCollapsed = collapsedGroups.has(agentId);
+              return (
+                <div key={agentId} className="task-agent-group">
+                  <AgentGroupHeader
+                    agentId={agentId}
+                    count={assigned.length}
+                    collapsed={isGroupCollapsed}
+                    onToggle={() => toggleGroup(agentId)}
                   />
-                  <span className="task-group-label">{label}</span>
-                  <span className="panel-count">{assigned.length}</span>
-                </summary>
-                <ul className="task-list">
-                  {assigned.map((task) => (
-                    <TaskRow key={task.id} task={task} onOpenInbox={onOpenInbox} />
-                  ))}
-                </ul>
-              </details>
-            );
-          })
+                  {/* Always render for DOM consistency; hide via CSS when collapsed */}
+                  <ul
+                    className={`task-list${isGroupCollapsed ? " task-list--collapsed" : ""}`}
+                    aria-hidden={isGroupCollapsed || undefined}
+                  >
+                    {assigned.map((task) => (
+                      <TaskRow key={task.id} task={task} onOpenInbox={onOpenInbox} />
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </>
         )}
       </div>
     </aside>

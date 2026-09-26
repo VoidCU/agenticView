@@ -22,9 +22,11 @@ interface Props {
   onInbox?: () => void;
   onTimeline?: () => void;
   timelineActive?: boolean;
+  onWalk?: () => void;
+  walkActive?: boolean;
 }
 
-export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, timelineActive }: Props) {
+export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, timelineActive, onWalk, walkActive }: Props) {
   const sessions = useStore((s) => s.sessions);
   const online = sessions.filter((s) => s.online).length;
   const world = useStore((s) => s.world);
@@ -79,6 +81,19 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, 
             {pendingCount}
           </span>
         </button>
+        {onWalk && (
+          <button
+            type="button"
+            className={`btn btn-ghost btn-sm${walkActive ? " btn-ghost-active" : ""}`}
+            onClick={onWalk}
+            title={walkActive ? "Exit walk mode (Esc)" : "Walk mode (V)"}
+            aria-label={walkActive ? "Exit walk mode" : "Walk mode"}
+            aria-pressed={walkActive}
+            data-testid="walk-button"
+          >
+            Walk
+          </button>
+        )}
         {onTimeline && (
           <button
             type="button"

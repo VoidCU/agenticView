@@ -6,10 +6,22 @@ import { groupTasksByBoard } from "../src/state/taskGroups";
 import { useStore } from "../src/state/store";
 import { manager, worker, worker2, task, snapshot } from "./fixtures";
 
-beforeEach(() => useStore.getState().reset());
+beforeEach(() => {
+  useStore.getState().reset();
+  // Clear persisted group-collapse state so each test starts fresh
+  try { localStorage.removeItem("av:task-groups-collapsed"); } catch { /* ignore */ }
+});
 
 function agentGroup(name: string) {
-  return screen.getByLabelText(`Agent: ${name}`).closest("details")!;
+  // find the group label span and return the containing .task-agent-group div
+  const labelEl = screen.getByText(name, { selector: ".task-group-label" });
+  return labelEl.closest<HTMLElement>(".task-agent-group")!;
+}
+
+/** Check if the agent group is in its collapsed state (button aria-expanded=false). */
+function isGroupCollapsed(groupEl: HTMLElement): boolean {
+  const btn = groupEl.querySelector(".task-agent-group-btn");
+  return btn?.getAttribute("aria-expanded") === "false";
 }
 
 describe("TaskBoard", () => {
@@ -135,19 +147,23 @@ describe("TaskBoard", () => {
     useStore.getState().apply(snapshot([worker], [task({ id: "one", title: "First" })]));
     render(<TaskBoard />);
     const group = agentGroup("Pixel");
-    await userEvent.click(within(group).getByText("Pixel"));
-    expect(group).not.toHaveAttribute("open");
+    // Click the group header button to collapse it
+    await userEvent.click(within(group).getByRole("button", { name: /Pixel/i }));
+    expect(isGroupCollapsed(group)).toBe(true);
 
     act(() =>
       useStore.getState().apply({ type: "task.updated", task: task({ id: "one", title: "First", status: "done" }) }),
     );
-    expect(group).not.toHaveAttribute("open");
+    // Still collapsed after update
+    expect(isGroupCollapsed(group)).toBe(true);
+    // Task is still in DOM (always-rendered, hidden via CSS)
     expect(within(group).getByText("Done")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Collapse tasks" }));
     expect(screen.getByRole("button", { name: "Expand tasks" })).toHaveAttribute("aria-expanded", "false");
     await userEvent.click(screen.getByRole("button", { name: "Expand tasks" }));
-    expect(group).not.toHaveAttribute("open");
+    // Group is still collapsed after panel expand/collapse
+    expect(isGroupCollapsed(group)).toBe(true);
   });
 
   it("selects agents by keyboard and cancels without changing selection", async () => {
