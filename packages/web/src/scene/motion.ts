@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /** Live robot positions, written every frame by each robot; read by beams, confetti and the drag logic. */
-export const livePositions = new Map<string, { x: number; z: number }>();
+export const livePositions = new Map<string, { x: number; z: number; walking?: boolean; waiting?: boolean }>();
 
 export function livePos(id: string, fallback?: { x: number; z: number }): { x: number; z: number } | undefined {
   return livePositions.get(id) ?? fallback;

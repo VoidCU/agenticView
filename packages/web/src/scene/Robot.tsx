@@ -260,7 +260,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           : target.yaw;
       st.yaw += angleDiff(desired, st.yaw) * Math.min(1, dt * TURN_RATE);
     }
-    livePositions.set(agent.id, { x: st.x, z: st.z });
+    livePositions.set(agent.id, { x: st.x, z: st.z, walking: st.path.length > 0, waiting: status === "waiting" });
     g.position.set(st.x, st.lift + (target.yOffset ?? 0), st.z);
 
     // Walk cycle: feet step, arms swing, the body bobs and leans into the stride.

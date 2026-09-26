@@ -14,11 +14,12 @@
 import { useRef, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { type Space } from "@agenticview/shared";
+import { spaceAt, type Space } from "@agenticview/shared";
 import { useWalk } from "../state/walk";
 import { useStore } from "../state/store";
 import { movePlayer, walkDelta, clampPitch, applyVelocity } from "./walkPhysics";
 import { type Solid } from "./colliders";
+import { usePositions } from "../state/positions";
 
 // ---- Constants ----
 
@@ -84,6 +85,9 @@ export function WalkModeController({
   });
 
   const keys = useRef(new Set<string>());
+  const lastPlayerPosition = useRef<{ x: number; z: number; yaw: number; spaceId: string } | null>(null);
+
+  useEffect(() => () => usePositions.getState().setPlayer(undefined), []);
 
   // ---- Pointer lock setup ----
 
@@ -189,6 +193,15 @@ export function WalkModeController({
 
     // Apply camera.
     camera.position.set(cur.x + bobX, EYE_HEIGHT + bobY, cur.z);
+
+    const currentSpace = spaceAt(spaces, cur.x, cur.z);
+    if (currentSpace) {
+      const prev = lastPlayerPosition.current;
+      if (!prev || prev.spaceId !== currentSpace.id || Math.hypot(cur.x - prev.x, cur.z - prev.z) >= 0.12 || Math.abs(cur.yaw - prev.yaw) >= 0.045) {
+        lastPlayerPosition.current = { x: cur.x, z: cur.z, yaw: cur.yaw, spaceId: currentSpace.id };
+        usePositions.getState().setPlayer({ x: cur.x, z: cur.z, yaw: cur.yaw, spaceId: currentSpace.id });
+      }
+    }
 
     // Build rotation from yaw + pitch.
     const euler = new THREE.Euler(cur.pitch, cur.yaw, 0, "YXZ");
