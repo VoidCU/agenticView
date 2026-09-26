@@ -18,6 +18,12 @@ import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { classifyError, isLimitActive, parseResetAt } from "../runtimes/errors.js";
 import { z } from "zod";
 
+/** Rate-limit window as posted by a Claude Code session worker. */
+export interface ClaudeRateLimitWindow {
+  used_percentage: number;
+  resets_at?: number;
+}
+
 export interface RunUsageRecord {
   runId: string;
   taskId: string;
@@ -63,6 +69,17 @@ const PersistedUsageSchema = z.object({
       resetAt: z.string().optional(),
     }),
   ).default({}),
+  /** Keyed by "${sessionId}:${model}"; stores the latest limits posted by a Claude Code session. */
+  claudeSessionLimits: z.record(
+    z.string(),
+    z.object({
+      provider: z.string() as z.ZodType<Provider>,
+      model: z.string(),
+      fiveHour: z.any() as z.ZodType<WindowLimit>,
+      weekly: z.any() as z.ZodType<WindowLimit>,
+      updatedAt: z.string(),
+    }),
+  ).default({}),
 });
 
 type PersistedUsage = z.infer<typeof PersistedUsageSchema>;
@@ -73,6 +90,8 @@ export class UsageTracker {
   private runs: RunUsageRecord[] = [];
   private rateLimits = new Map<string, ProviderModelLimits>();
   private providerLimits = new Map<Provider, LimitInfo>();
+  /** Keyed by "${sessionId}:${model}"; latest rate limits posted by a Claude Code session. */
+  private claudeSessionLimits = new Map<string, ProviderModelLimits>();
   private saveChain = Promise.resolve();
 
   constructor(
@@ -89,6 +108,7 @@ export class UsageTracker {
         runs: [],
         rateLimits: {},
         providerLimits: {},
+        claudeSessionLimits: {},
       });
       const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
       this.runs = data.runs.filter((r) => new Date(r.timestamp).getTime() >= cutoff);
@@ -100,10 +120,14 @@ export class UsageTracker {
           this.providerLimits.set(p as Provider, lim);
         }
       }
+      for (const [k, v] of Object.entries(data.claudeSessionLimits)) {
+        this.claudeSessionLimits.set(k, v);
+      }
     } catch {
       this.runs = [];
       this.rateLimits.clear();
       this.providerLimits.clear();
+      this.claudeSessionLimits.clear();
     }
   }
 
@@ -112,6 +136,7 @@ export class UsageTracker {
       runs: this.runs,
       rateLimits: Object.fromEntries(this.rateLimits.entries()),
       providerLimits: Object.fromEntries(this.providerLimits.entries()),
+      claudeSessionLimits: Object.fromEntries(this.claudeSessionLimits.entries()),
     };
     const next = this.saveChain.then(() => writeJsonFile(this.file, data)).catch(() => undefined);
     this.saveChain = next;
@@ -186,6 +211,88 @@ export class UsageTracker {
     return limits;
   }
 
+  /**
+   * Store rate limits posted by a Claude Code session worker via POST /api/claude-limits.
+   * Returns the built ProviderModelLimits entry.
+   */
+  recordClaudeLimits(
+    sessionId: string,
+    model: string,
+    rateLimits: { five_hour?: ClaudeRateLimitWindow; seven_day?: ClaudeRateLimitWindow },
+  ): ProviderModelLimits {
+    const now = new Date().toISOString();
+
+    const parseWindow = (w: ClaudeRateLimitWindow | undefined): WindowLimit => {
+      if (!w) return { status: "not reported" };
+      const usedPercent = Math.max(0, Math.min(100, Math.round(w.used_percentage)));
+      const percentLeft = Math.max(0, 100 - usedPercent);
+      let resetAt: string | undefined;
+      if (typeof w.resets_at === "number" && w.resets_at > 0) {
+        const ms = w.resets_at > 1e11 ? w.resets_at : w.resets_at * 1000;
+        resetAt = new Date(ms).toISOString();
+      }
+      const warning = usedPercent >= 80;
+      return { status: "reported", usedPercent, percentLeft, resetAt, ...(warning ? { warning } : {}) };
+    };
+
+    const fiveHour = parseWindow(rateLimits.five_hour);
+    const weekly = parseWindow(rateLimits.seven_day);
+
+    const limits: ProviderModelLimits = {
+      provider: "claude-session",
+      model,
+      fiveHour,
+      weekly,
+      updatedAt: now,
+    };
+
+    const key = `${sessionId}:${model}`;
+    this.claudeSessionLimits.set(key, limits);
+
+    // Mark provider as limited when a window is fully consumed.
+    if (
+      (fiveHour.status === "reported" && fiveHour.percentLeft <= 0) ||
+      (weekly.status === "reported" && weekly.percentLeft <= 0)
+    ) {
+      const resetAt =
+        (fiveHour.status === "reported" ? fiveHour.resetAt : undefined) ??
+        (weekly.status === "reported" ? weekly.resetAt : undefined);
+      this.providerLimits.set("claude-session", {
+        limited: true,
+        errorType: "rate-limit",
+        reason: `Rate limit reached for claude-session/${model}`,
+        resetAt,
+      });
+    }
+
+    void this.persist();
+    return limits;
+  }
+
+  /** All model limits reported by a specific Claude Code session, keyed by model string. */
+  getSessionModelLimits(sessionId: string): Record<string, ProviderModelLimits> {
+    const result: Record<string, ProviderModelLimits> = {};
+    const prefix = `${sessionId}:`;
+    for (const [key, limits] of this.claudeSessionLimits.entries()) {
+      if (key.startsWith(prefix)) {
+        result[limits.model] = limits;
+      }
+    }
+    return result;
+  }
+
+  /** Aggregate claude-session limits across all sessions: most recently updated entry per model. */
+  private getClaudeSessionAggregateModels(): Record<string, ProviderModelLimits> {
+    const byModel = new Map<string, ProviderModelLimits>();
+    for (const limits of this.claudeSessionLimits.values()) {
+      const existing = byModel.get(limits.model);
+      if (!existing || limits.updatedAt > existing.updatedAt) {
+        byModel.set(limits.model, limits);
+      }
+    }
+    return Object.fromEntries(byModel.entries());
+  }
+
   recordFailure(agent: Agent, provider: Provider, model: string, errorText: string): LimitInfo {
     const errorType: ErrorClassification = classifyError(errorText);
     const resetAt = parseResetAt(errorText);
@@ -236,9 +343,18 @@ export class UsageTracker {
       const limit = this.getProviderLimit(p);
       const models: Record<string, ProviderModelLimits> = {};
 
-      for (const [key, modelLimit] of this.rateLimits.entries()) {
+      for (const [, modelLimit] of this.rateLimits.entries()) {
         if (modelLimit.provider === p) {
           models[modelLimit.model] = modelLimit;
+        }
+      }
+
+      // For claude-session, also merge in limits reported directly by session workers.
+      if (p === "claude-session") {
+        for (const [model, limEntry] of Object.entries(this.getClaudeSessionAggregateModels())) {
+          if (!models[model] || limEntry.updatedAt > models[model]!.updatedAt) {
+            models[model] = limEntry;
+          }
         }
       }
 

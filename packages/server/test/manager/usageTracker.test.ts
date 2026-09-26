@@ -194,4 +194,85 @@ describe("UsageTracker", () => {
       expect(report.agents["w_p"]!.last7Days.runs).toBe(1);
     });
   });
+
+  describe("recordClaudeLimits / getSessionModelLimits", () => {
+    it("stores and retrieves limits for a session+model pair", () => {
+      const limits = tracker.recordClaudeLimits("sess1", "claude-sonnet-4-6", {
+        five_hour: { used_percentage: 60, resets_at: 1758873600 },
+        seven_day: { used_percentage: 20 },
+      });
+      expect(limits.provider).toBe("claude-session");
+      expect(limits.model).toBe("claude-sonnet-4-6");
+      expect(limits.fiveHour.status).toBe("reported");
+      if (limits.fiveHour.status === "reported") {
+        expect(limits.fiveHour.usedPercent).toBe(60);
+        expect(limits.fiveHour.percentLeft).toBe(40);
+        expect(limits.fiveHour.resetAt).toBeDefined();
+        expect(limits.fiveHour.warning).toBeUndefined();
+      }
+      if (limits.weekly.status === "reported") {
+        expect(limits.weekly.usedPercent).toBe(20);
+        expect(limits.weekly.percentLeft).toBe(80);
+      }
+
+      const sessLimits = tracker.getSessionModelLimits("sess1");
+      expect(sessLimits["claude-sonnet-4-6"]).toBeDefined();
+      expect(sessLimits["claude-sonnet-4-6"]!.fiveHour.status).toBe("reported");
+    });
+
+    it("sets warning=true at >=80% used", () => {
+      const limits = tracker.recordClaudeLimits("sess2", "claude-opus-5", {
+        five_hour: { used_percentage: 85 },
+      });
+      expect(limits.fiveHour.status).toBe("reported");
+      if (limits.fiveHour.status === "reported") {
+        expect(limits.fiveHour.warning).toBe(true);
+      }
+      if (limits.weekly.status === "reported") {
+        expect(limits.weekly.warning).toBeUndefined();
+      }
+    });
+
+    it("marks provider limited when 100% used", () => {
+      tracker.recordClaudeLimits("sess3", "claude-haiku", {
+        five_hour: { used_percentage: 100 },
+      });
+      const providerLim = tracker.getProviderLimit("claude-session");
+      expect(providerLim.limited).toBe(true);
+      expect(providerLim.errorType).toBe("rate-limit");
+    });
+
+    it("returns not reported for missing windows", () => {
+      const limits = tracker.recordClaudeLimits("sess4", "claude-sonnet", {});
+      expect(limits.fiveHour.status).toBe("not reported");
+      expect(limits.weekly.status).toBe("not reported");
+    });
+
+    it("getSessionModelLimits returns empty for unknown session", () => {
+      expect(tracker.getSessionModelLimits("sess_unknown")).toEqual({});
+    });
+
+    it("getLimitsReport includes claude-session model limits from sessions", () => {
+      tracker.recordClaudeLimits("sess5", "claude-sonnet-4-6", {
+        five_hour: { used_percentage: 50 },
+      });
+      const report = tracker.getLimitsReport();
+      expect(report.providers["claude-session"]).toBeDefined();
+      expect(report.providers["claude-session"]!.models["claude-sonnet-4-6"]).toBeDefined();
+      const m = report.providers["claude-session"]!.models["claude-sonnet-4-6"]!;
+      expect(m.fiveHour.status).toBe("reported");
+    });
+
+    it("persists and restores claudeSessionLimits across init() calls", async () => {
+      tracker.recordClaudeLimits("sessP", "claude-sonnet", { five_hour: { used_percentage: 70 } });
+      await new Promise((r) => setTimeout(r, 30));
+      const tracker2 = new UsageTracker(dir);
+      await tracker2.init();
+      const sessLimits = tracker2.getSessionModelLimits("sessP");
+      expect(sessLimits["claude-sonnet"]).toBeDefined();
+      if (sessLimits["claude-sonnet"]!.fiveHour.status === "reported") {
+        expect(sessLimits["claude-sonnet"]!.fiveHour.usedPercent).toBe(70);
+      }
+    });
+  });
 });

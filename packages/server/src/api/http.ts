@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { mkdir, writeFile, stat, readFile } from "node:fs/promises";
 import { extname, join, normalize, resolve, sep } from "node:path";
-import { newId, ProviderSchema, SwitchAgentPayloadSchema, SwitchProviderPayloadSchema } from "@agenticview/shared";
+import { newId, ClaudeLimitsBodySchema, ProviderSchema, SwitchAgentPayloadSchema, SwitchProviderPayloadSchema } from "@agenticview/shared";
 import type { World } from "../world.js";
 import { mirrorRoutes } from "../hooks/mirror.js";
 
@@ -16,6 +16,39 @@ export function apiRoutes(world: World): Hono {
   app.get("/api/limits", async (c) => c.json(await world.getLimits()));
 
   app.get("/api/usage", async (c) => c.json(await world.getUsage()));
+
+  app.post("/api/claude-limits", async (c) => {
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return c.json({ error: "JSON body expected" }, 400);
+    }
+    const parsed = ClaudeLimitsBodySchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: `Invalid body: ${parsed.error.issues.map((i) => i.message).join(", ")}` }, 400);
+    }
+    const { session_id, model, cwd: _cwd, rate_limits } = parsed.data;
+    // Silently ignore bodies without rate_limits.
+    if (!rate_limits) return c.body(null, 204);
+
+    // Normalise the model field: string or {id?, display_name?} -> string.
+    let modelStr = "unknown";
+    if (typeof model === "string" && model.trim()) {
+      modelStr = model.trim().slice(0, 120);
+    } else if (model && typeof model === "object") {
+      const m = (model.id ?? model.display_name ?? "").trim();
+      if (m) modelStr = m.slice(0, 120);
+    }
+
+    world.usageTracker.recordClaudeLimits(session_id, modelStr, rate_limits);
+
+    // Broadcast updated sessions so the Sessions panel reflects the new limits.
+    const sessions = await world.sessions();
+    world.bus.emit({ type: "sessions.updated", sessions });
+
+    return c.body(null, 204);
+  });
 
   app.post("/api/agents/:id/switch", async (c) => {
     const id = c.req.param("id");

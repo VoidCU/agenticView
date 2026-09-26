@@ -118,10 +118,14 @@ export async function createWorld(ref, opts) {
         if (!sessionRuntime)
             return [];
         const agents = await registry.list();
-        return sessionRuntime.sessionList().map(({ currentRunId: _r, currentAgentId: _a, ...s }) => ({
-            ...s,
-            agentIds: agents.filter((a) => a.session?.id === s.id).map((a) => a.id),
-        }));
+        return sessionRuntime.sessionList().map(({ currentRunId: _r, currentAgentId: _a, ...s }) => {
+            const claudeLimits = usageTracker.getSessionModelLimits(s.id);
+            return {
+                ...s,
+                agentIds: agents.filter((a) => a.session?.id === s.id).map((a) => a.id),
+                ...(Object.keys(claudeLimits).length > 0 ? { claudeLimits } : {}),
+            };
+        });
     };
     // Subagent files (.claude/agents/agenticview-<slug>.md) for the claude-session agents: the session
     // launches each task in its agent's subagent. Writes are chained so syncs never interleave.

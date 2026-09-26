@@ -9,8 +9,29 @@ export declare const WindowLimitSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     usedPercent: z.ZodNumber;
     resetAt: z.ZodOptional<z.ZodString>;
     windowMinutes: z.ZodOptional<z.ZodNumber>;
+    warning: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>], "status">;
 export type WindowLimit = z.infer<typeof WindowLimitSchema>;
+/** Body for POST /api/claude-limits (posted by the agenticview skill running in Claude Code). */
+export declare const ClaudeLimitsBodySchema: z.ZodObject<{
+    session_id: z.ZodString;
+    model: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodObject<{
+        id: z.ZodOptional<z.ZodString>;
+        display_name: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>]>>;
+    cwd: z.ZodOptional<z.ZodString>;
+    rate_limits: z.ZodOptional<z.ZodObject<{
+        five_hour: z.ZodOptional<z.ZodObject<{
+            used_percentage: z.ZodNumber;
+            resets_at: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+        seven_day: z.ZodOptional<z.ZodObject<{
+            used_percentage: z.ZodNumber;
+            resets_at: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type ClaudeLimitsBody = z.infer<typeof ClaudeLimitsBodySchema>;
 export declare const ProviderModelLimitsSchema: z.ZodObject<{
     provider: z.ZodEnum<{
         claude: "claude";
@@ -28,6 +49,7 @@ export declare const ProviderModelLimitsSchema: z.ZodObject<{
         usedPercent: z.ZodNumber;
         resetAt: z.ZodOptional<z.ZodString>;
         windowMinutes: z.ZodOptional<z.ZodNumber>;
+        warning: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>], "status">;
     weekly: z.ZodDiscriminatedUnion<[z.ZodObject<{
         status: z.ZodLiteral<"not reported">;
@@ -37,6 +59,7 @@ export declare const ProviderModelLimitsSchema: z.ZodObject<{
         usedPercent: z.ZodNumber;
         resetAt: z.ZodOptional<z.ZodString>;
         windowMinutes: z.ZodOptional<z.ZodNumber>;
+        warning: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>], "status">;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
@@ -70,6 +93,7 @@ export declare const ProviderLimitsEntrySchema: z.ZodObject<{
             usedPercent: z.ZodNumber;
             resetAt: z.ZodOptional<z.ZodString>;
             windowMinutes: z.ZodOptional<z.ZodNumber>;
+            warning: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>], "status">;
         weekly: z.ZodDiscriminatedUnion<[z.ZodObject<{
             status: z.ZodLiteral<"not reported">;
@@ -79,6 +103,7 @@ export declare const ProviderLimitsEntrySchema: z.ZodObject<{
             usedPercent: z.ZodNumber;
             resetAt: z.ZodOptional<z.ZodString>;
             windowMinutes: z.ZodOptional<z.ZodNumber>;
+            warning: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>], "status">;
         updatedAt: z.ZodString;
     }, z.core.$strip>>;
@@ -120,6 +145,7 @@ export declare const LimitsReportSchema: z.ZodObject<{
                 usedPercent: z.ZodNumber;
                 resetAt: z.ZodOptional<z.ZodString>;
                 windowMinutes: z.ZodOptional<z.ZodNumber>;
+                warning: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>], "status">;
             weekly: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 status: z.ZodLiteral<"not reported">;
@@ -129,6 +155,7 @@ export declare const LimitsReportSchema: z.ZodObject<{
                 usedPercent: z.ZodNumber;
                 resetAt: z.ZodOptional<z.ZodString>;
                 windowMinutes: z.ZodOptional<z.ZodNumber>;
+                warning: z.ZodOptional<z.ZodBoolean>;
             }, z.core.$strip>], "status">;
             updatedAt: z.ZodString;
         }, z.core.$strip>>;

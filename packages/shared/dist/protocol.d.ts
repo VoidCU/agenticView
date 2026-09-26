@@ -95,8 +95,28 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type CreateAgentPayload = z.infer<typeof CreateAgentPayloadSchema>;
 export declare const AgentPatchSchema: z.ZodObject<{
-    name: z.ZodOptional<z.ZodString>;
     model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        antigravity: "antigravity";
+        gemini: "gemini";
+    }>>>;
+    session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>>;
+    effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        minimal: "minimal";
+        low: "low";
+        medium: "medium";
+        high: "high";
+        xhigh: "xhigh";
+        max: "max";
+        ultra: "ultra";
+    }>>>>;
+    name: z.ZodOptional<z.ZodString>;
     tools: z.ZodOptional<z.ZodObject<{
         edit: z.ZodBoolean;
         shell: z.ZodBoolean;
@@ -118,30 +138,10 @@ export declare const AgentPatchSchema: z.ZodObject<{
         }>;
     }, z.core.$strip>>;
     specialty: z.ZodOptional<z.ZodString>;
-    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-        claude: "claude";
-        "claude-session": "claude-session";
-        codex: "codex";
-        antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
-    effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-        minimal: "minimal";
-        low: "low";
-        medium: "medium";
-        high: "high";
-        xhigh: "xhigh";
-        max: "max";
-        ultra: "ultra";
-    }>>>>;
     placement: z.ZodOptional<z.ZodOptional<z.ZodObject<{
         space: z.ZodString;
         seat: z.ZodNumber;
     }, z.core.$strip>>>;
-    session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-        id: z.ZodString;
-        name: z.ZodOptional<z.ZodString>;
-    }, z.core.$strip>>>>;
     description: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -211,8 +211,28 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"agent.update">;
     id: z.ZodString;
     patch: z.ZodObject<{
-        name: z.ZodOptional<z.ZodString>;
         model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            antigravity: "antigravity";
+            gemini: "gemini";
+        }>>>;
+        session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>>;
+        effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            minimal: "minimal";
+            low: "low";
+            medium: "medium";
+            high: "high";
+            xhigh: "xhigh";
+            max: "max";
+            ultra: "ultra";
+        }>>>>;
+        name: z.ZodOptional<z.ZodString>;
         tools: z.ZodOptional<z.ZodObject<{
             edit: z.ZodBoolean;
             shell: z.ZodBoolean;
@@ -234,30 +254,10 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             }>;
         }, z.core.$strip>>;
         specialty: z.ZodOptional<z.ZodString>;
-        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-            claude: "claude";
-            "claude-session": "claude-session";
-            codex: "codex";
-            antigravity: "antigravity";
-            gemini: "gemini";
-        }>>>;
-        effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-            minimal: "minimal";
-            low: "low";
-            medium: "medium";
-            high: "high";
-            xhigh: "xhigh";
-            max: "max";
-            ultra: "ultra";
-        }>>>>;
         placement: z.ZodOptional<z.ZodOptional<z.ZodObject<{
             space: z.ZodString;
             seat: z.ZodNumber;
         }, z.core.$strip>>>;
-        session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-            id: z.ZodString;
-            name: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>>>>;
         description: z.ZodOptional<z.ZodString>;
         systemPrompt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;

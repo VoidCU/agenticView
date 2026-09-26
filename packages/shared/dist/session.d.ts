@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ProviderModelLimits } from "./limits.js";
 /** Default number of tasks one Claude Code session runs at once (one subagent each). */
 export declare const DEFAULT_SESSION_CAPACITY = 4;
 export declare const MAX_SESSION_CAPACITY = 8;
@@ -52,6 +53,8 @@ export interface WorkerSessionInfo extends WorkerSession {
     runs: SessionRunInfo[];
     /** Agents bound to this session. */
     agentIds: string[];
+    /** Latest rate limits reported by this session via POST /api/claude-limits, keyed by model string. */
+    claudeLimits?: Record<string, ProviderModelLimits>;
 }
 /** The binding stored on a claude-session agent. */
 export declare const AgentSessionSchema: z.ZodObject<{
