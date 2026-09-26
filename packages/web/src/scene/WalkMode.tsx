@@ -12,14 +12,15 @@
  *    BONK_RANGE gives it a playful bonk (state/bonk.ts).
  *  - Keys ignored while typing in inputs or a modal is open.
  */
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useMemo } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { spaceAt, type Space } from "@agenticview/shared";
 import { useWalk } from "../state/walk";
 import { useStore } from "../state/store";
-import { movePlayer, walkDelta, clampPitch, applyVelocity, BOB_FREQ, bobWeightStep, headBobSide, headBobY } from "./walkPhysics";
-import { type Solid } from "./colliders";
+import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, BOB_FREQ, bobWeightStep, headBobSide, headBobY } from "./walkPhysics";
+import { PLAYER_RADIUS, type Solid } from "./colliders";
+import { chairField } from "./pushChairs";
 import { usePositions } from "../state/positions";
 import { bonk, BONK_RANGE } from "../state/bonk";
 
@@ -84,6 +85,9 @@ export function WalkModeController({
   });
 
   const keys = useRef(new Set<string>());
+  // Pushable chairs: clearance test built once per floor plan; one scratch point for the walker.
+  const chairClear = useMemo(() => chairField.clearFn(solids, (x, z) => isWalkable(spaces, x, z)), [solids, spaces]);
+  const walker = useRef({ x: 0, z: 0 });
   const lastPlayerPosition = useRef<{ x: number; z: number; yaw: number; spaceId: string; at: number } | null>(null);
 
   useEffect(() => () => {
@@ -201,6 +205,20 @@ export function WalkModeController({
       const next = movePlayer(spaces, cur.x, cur.z, cur.vx * dt, cur.vz * dt, solids);
       cur.x = next.x;
       cur.z = next.z;
+    }
+    // Chairs: shove the ones you walk into, glide the ones still sliding, and keep you out of fixed
+    // (or blocked) ones. Runs every frame so a shoved chair settles even after you stop.
+    {
+      const w = walker.current;
+      w.x = cur.x;
+      w.z = cur.z;
+      chairField.interact(w, PLAYER_RADIUS, dt, chairClear, performance.now());
+      if ((w.x !== cur.x || w.z !== cur.z) && isWalkable(spaces, w.x, w.z)) {
+        cur.x = w.x;
+        cur.z = w.z;
+      }
+    }
+    if (moveDist > 1e-4) {
       cur.bobPhase += moveDist * BOB_FREQ;
     }
 

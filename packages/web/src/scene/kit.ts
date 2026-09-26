@@ -69,11 +69,33 @@ interface Frame {
 
 type V3 = [number, number, number];
 
+/**
+ * A desk / meeting / visitor chair as drawn: world pose, its item range in Kit.items, and whether a
+ * walker may push it (walk mode). Only chairs whose owner is at the seat are fixed.
+ */
+export interface ChairInfo {
+  /** Stable id: "space#seat" for seats, "space#v<i>" for visitor chairs. */
+  id: string;
+  x: number;
+  z: number;
+  yaw: number;
+  pushable: boolean;
+  /** Index of the chair's first item in Kit.items; it spans `count` items. */
+  first: number;
+  count: number;
+}
+
 export class Kit {
   constructor(
     readonly items: Item[] = [],
     private readonly f: Frame = { x: 0, y: 0, z: 0, yaw: 0 },
+    readonly chairs: ChairInfo[] = [],
   ) {}
+
+  /** World pose of this frame's origin. */
+  origin(): { x: number; z: number; yaw: number } {
+    return { x: this.f.x, z: this.f.z, yaw: this.f.yaw };
+  }
 
   /** Map a local x/z to world using three's Y-rotation convention (local +z faces (sin yaw, cos yaw)). */
   private pt(x: number, z: number) {
@@ -84,7 +106,7 @@ export class Kit {
 
   frame(x: number, z: number, yaw = 0, y = 0): Kit {
     const p = this.pt(x, z);
-    return new Kit(this.items, { x: p.x, z: p.z, y: this.f.y + y, yaw: this.f.yaw + yaw });
+    return new Kit(this.items, { x: p.x, z: p.z, y: this.f.y + y, yaw: this.f.yaw + yaw }, this.chairs);
   }
 
   add(prim: Prim, mat: Mat, [x, y, z]: V3, [sx, sy, sz]: V3, o: { yaw?: number; rx?: number; rz?: number; color?: string } = {}): this {
@@ -149,12 +171,14 @@ export const SEATED_CHAIR_BACK = 0.25;
 /** The manager sits this much farther back from the executive desk than managerHome() so the raised body clears the desktop. */
 export const MANAGER_DESK_CLEARANCE = 0.15;
 
-export function chair(k: Kit) {
+export function chair(k: Kit, tag?: { id: string; pushable: boolean }) {
+  const first = k.items.length;
   k.rbox("chair", [0, 0.47, 0], [0.5, 0.08, 0.48]);
   k.rbox("chair", [0, 0.82, -0.25], [0.46, 0.52, 0.07], { rx: -0.1 });
   k.cyl("chairBase", [0, 0.27, 0], 0.06, 0.38);
   k.cyl("chairBase", [0, 0.05, 0], 0.56, 0.04);
   for (const x of [-0.26, 0.26]) k.box("chairBase", [x, 0.6, -0.02], [0.04, 0.03, 0.3]);
+  if (tag) k.chairs.push({ ...tag, ...k.origin(), first, count: k.items.length - first });
 }
 
 export function plant(k: Kit, size = 1, seed = 0) {
@@ -290,9 +314,10 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
     const dz = l.z < 0 ? -0.36 : 0.36;
     desk(k.frame(l.x, dz, l.z < 0 ? Math.PI : 0), occ.seats.get(seat), seed + seat);
     const back = l.z < 0 ? -1 : 1;
-    if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + back * 0.1, l.yaw));
-    else if (occ.away?.has(seat)) chair(k.frame(l.x, l.z + back * (SEATED_CHAIR_BACK + AWAY_CHAIR_ROLLBACK), l.yaw + AWAY_CHAIR_SWIVEL));
-    else chair(k.frame(l.x, l.z + back * SEATED_CHAIR_BACK, l.yaw));
+    const id = `${s.id}#${seat}`;
+    if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + back * 0.1, l.yaw), { id, pushable: true });
+    else if (occ.away?.has(seat)) chair(k.frame(l.x, l.z + back * (SEATED_CHAIR_BACK + AWAY_CHAIR_ROLLBACK), l.yaw + AWAY_CHAIR_SWIVEL), { id, pushable: true });
+    else chair(k.frame(l.x, l.z + back * SEATED_CHAIR_BACK, l.yaw), { id, pushable: false });
   }
   // Felt privacy screen along the spine of the cluster, with an aluminium cap.
   k.rbox("felt", [0, DESK_H + 0.2, 0], [3.8, 0.4, 0.05]);
@@ -329,17 +354,17 @@ function officeRoom(k: Kit, s: Space, occ: RoomOccupancy = { seats: new Map() })
   dk.box("book", [0.75, 0.8, 0.12], [0.28, 0.04, 0.2], { color: "#b5503b", yaw: -0.3 });
   // Two visitor chairs in front, facing the manager.
   const front = { x: deskAt.x + toCam.x * 1.05, z: deskAt.z + toCam.z * 1.05 };
-  for (const side of [-0.62, 0.62]) {
+  [-0.62, 0.62].forEach((side, i) => {
     const p = { x: front.x + side * toCam.z, z: front.z - side * toCam.x };
-    chair(k.frame(p.x, p.z, yawToward(p, home)));
-  }
+    chair(k.frame(p.x, p.z, yawToward(p, home)), { id: `${s.id}#v${i}`, pushable: true });
+  });
   // Manager desk chair (seat 0 = manager): under the seated manager, or swivelled and rolled back
   // when they stepped out.
   if (occ.seats.has(0)) {
     const away = occ.away?.has(0) ?? false;
     const d = MANAGER_DESK_CLEARANCE + SEATED_CHAIR_BACK + (away ? AWAY_CHAIR_ROLLBACK : 0);
     const fx = Math.sin(home.yaw), fz = Math.cos(home.yaw);
-    chair(k.frame(home.x - fx * d, home.z - fz * d, home.yaw + (away ? AWAY_CHAIR_SWIVEL : 0)));
+    chair(k.frame(home.x - fx * d, home.z - fz * d, home.yaw + (away ? AWAY_CHAIR_SWIVEL : 0)), { id: `${s.id}#0`, pushable: away });
   }
   bookshelf(corner(k, 180, 4.5), 3, 1.9);
   whiteboard(corner(k, WHITEBOARD_SLOT.pod.angleDeg, WHITEBOARD_SLOT.pod.at));
@@ -364,7 +389,7 @@ function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
     const r = Math.hypot(l.x, l.z);
     const back = !taken ? r + 0.12 : r + SEATED_CHAIR_BACK + (away ? AWAY_CHAIR_ROLLBACK : 0);
     const a = Math.atan2(l.z, l.x);
-    chair(k.frame(back * Math.cos(a), back * Math.sin(a), l.yaw + (away ? AWAY_CHAIR_SWIVEL : 0)));
+    chair(k.frame(back * Math.cos(a), back * Math.sin(a), l.yaw + (away ? AWAY_CHAIR_SWIVEL : 0)), { id: `${s.id}#${seat}`, pushable: !taken || away });
   }
   tvStand(corner(k, 240, 4.5));
   whiteboard(corner(k, WHITEBOARD_SLOT.meeting.angleDeg, WHITEBOARD_SLOT.meeting.at));

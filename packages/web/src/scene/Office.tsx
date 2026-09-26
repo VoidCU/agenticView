@@ -11,8 +11,9 @@ import { Robot, type RobotTarget } from "./Robot";
 import { Beam } from "./Beam";
 import { Confetti } from "./Confetti";
 import { PlusIcon } from "../hud/ui";
-import { Kit, buildWalls, furnishSpace } from "./kit";
-import { Batches, useMaterials } from "./Batches";
+import { Kit, buildWalls, furnishSpace, type Item } from "./kit";
+import { Batches, useMaterials, type InstanceRegistry } from "./Batches";
+import { chairField } from "./pushChairs";
 import { PALETTES, carpetTexture, useSceneTheme, woodTexture, type Palette } from "./theme";
 import { dragPoint, livePos, livePositions, useDrag, useFocus } from "./motion";
 import { PodBoard } from "../hud/PodBoard";
@@ -304,10 +305,46 @@ function Furniture({ spaces, layout, agents, palette, away = "" }: { spaces: Spa
     }
     // Screens without anyone at them are dark.
     for (const it of kit.items) if (it.mat === "screen" && !it.color) it.color = palette.screenOff;
+    // Walk-mode chair pushing: chairs as drawn (a seated owner's chair is fixed; others pushable).
+    chairField.sync(kit.chairs);
     return kit.items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, palette]);
-  return <Batches items={items} materials={materials} />;
+  // Pushed chairs: move their instances in place (only chairs that changed; no allocations).
+  const registry = useMemo<InstanceRegistry>(() => new Map(), []);
+  useFrame(() => applyChairOffsets(items, registry));
+  return <Batches items={items} materials={materials} registry={registry} />;
+}
+
+const chairMatrix = new THREE.Matrix4();
+const chairQuat = new THREE.Quaternion();
+const chairEuler = new THREE.Euler();
+const chairPos = new THREE.Vector3();
+const chairScale = new THREE.Vector3();
+
+/** Rewrite the instance matrices of chairs whose pushed pose changed since the last frame. */
+function applyChairOffsets(items: Item[], registry: InstanceRegistry) {
+  for (const c of chairField.chairs) {
+    if (!c.dirty) continue;
+    let done = true;
+    const ox = c.x - c.baseX;
+    const oz = c.z - c.baseZ;
+    for (let i = c.first; i < c.first + c.count; i++) {
+      const it = items[i];
+      const slot = registry.get(i);
+      if (!it || !slot) {
+        done = false;
+        continue;
+      }
+      chairEuler.set(it.rx, it.yaw, it.rz, "YXZ");
+      chairQuat.setFromEuler(chairEuler);
+      chairMatrix.compose(chairPos.set(it.x + ox, it.y, it.z + oz), chairQuat, chairScale.set(it.sx, it.sy, it.sz));
+      slot.mesh.setMatrixAt(slot.index, chairMatrix);
+      slot.mesh.instanceMatrix.needsUpdate = true;
+    }
+    // Keep it dirty until the batches have registered (first frame after a rebuild).
+    if (done) c.dirty = false;
+  }
 }
 
 
@@ -362,6 +399,8 @@ function Ground({ palette }: { palette: Palette }) {
 
 function NewAgentPad({ at, onCreate }: { at: { x: number; z: number }; onCreate: () => void }) {
   const ring = useRef<THREE.Mesh>(null);
+  // Like the name tags, the HTML button is an overview control: unmounted in walk mode (it filled the view up close).
+  const walking = useWalk((s) => s.walking);
   useFrame(({ clock }) => {
     const m = ring.current;
     if (!m) return;
@@ -374,7 +413,7 @@ function NewAgentPad({ at, onCreate }: { at: { x: number; z: number }; onCreate:
         <ringGeometry args={[0.5, 0.66, 40]} />
         <meshBasicMaterial color="#5b8cff" transparent opacity={0.6} toneMapped={false} />
       </mesh>
-      <Html center position={[0, 1.5, 0]} distanceFactor={14} zIndexRange={[15, 0]} style={{ pointerEvents: "none" }}>
+      {!walking && <Html center position={[0, 1.5, 0]} distanceFactor={14} zIndexRange={[15, 0]} style={{ pointerEvents: "none" }}>
         <button
           type="button"
           className="pad-btn"
@@ -385,7 +424,7 @@ function NewAgentPad({ at, onCreate }: { at: { x: number; z: number }; onCreate:
           <PlusIcon />
           <span>New agent</span>
         </button>
-      </Html>
+      </Html>}
     </group>
   );
 }
@@ -657,7 +696,8 @@ function ShadowThrottle({ signature }: { signature: string }) {
   }, [gl]);
   useEffect(() => sched.poke(), [sched, signature]);
   useFrame(() => {
-    if (sched.tick(Date.now(), livePositions, useDrag.getState().active)) gl.shadowMap.needsUpdate = true;
+    const chairsMoving = performance.now() - chairField.lastMove < 100;
+    if (sched.tick(Date.now(), livePositions, useDrag.getState().active || chairsMoving)) gl.shadowMap.needsUpdate = true;
   });
   return null;
 }
@@ -747,7 +787,8 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
     return out;
   }, [layout.occupied, spaces]);
 
-  const colliders = useMemo(() => buildColliders(layout), [layout]);
+  // Office chairs are dynamic (pushChairs.ts: drawn pose, pushable or fixed); everything else is static.
+  const colliders = useMemo(() => buildColliders(layout, { excludeKinds: ["chair"] }), [layout]);
   const nextPose = layout.next && spaces.find((s) => s.id === layout.next!.space) ? seatPose(spaces.find((s) => s.id === layout.next!.space)!, layout.next.seat) : undefined;
   const at = (id: string) => livePos(id, targets[id]);
 
@@ -937,6 +978,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
       store: useStore,
       inject: (msg: ServerMessage) => ingestMessage(useStore, msg),
       agentPos: (id: string) => livePositions.get(id),
+      chairs: () => chairField.chairs.map((c) => ({ id: c.id, x: c.x, z: c.z, baseX: c.baseX, baseZ: c.baseZ, yaw: c.yaw, pushable: c.pushable })),
       boardPose: (spaceId: string) => {
         const state = useStore.getState();
         const space = layoutFor(Object.values(state.agents), state.spaceNames).spaces.find((s) => s.id === spaceId);
