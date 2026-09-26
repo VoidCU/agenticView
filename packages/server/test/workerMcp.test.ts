@@ -77,8 +77,9 @@ describe("worker MCP", () => {
     expect(text).toContain("take_screenshot: Shoot");
     expect(text).toContain("Be Nova.");
     expect(text).toContain("Fix the bug");
-    expect(text).toContain("Requested model: opus");
-    expect(text).toContain("Requested effort: max");
+    expect(text).toContain("Model and effort: inherited from this Claude Code session");
+    expect(text).not.toContain("Requested model");
+    expect(text).not.toContain("Requested effort");
     expect(text).toContain("/tmp/a.png");
   });
 
@@ -104,11 +105,11 @@ describe("worker MCP", () => {
     });
     expect(withSub).toContain("run_id: r_9");
     expect(withSub).toContain('agenticview_complete {run_id: "r_9", result}');
-    expect(withSub).toContain("the agenticview-nova subagent runs on opus");
+    expect(withSub).toContain("inherited from this Claude Code session (claude-sonnet-5)");
     expect(withSub).not.toContain("MODEL MISMATCH");
     expect(withSub).toContain('- [done] "Header" (task t_1 2026-09-25 10:00) (subagent id ag-1 in "Main"): Built it [files: a.tsx]');
     const noSub = formatTask({ ...base, subagent: null });
-    expect(noSub).toContain("MODEL MISMATCH");
+    expect(noSub).not.toContain("MODEL MISMATCH");
     expect(noSub).toContain("(none yet: this is the agent's first task here)");
     expect(formatDispatch({ ...base, subagent: "agenticview-nova" }, 0, 2)).toMatch(/^=== Task 1 of 2: Nova, run_id r_9 ===\nLaunch the `agenticview-nova` subagent IN THE BACKGROUND/);
     expect(formatDispatch({ ...base, subagent: null }, 1, 2)).toContain("do this task yourself in the main thread");

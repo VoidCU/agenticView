@@ -69,11 +69,33 @@ interface Frame {
 
 type V3 = [number, number, number];
 
+/**
+ * A desk / meeting / visitor chair as drawn: world pose, its item range in Kit.items, and whether a
+ * walker may push it (walk mode). Only chairs whose owner is at the seat are fixed.
+ */
+export interface ChairInfo {
+  /** Stable id: "space#seat" for seats, "space#v<i>" for visitor chairs. */
+  id: string;
+  x: number;
+  z: number;
+  yaw: number;
+  pushable: boolean;
+  /** Index of the chair's first item in Kit.items; it spans `count` items. */
+  first: number;
+  count: number;
+}
+
 export class Kit {
   constructor(
     readonly items: Item[] = [],
     private readonly f: Frame = { x: 0, y: 0, z: 0, yaw: 0 },
+    readonly chairs: ChairInfo[] = [],
   ) {}
+
+  /** World pose of this frame's origin. */
+  origin(): { x: number; z: number; yaw: number } {
+    return { x: this.f.x, z: this.f.z, yaw: this.f.yaw };
+  }
 
   /** Map a local x/z to world using three's Y-rotation convention (local +z faces (sin yaw, cos yaw)). */
   private pt(x: number, z: number) {
@@ -84,7 +106,7 @@ export class Kit {
 
   frame(x: number, z: number, yaw = 0, y = 0): Kit {
     const p = this.pt(x, z);
-    return new Kit(this.items, { x: p.x, z: p.z, y: this.f.y + y, yaw: this.f.yaw + yaw });
+    return new Kit(this.items, { x: p.x, z: p.z, y: this.f.y + y, yaw: this.f.yaw + yaw }, this.chairs);
   }
 
   add(prim: Prim, mat: Mat, [x, y, z]: V3, [sx, sy, sz]: V3, o: { yaw?: number; rx?: number; rz?: number; color?: string } = {}): this {
@@ -136,12 +158,27 @@ export function desk(k: Kit, screen?: string, seed = 0) {
 }
 
 /** Swivel chair; the sitter faces +z. */
-export function chair(k: Kit) {
+/** Top of the desk-chair seat cushion (seat box y 0.47 + half height 0.04). Seated robots rest here. */
+export const CHAIR_SEAT_TOP = 0.51;
+/** An assigned seat whose owner stepped away: the chair is swivelled off the desk and rolled back. */
+export const AWAY_CHAIR_SWIVEL = 70 * (Math.PI / 180);
+export const AWAY_CHAIR_ROLLBACK = 0.18;
+/**
+ * A seated robot sits on the front of its chair: the chair is drawn this far behind the seat point
+ * so the backrest (0.25 + this, minus half its 0.07 depth) clears the 0.43-radius robot body.
+ */
+export const SEATED_CHAIR_BACK = 0.25;
+/** The manager sits this much farther back from the executive desk than managerHome() so the raised body clears the desktop. */
+export const MANAGER_DESK_CLEARANCE = 0.15;
+
+export function chair(k: Kit, tag?: { id: string; pushable: boolean }) {
+  const first = k.items.length;
   k.rbox("chair", [0, 0.47, 0], [0.5, 0.08, 0.48]);
   k.rbox("chair", [0, 0.82, -0.25], [0.46, 0.52, 0.07], { rx: -0.1 });
   k.cyl("chairBase", [0, 0.27, 0], 0.06, 0.38);
   k.cyl("chairBase", [0, 0.05, 0], 0.56, 0.04);
   for (const x of [-0.26, 0.26]) k.box("chairBase", [x, 0.6, -0.02], [0.04, 0.03, 0.3]);
+  if (tag) k.chairs.push({ ...tag, ...k.origin(), first, count: k.items.length - first });
 }
 
 export function plant(k: Kit, size = 1, seed = 0) {
@@ -196,7 +233,7 @@ export function whiteboard(k: Kit) {
     k.box("alu", [x, 0.02, 0], [0.06, 0.04, 0.5]);
   }
   k.box("alu", [0, 1.12, -0.005], [1.66, 0.96, 0.03]);
-  k.box("whiteboard", [0, 1.12, 0.012], [1.6, 0.9, 0.01]);
+  k.box("whiteboard", [0, WHITEBOARD_FACE.y, WHITEBOARD_FACE.z - 0.005], [WHITEBOARD_FACE.w, WHITEBOARD_FACE.h, 0.01]);
 }
 
 export function floorLamp(k: Kit) {
@@ -246,17 +283,29 @@ export function tvStand(k: Kit) {
 // ---------- rooms ----------
 
 /** Corner slots: vertex directions k*60deg, 4.6 from the center, facing in. */
-function corner(k: Kit, angleDeg: number, at = 4.55): Kit {
+export function cornerFrame(angleDeg: number, at = 4.55): { x: number; z: number; yaw: number } {
   const dist = (at * HEX_R) / 6;
   const a = angleDeg * DEG;
   const x = dist * Math.cos(a);
   const z = dist * Math.sin(a);
-  return k.frame(x, z, yawToward({ x, z }, { x: 0, z: 0 }));
+  return { x, z, yaw: yawToward({ x, z }, { x: 0, z: 0 }) };
+}
+
+/** Whiteboard corner slot per room kind (meeting rooms put the TV at 240, so the board goes to 180). */
+export const WHITEBOARD_SLOT = { pod: { angleDeg: 240, at: 4.4 }, meeting: { angleDeg: 180, at: 4.4 } } as const;
+/** Board face inside the whiteboard frame: centre y, front-face z (box z 0.012 + half depth 0.005), size. */
+export const WHITEBOARD_FACE = { y: 1.12, z: 0.017, w: 1.6, h: 0.9 } as const;
+
+function corner(k: Kit, angleDeg: number, at = 4.55): Kit {
+  const c = cornerFrame(angleDeg, at);
+  return k.frame(c.x, c.z, c.yaw);
 }
 
 export interface RoomOccupancy {
   /** seat -> screen/tint colour for an occupied seat. */
   seats: Map<number, string>;
+  /** Assigned seats whose owner is currently elsewhere (lounge, meeting, visiting, walking). */
+  away?: Set<number>;
 }
 
 function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
@@ -264,7 +313,11 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
     const l = seatLocal("pod", seat);
     const dz = l.z < 0 ? -0.36 : 0.36;
     desk(k.frame(l.x, dz, l.z < 0 ? Math.PI : 0), occ.seats.get(seat), seed + seat);
-    if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + (l.z < 0 ? -0.1 : 0.1), l.yaw));
+    const back = l.z < 0 ? -1 : 1;
+    const id = `${s.id}#${seat}`;
+    if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + back * 0.1, l.yaw), { id, pushable: true });
+    else if (occ.away?.has(seat)) chair(k.frame(l.x, l.z + back * (SEATED_CHAIR_BACK + AWAY_CHAIR_ROLLBACK), l.yaw + AWAY_CHAIR_SWIVEL), { id, pushable: true });
+    else chair(k.frame(l.x, l.z + back * SEATED_CHAIR_BACK, l.yaw), { id, pushable: false });
   }
   // Felt privacy screen along the spine of the cluster, with an aluminium cap.
   k.rbox("felt", [0, DESK_H + 0.2, 0], [3.8, 0.4, 0.05]);
@@ -272,14 +325,14 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
   k.box("deskLeg", [0, 0.36, 0], [0.06, 0.72, 0.06]);
   // Corners: tall pieces at the back (away from the camera), low ones at the front.
   bookshelf(corner(k, 180), seed);
-  whiteboard(corner(k, 240, 4.4));
+  whiteboard(corner(k, WHITEBOARD_SLOT.pod.angleDeg, WHITEBOARD_SLOT.pod.at));
   credenza(corner(k, 300), seed);
   plant(corner(k, 0, 4.7), 1.1, seed);
   plant(corner(k, 120, 4.7), 0.9, seed + 1);
   credenza(corner(k, 60, 4.7), seed + 1);
 }
 
-function officeRoom(k: Kit, s: Space) {
+function officeRoom(k: Kit, s: Space, occ: RoomOccupancy = { seats: new Map() }) {
   const home = managerHome({ ...s, x: 0, z: 0 });
   // Rug, then the executive desk between the manager and the room.
   k.cyl("rugOffice", [0, 0.006, 0], 6.0, 0.012);
@@ -301,12 +354,20 @@ function officeRoom(k: Kit, s: Space) {
   dk.box("book", [0.75, 0.8, 0.12], [0.28, 0.04, 0.2], { color: "#b5503b", yaw: -0.3 });
   // Two visitor chairs in front, facing the manager.
   const front = { x: deskAt.x + toCam.x * 1.05, z: deskAt.z + toCam.z * 1.05 };
-  for (const side of [-0.62, 0.62]) {
+  [-0.62, 0.62].forEach((side, i) => {
     const p = { x: front.x + side * toCam.z, z: front.z - side * toCam.x };
-    chair(k.frame(p.x, p.z, yawToward(p, home)));
+    chair(k.frame(p.x, p.z, yawToward(p, home)), { id: `${s.id}#v${i}`, pushable: true });
+  });
+  // Manager desk chair (seat 0 = manager): under the seated manager, or swivelled and rolled back
+  // when they stepped out.
+  if (occ.seats.has(0)) {
+    const away = occ.away?.has(0) ?? false;
+    const d = MANAGER_DESK_CLEARANCE + SEATED_CHAIR_BACK + (away ? AWAY_CHAIR_ROLLBACK : 0);
+    const fx = Math.sin(home.yaw), fz = Math.cos(home.yaw);
+    chair(k.frame(home.x - fx * d, home.z - fz * d, home.yaw + (away ? AWAY_CHAIR_SWIVEL : 0)), { id: `${s.id}#0`, pushable: away });
   }
   bookshelf(corner(k, 180, 4.5), 3, 1.9);
-  whiteboard(corner(k, 240, 4.4));
+  whiteboard(corner(k, WHITEBOARD_SLOT.pod.angleDeg, WHITEBOARD_SLOT.pod.at));
   credenza(corner(k, 300), 2);
   armchair(corner(k, 0, 4.4));
   plant(corner(k, 60, 4.8), 1.25, 2);
@@ -322,14 +383,16 @@ function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
   k.cyl("pot", [0, 0.86, 0], 0.18, 0.18);
   k.add("ico", "leaf2", [0, 1.02, 0], [0.26, 0.24, 0.26]);
   for (let seat = 0; seat < s.seats; seat++) {
-    if (occ.seats.has(seat)) continue;
+    const taken = occ.seats.has(seat);
+    const away = taken && (occ.away?.has(seat) ?? false);
     const l = seatLocal("meeting", seat);
-    const back = Math.hypot(l.x, l.z) + 0.12;
+    const r = Math.hypot(l.x, l.z);
+    const back = !taken ? r + 0.12 : r + SEATED_CHAIR_BACK + (away ? AWAY_CHAIR_ROLLBACK : 0);
     const a = Math.atan2(l.z, l.x);
-    chair(k.frame(back * Math.cos(a), back * Math.sin(a), l.yaw));
+    chair(k.frame(back * Math.cos(a), back * Math.sin(a), l.yaw + (away ? AWAY_CHAIR_SWIVEL : 0)), { id: `${s.id}#${seat}`, pushable: !taken || away });
   }
   tvStand(corner(k, 240, 4.5));
-  whiteboard(corner(k, 180, 4.4));
+  whiteboard(corner(k, WHITEBOARD_SLOT.meeting.angleDeg, WHITEBOARD_SLOT.meeting.at));
   credenza(corner(k, 300), 4);
   plant(corner(k, 0, 4.7), 1.1, 3);
   plant(corner(k, 60, 4.8), 0.8, 4);
@@ -379,7 +442,7 @@ export function furnishSpace(kit: Kit, s: Space, occ: RoomOccupancy) {
   const k = kit.frame(s.x, s.z);
   const seed = Math.abs(s.q * 7 + s.r * 13);
   if (s.kind === "pod") podRoom(k, s, occ, seed);
-  else if (s.kind === "office") officeRoom(k, s);
+  else if (s.kind === "office") officeRoom(k, s, occ);
   else if (s.kind === "meeting") meetingRoom(k, s, occ);
   else loungeRoom(k, s, occ);
 }

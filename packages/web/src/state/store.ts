@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
-export type Bubble = { text: string; until: number };
+export type Bubble = { text: string; until: number; /** Local playful bonk line (shown even in walk mode). */ bonk?: boolean };
 export type Beam = { id: string; from: string; to: string; until: number };
 export type PendingPermission = { id: string; agentId: string; taskId: string; tool: string; input: unknown };
 export type PendingQuestion = { id: string; agentId: string; taskId: string; question: string };
@@ -66,6 +66,8 @@ export interface Store {
   lastGameRound?: GameRoundResult;
 
   apply(msg: ServerMessage): void;
+  /** Apply several messages in order, coalescing consecutive run.events into a single store update. */
+  applyMany(msgs: readonly ServerMessage[]): void;
   select(id?: string): void;
   send: (m: ClientMessage) => void;
   /** Record a line the user typed so the chat shows it immediately. */
@@ -101,6 +103,38 @@ export function bubbleFor(event: RunEvent): string | undefined {
     default:
       return undefined;
   }
+}
+
+type RunEventMessage = Extract<ServerMessage, { type: "run.event" }>;
+
+/**
+ * Store patch for a run of run.events: copies the feed map once and each touched agent's list once
+ * (untouched agents keep their array identity, so per-agent subscribers do not re-render), trims to
+ * FEED_CAP, and keeps only the newest bubble per agent.
+ */
+function runEventsPatch(s: Store, msgs: readonly RunEventMessage[], now: number): Partial<Store> {
+  const feed = { ...s.feed };
+  const touched = new Set<string>();
+  let bubbles: Record<string, Bubble> | undefined;
+  for (const m of msgs) {
+    let list = feed[m.agentId];
+    if (!touched.has(m.agentId)) {
+      list = list ? list.slice() : [];
+      feed[m.agentId] = list;
+      touched.add(m.agentId);
+    }
+    list!.push({ ts: now, taskId: m.taskId, event: m.event });
+    const text = bubbleFor(m.event);
+    if (text) {
+      bubbles ??= { ...s.bubbles };
+      bubbles[m.agentId] = { text, until: now + BUBBLE_MS };
+    }
+  }
+  for (const id of touched) {
+    const list = feed[id]!;
+    if (list.length > FEED_CAP) list.splice(0, list.length - FEED_CAP);
+  }
+  return bubbles ? { feed, bubbles } : { feed };
 }
 
 function managerFor(agents: Record<string, Agent>, task: Task): string | undefined {
@@ -202,14 +236,7 @@ export const useStore = create<Store>()((set, get) => ({
         return;
       }
       case "run.event": {
-        set((s) => {
-          const list = [...(s.feed[msg.agentId] ?? []), { ts: now, taskId: msg.taskId, event: msg.event }];
-          if (list.length > FEED_CAP) list.splice(0, list.length - FEED_CAP);
-          const patch: Partial<Store> = { feed: { ...s.feed, [msg.agentId]: list } };
-          const text = bubbleFor(msg.event);
-          if (text) patch.bubbles = { ...s.bubbles, [msg.agentId]: { text, until: now + BUBBLE_MS } };
-          return patch;
-        });
+        set((s) => runEventsPatch(s, [msg], now));
         return;
       }
       case "permission.request":
@@ -307,6 +334,25 @@ export const useStore = create<Store>()((set, get) => ({
       }
       default:
         return;
+    }
+  },
+
+  applyMany(msgs) {
+    // Consecutive run.events become ONE store update (one notification, one React commit per
+    // subscriber); anything else is applied in order in between.
+    let i = 0;
+    while (i < msgs.length) {
+      if (msgs[i]!.type !== "run.event") {
+        get().apply(msgs[i]!);
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < msgs.length && msgs[j]!.type === "run.event") j++;
+      const run = msgs.slice(i, j) as RunEventMessage[];
+      const now = Date.now();
+      set((s) => runEventsPatch(s, run, now));
+      i = j;
     }
   },
 

@@ -8,20 +8,37 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { HEX_R, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
+import { type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { useWalk } from "../state/walk";
+import { cornerFrame, WHITEBOARD_FACE, WHITEBOARD_SLOT } from "./kit";
 import { BOARD_COLORS, BOARD_LABELS, boardColumn, podBoard, type BoardColumn } from "../state/boards";
 
-const DEG = Math.PI / 180;
+/** Live overlay sits this far in front of the physical board face (a few mm, like DeskMonitor). */
+export const BOARD_FACE_NUDGE = 0.003;
+const BOARD_OVERLAY_Z = WHITEBOARD_FACE.z + BOARD_FACE_NUDGE;
+
+/**
+ * World pose of the whiteboard frame for a room, mirroring kit.ts exactly: the same corner()
+ * slot (WHITEBOARD_SLOT) and the same frame yaw. `face` is the world centre of the live overlay.
+ */
+export function whiteboardPose(space: Pick<Space, "kind" | "x" | "z">) {
+  const slot = space.kind === "meeting" ? WHITEBOARD_SLOT.meeting : WHITEBOARD_SLOT.pod;
+  const c = cornerFrame(slot.angleDeg, slot.at);
+  const x = space.x + c.x;
+  const z = space.z + c.z;
+  // Kit.frame maps local +z to (sin yaw, cos yaw).
+  const face: [number, number, number] = [x + Math.sin(c.yaw) * BOARD_OVERLAY_Z, WHITEBOARD_FACE.y, z + Math.cos(c.yaw) * BOARD_OVERLAY_Z];
+  return { x, z, yaw: c.yaw, face };
+}
 /** The readable texture is only drawn when the camera is this close (world units). */
 export const BOARD_NEAR_DIST = 9;
 /** Minimum time between texture redraws. */
 export const BOARD_REFRESH_MS = 1000;
 /** Max task rows drawn on the board. */
 export const BOARD_MAX_LINES = 9;
-const BOARD_W = 1.6;
-const BOARD_H = 0.94;
+const BOARD_W = WHITEBOARD_FACE.w;
+const BOARD_H = WHITEBOARD_FACE.h;
 const TEX_W = 1024;
 const TEX_H = Math.round((TEX_W * BOARD_H) / BOARD_W);
 
@@ -123,7 +140,7 @@ function BoardFace({ space, heading, world }: { space: Space; heading: string; w
 
   if (!near) return null;
   return (
-    <mesh position={[0, 1.12, 0.085]} raycast={() => null}>
+    <mesh position={[0, WHITEBOARD_FACE.y, BOARD_OVERLAY_Z]} raycast={() => null}>
       <planeGeometry args={[BOARD_W, BOARD_H]} />
       <meshBasicMaterial map={texture} toneMapped={false} />
     </mesh>
@@ -138,23 +155,24 @@ export function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Sp
   const tasks = useStore((s) => s.tasks);
   const board = useMemo(() => podBoard(space.id, Object.values(agents), Object.values(tasks)), [space.id, agents, tasks]);
   const active = (["queued", "running", "waiting", "failed"] as const).flatMap((status) => board.columns[status].map((task) => ({ task, status })));
-  const angle = (space.kind === "meeting" ? 180 : 240) * DEG;
-  const x = ((4.4 * HEX_R) / 6) * Math.cos(angle);
-  const z = ((4.4 * HEX_R) / 6) * Math.sin(angle);
-  const world = useMemo(() => new THREE.Vector3(space.x + x, 1.12, space.z + z), [space.x, space.z, x, z]);
+  const pose = useMemo(() => whiteboardPose(space), [space]);
+  const world = useMemo(() => new THREE.Vector3(...pose.face), [pose]);
+  const euler = useMemo(() => new THREE.Euler(0, pose.yaw, 0, "YXZ"), [pose]);
   const cols = Math.max(6, Math.ceil(Math.sqrt(active.length * 1.7)));
   const rows = Math.max(3, Math.ceil(active.length / cols));
   const heading = space.kind === "pod" ? `${space.name} · tasks` : "Manager board";
-  return <group position={[space.x + x, 0, space.z + z]} rotation={[0, yawToward({ x, z }, { x: 0, z: 0 }), 0]}>
+  return <group position={[pose.x, 0, pose.z]} rotation={euler}>
     <mesh position={[0, 1.12, 0.04]}
       userData={{ boardSpaceId: space.id }}
       onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }} onPointerOut={() => setHovered(false)}
-      onClick={(e) => { e.stopPropagation(); if (e.delta <= 4) { setHovered(false); onOpen(space); } }}>
+      onClick={(e) => { e.stopPropagation(); if (e.delta <= 4) { setHovered(false); onOpen(space); } }}
+      // Invisible until hovered: no draw call per board (R3F still raycasts invisible meshes).
+      visible={hovered}>
       <boxGeometry args={[1.72, 1.02, 0.055]} />
       <meshBasicMaterial color="#78baff" transparent opacity={hovered ? 0.24 : 0} depthWrite={false} />
     </mesh>
     {walking && <BoardFace space={space} heading={heading} world={world} />}
-    {space.kind === "pod" && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + ((i % cols) + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, 0.076]} raycast={() => null}>
+    {space.kind === "pod" && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + ((i % cols) + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, BOARD_OVERLAY_Z + 0.001]} raycast={() => null}>
       <planeGeometry args={[1.12 / cols, 0.57 / rows]} /><meshBasicMaterial color={BOARD_COLORS[status]} side={THREE.DoubleSide} />
     </mesh>)}
     <Html center position={[0, 1.9, 0]} distanceFactor={14} zIndexRange={[9, 0]}>

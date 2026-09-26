@@ -1,4 +1,4 @@
-import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type Effort, type LimitsReport, type UsageReport, type GamesData } from "@agenticview/shared";
+import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type ServerMessage, type Effort, type LimitsReport, type UsageReport, type GamesData } from "@agenticview/shared";
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { type SyncResult } from "./agents/subagents.js";
@@ -78,6 +78,8 @@ export interface World {
         ok: false;
         message: string;
     }>;
+    /** Wire decoration of outgoing messages (fills agent.sessionModel for claude-session agents). */
+    decorate: (m: ServerMessage) => ServerMessage;
 }
 export declare function globalConfigPath(): string;
 export declare function readGlobalConfig(): Promise<GlobalConfig>;

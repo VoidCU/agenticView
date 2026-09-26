@@ -2,17 +2,18 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls, PerformanceMonitor, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, loungeSpots, assignLoungeSpots, rpsFacing, type Agent, type Space, type Task } from "@agenticview/shared";
-import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
+import { HEX_R, managerHome, seatPose, spaceAt, yawToward, type Agent, type ServerMessage, type Space, type Task } from "@agenticview/shared";
+import { useStore, sortedAgents, fileChipsFor, FILE_CHIP_MAX, type FeedItem, type FileChip } from "../state/store";
 import { useLoungeBreaks, agentRevivePhase } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
-import { layoutFor, seatKey, type OfficeLayout } from "./layout";
+import { awaySeatSignature, layoutFor, seatKey, type OfficeLayout } from "./layout";
 import { Robot, type RobotTarget } from "./Robot";
 import { Beam } from "./Beam";
 import { Confetti } from "./Confetti";
 import { PlusIcon } from "../hud/ui";
-import { Kit, buildWalls, furnishSpace } from "./kit";
-import { Batches, useMaterials } from "./Batches";
+import { Kit, buildWalls, furnishSpace, type Item } from "./kit";
+import { Batches, useMaterials, type InstanceRegistry } from "./Batches";
+import { chairField } from "./pushChairs";
 import { PALETTES, carpetTexture, useSceneTheme, woodTexture, type Palette } from "./theme";
 import { dragPoint, livePos, livePositions, useDrag, useFocus } from "./motion";
 import { PodBoard } from "../hud/PodBoard";
@@ -21,23 +22,62 @@ import { keyToRoom } from "./roomKeys";
 
 import { MiniMap } from "./MiniMap";
 import { WalkMode } from "./WalkMode";
-import { Whiteboard } from "./Whiteboard";
+import { Whiteboard, whiteboardPose } from "./Whiteboard";
 import { AllDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
 import { LoungeScoreboard } from "./LoungeScoreboard";
 import { buildColliders } from "./colliders";
-import { usePositions, type AgentActivity } from "../state/positions";
+import { usePositions, type AgentActivity, type AgentPosition } from "../state/positions";
+import { computeTargets, nextVisitExpiry } from "./targets";
+import { ShadowScheduler, applyRenderTuning } from "./renderTuning";
+import { ingestMessage } from "../net/ws";
 
 const DEG = Math.PI / 180;
 
 /** Chips naming the files an agent touched in the last few seconds, floating above it and fading out. */
+const NO_CHIPS: FileChip[] = [];
+const NO_CHIPS_FEED: FeedItem[] = [];
+
+function sameChips(a: FileChip[], b: FileChip[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i]!.path !== b[i]!.path || Math.abs(a[i]!.opacity - b[i]!.opacity) > 0.01) return false;
+  return true;
+}
+
+/** Identity of the newest few file_changed events in a feed: changes only when a file event arrives. */
+export function fileChipKey(feed: FeedItem[] | undefined): string {
+  if (!feed) return "";
+  let key = "";
+  let n = 0;
+  for (let i = feed.length - 1; i >= 0 && n < FILE_CHIP_MAX; i--) {
+    const item = feed[i]!;
+    if (!("event" in item) || item.event.type !== "file_changed") continue;
+    key += `${item.ts}:${item.event.path}|`;
+    n++;
+  }
+  return key;
+}
+
 function FileChips({ agentId }: { agentId: string }) {
-  const feed = useStore((s) => s.feed[agentId]);
-  const [chips, setChips] = useState<FileChip[]>([]);
+  // Keyed on the file events only, so text/tool events streaming in do not re-render the chips.
+  const fileKey = useStore((s) => fileChipKey(s.feed[agentId]));
+  const feed = useMemo(() => useStore.getState().feed[agentId], [agentId, fileKey]);
+  const [chips, setChips] = useState<FileChip[]>(NO_CHIPS);
+  // Perf: the fade timer only runs while chips are showing, and an unchanged (empty) result keeps the
+  // previous state. It used to tick every 250 ms for every worker forever with a fresh [] each time,
+  // which was ~48 React commits/s in an idle 12-worker office.
   useEffect(() => {
-    const update = () => setChips(fileChipsFor(feed ?? []));
-    update();
-    const id = setInterval(update, 250);
+    let id: ReturnType<typeof setInterval> | undefined;
+    const update = () => {
+      const next = fileChipsFor(feed ?? NO_CHIPS_FEED);
+      setChips((prev) => (sameChips(prev, next) ? prev : next.length ? next : NO_CHIPS));
+      if (!next.length && id !== undefined) {
+        clearInterval(id);
+        id = undefined;
+      }
+      return next.length > 0;
+    };
+    if (update()) id = setInterval(update, 250);
     return () => clearInterval(id);
   }, [feed]);
   if (chips.length === 0) return null;
@@ -235,15 +275,17 @@ function Floors({ spaces, palette, layout, managerName }: { spaces: Space[]; pal
 
 // ---------- furniture ----------
 
-function Furniture({ spaces, layout, agents, palette }: { spaces: Space[]; layout: OfficeLayout; agents: Record<string, Agent>; palette: Palette }) {
+function Furniture({ spaces, layout, agents, palette, away = "" }: { spaces: Space[]; layout: OfficeLayout; agents: Record<string, Agent>; palette: Palette; away?: string }) {
   const materials = useMaterials(palette);
   // Only rebuild when the floor plan or who-sits-where changes, not on every stats update.
   const signature = useMemo(() => {
     const occ = [...layout.occupied.entries()].map(([k, id]) => `${k}=${agents[id]?.appearance.color ?? ""}`).sort();
-    return `${spaces.map((s) => s.id).join(",")}|${occ.join(",")}`;
-  }, [spaces, layout, agents]);
+    const manager = Object.values(agents).find((a) => a.role === "manager");
+    return `${spaces.map((s) => s.id).join(",")}|${occ.join(",")}|m=${manager?.appearance.color ?? ""}|away=${away}`;
+  }, [spaces, layout, agents, away]);
   const items = useMemo(() => {
     const kit = new Kit();
+    const awayKeys = away ? away.split(",") : [];
     buildWalls(kit, spaces);
     const bg = new THREE.Color(palette.screenOff);
     for (const s of spaces) {
@@ -253,14 +295,56 @@ function Furniture({ spaces, layout, agents, palette }: { spaces: Space[]; layou
         const color = id ? agents[id]?.appearance.color : undefined;
         if (color) seats.set(seat, `#${new THREE.Color(color).lerp(bg, 0.25).getHexString()}`);
       }
-      furnishSpace(kit, s, { seats });
+      if (s.kind === "office") {
+        const manager = Object.values(agents).find((a) => a.role === "manager");
+        if (manager) seats.set(0, manager.appearance.color);
+      }
+      const awaySeats = new Set<number>();
+      for (const key of awayKeys) if (key.startsWith(`${s.id}#`)) awaySeats.add(Number(key.slice(s.id.length + 1)));
+      furnishSpace(kit, s, { seats, away: awaySeats });
     }
     // Screens without anyone at them are dark.
     for (const it of kit.items) if (it.mat === "screen" && !it.color) it.color = palette.screenOff;
+    // Walk-mode chair pushing: chairs as drawn (a seated owner's chair is fixed; others pushable).
+    chairField.sync(kit.chairs);
     return kit.items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, palette]);
-  return <Batches items={items} materials={materials} />;
+  // Pushed chairs: move their instances in place (only chairs that changed; no allocations).
+  const registry = useMemo<InstanceRegistry>(() => new Map(), []);
+  useFrame(() => applyChairOffsets(items, registry));
+  return <Batches items={items} materials={materials} registry={registry} />;
+}
+
+const chairMatrix = new THREE.Matrix4();
+const chairQuat = new THREE.Quaternion();
+const chairEuler = new THREE.Euler();
+const chairPos = new THREE.Vector3();
+const chairScale = new THREE.Vector3();
+
+/** Rewrite the instance matrices of chairs whose pushed pose changed since the last frame. */
+function applyChairOffsets(items: Item[], registry: InstanceRegistry) {
+  for (const c of chairField.chairs) {
+    if (!c.dirty) continue;
+    let done = true;
+    const ox = c.x - c.baseX;
+    const oz = c.z - c.baseZ;
+    for (let i = c.first; i < c.first + c.count; i++) {
+      const it = items[i];
+      const slot = registry.get(i);
+      if (!it || !slot) {
+        done = false;
+        continue;
+      }
+      chairEuler.set(it.rx, it.yaw, it.rz, "YXZ");
+      chairQuat.setFromEuler(chairEuler);
+      chairMatrix.compose(chairPos.set(it.x + ox, it.y, it.z + oz), chairQuat, chairScale.set(it.sx, it.sy, it.sz));
+      slot.mesh.setMatrixAt(slot.index, chairMatrix);
+      slot.mesh.instanceMatrix.needsUpdate = true;
+    }
+    // Keep it dirty until the batches have registered (first frame after a rebuild).
+    if (done) c.dirty = false;
+  }
 }
 
 
@@ -315,6 +399,8 @@ function Ground({ palette }: { palette: Palette }) {
 
 function NewAgentPad({ at, onCreate }: { at: { x: number; z: number }; onCreate: () => void }) {
   const ring = useRef<THREE.Mesh>(null);
+  // Like the name tags, the HTML button is an overview control: unmounted in walk mode (it filled the view up close).
+  const walking = useWalk((s) => s.walking);
   useFrame(({ clock }) => {
     const m = ring.current;
     if (!m) return;
@@ -327,7 +413,7 @@ function NewAgentPad({ at, onCreate }: { at: { x: number; z: number }; onCreate:
         <ringGeometry args={[0.5, 0.66, 40]} />
         <meshBasicMaterial color="#5b8cff" transparent opacity={0.6} toneMapped={false} />
       </mesh>
-      <Html center position={[0, 1.5, 0]} distanceFactor={14} zIndexRange={[15, 0]} style={{ pointerEvents: "none" }}>
+      {!walking && <Html center position={[0, 1.5, 0]} distanceFactor={14} zIndexRange={[15, 0]} style={{ pointerEvents: "none" }}>
         <button
           type="button"
           className="pad-btn"
@@ -338,7 +424,7 @@ function NewAgentPad({ at, onCreate }: { at: { x: number; z: number }; onCreate:
           <PlusIcon />
           <span>New agent</span>
         </button>
-      </Html>
+      </Html>}
     </group>
   );
 }
@@ -596,6 +682,37 @@ const YOU: Agent = {
 
 const FRESH_MS = 10_000;
 
+/**
+ * The shadow map is re-rendered every frame only while a robot moves (plus a short grace period);
+ * otherwise at 5 Hz. `signature` pokes a refresh when furniture or the theme changes.
+ */
+function ShadowThrottle({ signature }: { signature: string }) {
+  const gl = useThree((s) => s.gl);
+  const sched = useMemo(() => new ShadowScheduler(), []);
+  useEffect(() => {
+    gl.shadowMap.autoUpdate = false;
+    gl.shadowMap.needsUpdate = true;
+    return () => { gl.shadowMap.autoUpdate = true; };
+  }, [gl]);
+  useEffect(() => sched.poke(), [sched, signature]);
+  useFrame(() => {
+    const chairsMoving = performance.now() - chairField.lastMove < 100;
+    if (sched.tick(Date.now(), livePositions, useDrag.getState().active || chairsMoving)) gl.shadowMap.needsUpdate = true;
+  });
+  return null;
+}
+
+/** Test probe: renderer and scene for Playwright perf / screenshot specs (read-only use). */
+function GlProbe() {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  useEffect(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__agenticviewTest = Object.assign((w.__agenticviewTest as object | undefined) ?? {}, { gl, scene });
+  }, [gl, scene]);
+  return null;
+}
+
 function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: Palette; onBoard: (space: Space) => void }) {
   const walking = useWalk((s) => s.walking);
   const walkExitAt = useWalk((s) => s.exitAt);
@@ -621,102 +738,36 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const mountedAt = useRef(Date.now());
   const prevLoungeAssign = useRef<Record<string, string>>({});
   const lastPublishRef = useRef(0);
-  const lastSnapshotRef = useRef<string>("");
+
+  // Re-evaluate targets when the earliest idle visit lapses (the server also clears it; this covers a slow link).
+  const [visitClock, setVisitClock] = useState(0);
+  useEffect(() => {
+    const at = nextVisitExpiry(list, Date.now());
+    if (at === undefined) return;
+    const t = setTimeout(() => setVisitClock((n) => n + 1), Math.min(at - Date.now() + 50, 600_000));
+    return () => clearTimeout(t);
+  }, [list, visitClock]);
 
   const targets = useMemo(() => {
-    const out: Record<string, RobotTarget> = {};
-    for (const [id, pose] of Object.entries(layout.poses)) out[id] = pose;
-
-    // Lounge: collect all agents going to the lounge, assign spots via loungeSpots().
-    if (lounge) {
-      // Build the full list of agents heading to the lounge (breaks, server-side lounging, fainted).
-      const loungeAgentIds: string[] = [];
-      for (const [id] of loungeBreaks) loungeAgentIds.push(id);
-      for (const a of list) {
-        if (loungeBreaks.has(a.id)) continue; // already included above
-        if (a.lounging && a.role === "worker") { loungeAgentIds.push(a.id); continue; }
-        const phase = agentRevivePhase(a);
-        if (phase === "fainted" || phase === "reviving") loungeAgentIds.push(a.id);
-      }
-
-      if (loungeAgentIds.length > 0) {
-        // Get a layout large enough for overflow agents (waiting spots outside door).
-        const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2));
-        // Stable assignment: agents keep their spot unless it's gone.
-        const assignment = assignLoungeSpots(loungeAgentIds, loungeLayout.spots, prevLoungeAssign.current);
-        prevLoungeAssign.current = assignment;
-
-        for (const agentId of loungeAgentIds) {
-          const spotId = assignment[agentId];
-          if (!spotId) continue;
-          const spot = loungeLayout.spots.find((sp) => sp.id === spotId);
-          if (!spot) continue;
-          out[agentId] = {
-            x: lounge.x + spot.x,
-            z: lounge.z + spot.z,
-            yaw: spot.yaw,
-            yOffset: spot.seatHeight,
-          };
-        }
-      }
-    }
-
-    // Manager walks to fainted agent when phase is 'reviving'
-    if (manager && lounge) {
-      const faintingAgent = list.find((a) => agentRevivePhase(a) === "reviving");
-      if (faintingAgent && !visiting) {
-        const agentPos = out[faintingAgent.id];
-        if (agentPos) {
-          const visitP = { x: agentPos.x + 0.6, z: agentPos.z };
-          out[manager.id] = { ...visitP, yaw: yawToward(visitP, agentPos) };
-        }
-      }
-    }
-
-    // Manager task visits (existing logic; overrides the faint walk when visiting is set)
-    if (manager && visiting) {
-      const p = layout.placements[visiting];
-      const s = p && spaces.find((o) => o.id === p.space);
-      if (s && p) out[manager.id] = visitPose(s, p.seat);
-    }
-
-    // RPS game.started: walk both players to the designated game spots and face each other.
-    // This overrides their lounge seat assignment while the match is active.
-    if (activeRpsMatch && lounge) {
-      const gameLayout = loungeSpots();
-      for (let i = 0; i < 2; i++) {
-        const playerId = activeRpsMatch.players[i]!;
-        const spotId = activeRpsMatch.spotIds[i]!;
-        // Search all game spot pairs for the matching id
-        for (const [gsa, gsb] of gameLayout.gameSpots) {
-          const gs = gsa.id === spotId ? gsa : gsb.id === spotId ? gsb : null;
-          if (gs) {
-            out[playerId] = {
-              x: lounge.x + gs.x,
-              z: lounge.z + gs.z,
-              yaw: gs.yaw,
-              yOffset: 0,
-            };
-            break;
-          }
-        }
-      }
-    }
-
-    // RPS game.result: after the match ends, make both players face each other for the badge (~3 s).
-    if (gameAnimation && Date.now() - gameAnimation.at < 3000) {
-      const [playerA, playerB] = gameAnimation.match.players;
-      const posA = out[playerA];
-      const posB = out[playerB];
-      if (posA && posB) {
-        const { yawA, yawB } = rpsFacing(posA, posB);
-        out[playerA] = { ...posA, yaw: yawA };
-        out[playerB] = { ...posB, yaw: yawB };
-      }
-    }
-
-    return out;
-  }, [layout, manager, visiting, spaces, loungeBreaks, lounge, list, gameAnimation, activeRpsMatch]);
+    const r = computeTargets({
+      layout, list, lounge, loungeBreaks, prevLoungeAssign: prevLoungeAssign.current,
+      managerId: manager?.id, managerVisit: visiting, activeRpsMatch, gameAnimation, now: Date.now(),
+    });
+    prevLoungeAssign.current = r.loungeAssign;
+    return r.targets as Record<string, RobotTarget>;
+    // visitClock: re-run when a visit expires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, manager, visiting, loungeBreaks, lounge, list, gameAnimation, activeRpsMatch, visitClock]);
+  // Owners who stepped away leave their chair swivelled (plain string so furniture only rebuilds on change).
+  // Target-based part updates immediately; the 4 Hz publisher below adds owners still walking back.
+  const [liveAway, setLiveAway] = useState("");
+  const awaySeats = useMemo(() => {
+    const fromTargets = awaySeatSignature(layout, targets);
+    if (!liveAway) return fromTargets;
+    const merged = new Set(fromTargets ? fromTargets.split(",") : []);
+    for (const k of liveAway.split(",")) merged.add(k);
+    return [...merged].sort().join(",");
+  }, [layout, targets, liveAway]);
 
   const youPose = useMemo(() => {
     const a = 45 * DEG;
@@ -736,89 +787,85 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
     return out;
   }, [layout.occupied, spaces]);
 
-  const colliders = useMemo(() => buildColliders(layout), [layout]);
+  // Office chairs are dynamic (pushChairs.ts: drawn pose, pushable or fixed); everything else is static.
+  const colliders = useMemo(() => buildColliders(layout, { excludeKinds: ["chair"] }), [layout]);
   const nextPose = layout.next && spaces.find((s) => s.id === layout.next!.space) ? seatPose(spaces.find((s) => s.id === layout.next!.space)!, layout.next.seat) : undefined;
   const at = (id: string) => livePos(id, targets[id]);
 
   // Throttled position publisher: push to usePositions ~4 times per second, only on change.
   // Reads livePositions (updated by Robot.tsx every frame) and augments with activity/spaceId.
+  // Perf: compares against the last published map field by field (was JSON.stringify of the whole
+  // snapshot every 250 ms) and reuses the previous entry object when nothing moved, so the MiniMap
+  // (the only subscriber) re-renders only when a robot actually moved or changed activity.
   const layoutRef = useRef(layout);
-  const spacesRef = useRef(spaces);
   const listRef = useRef(list);
   const targetsRef = useRef(targets);
   const loungeBreaksRef = useRef(loungeBreaks);
+  const liveAwayRef = useRef("");
   layoutRef.current = layout;
-  spacesRef.current = spaces;
   listRef.current = list;
   targetsRef.current = targets;
   loungeBreaksRef.current = loungeBreaks;
 
-  useFrame(({ clock: _clock }) => {
+  useFrame(() => {
     const now = Date.now();
     if (now - lastPublishRef.current < 250) return; // ~4 Hz
     lastPublishRef.current = now;
 
     const curLayout = layoutRef.current;
-    const curSpaces = spacesRef.current;
+    const curSpaces = curLayout.spaces;
     const curList = listRef.current;
     const curLoungeBreaks = loungeBreaksRef.current;
     const curTargets = targetsRef.current;
-
-    // Build a lounge agent set for fast lookup.
-    const loungeAgentSet = new Set<string>();
-    for (const [id] of curLoungeBreaks) loungeAgentSet.add(id);
-    for (const a of curList) {
-      if (a.lounging && a.role === "worker") loungeAgentSet.add(a.id);
-      const phase = agentRevivePhase(a);
-      if (phase === "fainted" || phase === "reviving") loungeAgentSet.add(a.id);
-    }
-
-    // Determine waiting agents (those assigned to lounge overflow spots).
+    const prev = usePositions.getState().byAgent;
     const loungeSpace = curSpaces.find((s) => s.kind === "lounge");
 
-    const result: Record<string, import("../state/positions").AgentPosition> = {};
+    let changed = false;
+    let count = 0;
+    const result: Record<string, AgentPosition> = {};
     for (const a of curList) {
       const target = curTargets[a.id];
       if (!target) continue;
       const lp = livePositions.get(a.id);
       const x = lp?.x ?? target.x;
       const z = lp?.z ?? target.z;
+      const phase = agentRevivePhase(a);
+      const fainted = phase === "fainted" || phase === "reviving";
+      const inLounge = curLoungeBreaks.has(a.id) || (a.lounging === true && a.role === "worker") || fainted;
 
-      // Determine activity from the live path and current room, with lounge/faint state taking precedence.
+      // Activity from the live path and current room, with lounge/faint state taking precedence.
       const liveSpace = spaceAt(curSpaces, x, z) ?? spaceAt(curSpaces, target.x, target.z);
       let activity: AgentActivity;
-      if (loungeAgentSet.has(a.id)) {
-        const phase = agentRevivePhase(a);
-        if (phase === "fainted" || phase === "reviving") {
-          activity = "fainted";
-        } else if (lp?.walking) {
-          activity = "walking";
-        } else if (curLoungeBreaks.has(a.id)) {
-          activity = "break";
-        } else if (liveSpace?.kind !== "lounge") {
-          activity = "waiting";
-        } else {
-          activity = "lounge";
-        }
-      } else {
-        if (lp?.walking) activity = "walking";
-        else if (liveSpace?.kind === "meeting") activity = "meeting";
-        else if (lp?.waiting) activity = "waiting";
-        else activity = "desk";
-      }
+      if (inLounge) {
+        if (fainted) activity = "fainted";
+        else if (lp?.walking) activity = "walking";
+        else if (curLoungeBreaks.has(a.id)) activity = "break";
+        else if (liveSpace?.kind !== "lounge") activity = "waiting";
+        else activity = "lounge";
+      } else if (lp?.walking) activity = "walking";
+      else if (liveSpace?.kind === "meeting") activity = "meeting";
+      else if (lp?.waiting) activity = "waiting";
+      else activity = "desk";
 
-      // Determine spaceId.
       const placement = curLayout.placements[a.id];
-      const spaceId = liveSpace?.id ?? (loungeAgentSet.has(a.id) ? loungeSpace?.id : placement?.space) ?? curSpaces[0]!.id;
-
-      result[a.id] = { x, z, spaceId, activity };
+      const spaceId = liveSpace?.id ?? (inLounge ? loungeSpace?.id : placement?.space) ?? curSpaces[0]!.id;
+      const old = prev[a.id];
+      // Round to cm: sub-cm drift is invisible on a 180 px map and would defeat the change check.
+      const rx = Math.round(x * 100) / 100;
+      const rz = Math.round(z * 100) / 100;
+      if (old && old.x === rx && old.z === rz && old.spaceId === spaceId && old.activity === activity) result[a.id] = old;
+      else { result[a.id] = { x: rx, z: rz, spaceId, activity }; changed = true; }
+      count++;
     }
+    if (!changed) for (const id in prev) if (!(id in result)) { changed = true; break; }
+    if (changed || count !== Object.keys(prev).length) usePositions.getState().set(result);
 
-    // Only publish when the snapshot actually changed.
-    const snapshot = JSON.stringify(result);
-    if (snapshot === lastSnapshotRef.current) return;
-    lastSnapshotRef.current = snapshot;
-    usePositions.getState().set(result);
+    // Chairs of owners still walking back to their seat stay swivelled until they sit down.
+    const away = awaySeatSignature(curLayout, curTargets, livePositions);
+    if (away !== liveAwayRef.current) {
+      liveAwayRef.current = away;
+      setLiveAway(away);
+    }
   });
 
   return (
@@ -826,9 +873,10 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       <color attach="background" args={[palette.bg]} />
       <fog attach="fog" args={[palette.bg, palette.fog[0], palette.fog[1]]} />
       <Lights palette={palette} spaces={spaces} />
+      <ShadowThrottle signature={`${palette.bg}|${spaces.length}|${awaySeats}|${list.length}`} />
       <Ground palette={palette} />
       <Floors spaces={spaces} palette={palette} layout={layout} managerName={manager?.name} />
-      <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} />
+      <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} away={awaySeats} />
       {spaces.filter(s => s.kind !== "lounge").map(s => <Whiteboard key={s.id} space={s} onOpen={onBoard} />)}
       {spaces.filter(s => s.kind === "meeting").map(s => <MeetingTV key={`tv-${s.id}`} space={s} />)}
       <DropMarker spaces={spaces} />
@@ -923,6 +971,23 @@ export function Office({ onCreate }: { onCreate: () => void }) {
     return () => { delete (window as unknown as Record<string, unknown>).__setWalking; };
   }, [setWalking]);
 
+  // Read-only probes for Playwright screenshot specs (store, live robot positions, board poses).
+  useEffect(() => {
+    const w = window as unknown as Record<string, unknown>;
+    w.__agenticviewTest = Object.assign((w.__agenticviewTest as object | undefined) ?? {}, {
+      store: useStore,
+      inject: (msg: ServerMessage) => ingestMessage(useStore, msg),
+      agentPos: (id: string) => livePositions.get(id),
+      chairs: () => chairField.chairs.map((c) => ({ id: c.id, x: c.x, z: c.z, baseX: c.baseX, baseZ: c.baseZ, yaw: c.yaw, pushable: c.pushable })),
+      boardPose: (spaceId: string) => {
+        const state = useStore.getState();
+        const space = layoutFor(Object.values(state.agents), state.spaceNames).spaces.find((s) => s.id === spaceId);
+        return space ? whiteboardPose(space) : undefined;
+      },
+    });
+    return () => { delete (window as unknown as Record<string, unknown>).__agenticviewTest; };
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Ignore when typing in a text field.
@@ -958,6 +1023,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
         camera={{ position: [30, 36, 30], fov: 38, near: 0.5, far: 220 }}
         shadows
         gl={{ antialias: true, powerPreference: "high-performance" }}
+        onCreated={({ gl }) => applyRenderTuning(gl)}
         onPointerMissed={() => {
           select(undefined);
           useFocus.getState().setHover(undefined);
@@ -971,6 +1037,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
           flipflops={4}
           onFallback={() => setDpr(1)}
         />
+        <GlProbe />
         <Suspense fallback={null}>
           <Scene onCreate={onCreate} palette={palette} onBoard={setBoardSpace} />
         </Suspense>

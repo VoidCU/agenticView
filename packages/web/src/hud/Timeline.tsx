@@ -1,257 +1,173 @@
 import { useMemo, useState } from "react";
-import { planOffice, type Task } from "@agenticview/shared";
-import { useStore, type FeedItem } from "../state/store";
-import { filterTasksByRoom, getAgentRoomId } from "../state/taskGroups";
-import { timeAgo } from "./ui";
+import type { Agent, Task } from "@agenticview/shared";
+import { useStore } from "../state/store";
+import { filesChangedForTask } from "../state/boards";
+import { buildWorkflow, formatDuration, involvedAgents, mainTasks, type WorkflowStep } from "../state/workflow";
+import { SimpleMarkdown, inlineMarkdown } from "./markdown";
+import { TaskDrawer } from "./PodBoard";
+import { providerLabel, timeAgo } from "./ui";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+/**
+ * Timeline: one row per user request (main task). Opening a row shows its workflow, the story in
+ * order, derived on open from the task tree and logs (buildWorkflow, memoised on the store maps).
+ */
 
-export interface TimelineEntry {
-  id: string;
-  ts: number;
-  agentId: string;
-  agentName: string;
-  agentColor: string;
-  kind: "task.created" | "task.started" | "task.done" | "task.failed" | "task.waiting" | "file.changed" | "question";
-  label: string;
-  detail?: string;
+const STEP_ICON: Record<WorkflowStep["kind"], string> = {
+  asked: "›",
+  received: "◆",
+  delegate: "→",
+  question: "?",
+  failover: "⚡",
+  reply: "←",
+  final: "✓",
+};
+
+const STATUS_LABEL: Record<Task["status"], string> = {
+  queued: "Queued",
+  assigned: "Assigned",
+  running: "Running",
+  waiting: "Waiting on you",
+  done: "Done",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+function clock(ts: number): string {
+  if (Number.isNaN(ts)) return "";
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function entryKindIcon(kind: TimelineEntry["kind"]): string {
-  switch (kind) {
-    case "task.created": return "·";
-    case "task.started": return "▶";
-    case "task.done": return "✓";
-    case "task.failed": return "✗";
-    case "task.waiting": return "?";
-    case "file.changed": return "✎";
-    case "question": return "❓";
-  }
+function Step({ step, agents, onOpen }: { step: WorkflowStep; agents: Record<string, Agent>; onOpen: (taskId: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const color = step.agentId ? agents[step.agentId]?.appearance.color : undefined;
+  const bad = step.ok === false || step.kind === "failover";
+  return (
+    <li className={`wf-step wf-${step.kind}${bad ? " wf-bad" : ""}`} data-testid="wf-step" data-kind={step.kind}>
+      <span className="wf-rail" aria-hidden="true">
+        <span className="wf-node" style={color ? { borderColor: color } : undefined}>
+          {STEP_ICON[step.kind]}
+        </span>
+      </span>
+      <div className="wf-card">
+        <button type="button" className="wf-head" onClick={() => onOpen(step.taskId)} title="Open task details">
+          <span className="wf-title">{step.title}</span>
+          {step.retry && <span className="wf-tag">retry</span>}
+        </button>
+        <div className="wf-meta">
+          <time dateTime={new Date(step.ts).toISOString()}>{clock(step.ts)}</time>
+          {step.durationMs !== undefined && <span className="wf-dur">took {formatDuration(step.durationMs)}</span>}
+          {step.tools && <span className="wf-tools">used {step.tools.join(", ")}</span>}
+        </div>
+        {step.summary && !expanded && <p className="wf-summary">{inlineMarkdown(step.summary)}</p>}
+        {step.full && (
+          <>
+            {expanded && <SimpleMarkdown text={step.full} className="wf-full" />}
+            <button type="button" className="link wf-more" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
+              {expanded ? "Show less" : "Show all"}
+            </button>
+          </>
+        )}
+      </div>
+    </li>
+  );
 }
 
-function entryKindClass(kind: TimelineEntry["kind"]): string {
-  switch (kind) {
-    case "task.created": return "tl-created";
-    case "task.started": return "tl-started";
-    case "task.done": return "tl-done";
-    case "task.failed": return "tl-failed";
-    case "task.waiting": return "tl-waiting";
-    case "file.changed": return "tl-file";
-    case "question": return "tl-question";
-  }
+function Workflow({ root, onOpen }: { root: Task; onOpen: (taskId: string) => void }) {
+  const tasks = useStore((s) => s.tasks);
+  const agents = useStore((s) => s.agents);
+  // Derived only while open; recomputed when the task or agent maps change.
+  const steps = useMemo(() => buildWorkflow(root, tasks, agents, (p) => providerLabel(p, "Automatic")), [root, tasks, agents]);
+  return (
+    <ol className="wf-list" aria-label={`Workflow: ${root.title}`}>
+      {steps.map((s) => (
+        <Step key={s.id} step={s} agents={agents} onOpen={onOpen} />
+      ))}
+    </ol>
+  );
 }
 
-// ── Build entries from store ──────────────────────────────────────────────────
-
-/** Build timeline entries from tasks and the live feed. Newest first. */
-export function buildTimeline(
-  tasks: Record<string, Task>,
-  feed: Record<string, FeedItem[]>,
-  agents: Record<string, import("@agenticview/shared").Agent>,
-): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
-  let seq = 0;
-
-  for (const task of Object.values(tasks)) {
-    const agent = agents[task.assigneeId];
-    const name = agent?.name ?? task.assigneeId ?? "Unknown";
-    const color = agent?.appearance.color ?? "#6b7280";
-    const base = { agentId: task.assigneeId, agentName: name, agentColor: color };
-
-    entries.push({
-      ...base,
-      id: `tc-${task.id}`,
-      ts: Date.parse(task.createdAt),
-      kind: "task.created",
-      label: `Task created: ${task.title}`,
-    });
-
-    if (task.startedAt) {
-      entries.push({
-        ...base,
-        id: `ts-${task.id}`,
-        ts: Date.parse(task.startedAt),
-        kind: "task.started",
-        label: `Started: ${task.title}`,
-      });
-    }
-
-    if (task.finishedAt) {
-      if (task.status === "done") {
-        entries.push({
-          ...base,
-          id: `td-${task.id}`,
-          ts: Date.parse(task.finishedAt),
-          kind: "task.done",
-          label: `Done: ${task.title}`,
-          detail: task.result ?? undefined,
-        });
-      } else if (task.status === "failed") {
-        entries.push({
-          ...base,
-          id: `tf-${task.id}`,
-          ts: Date.parse(task.finishedAt),
-          kind: "task.failed",
-          label: `Failed: ${task.title}`,
-          detail: task.error ?? undefined,
-        });
-      }
-    }
-
-    if (task.status === "waiting") {
-      entries.push({
-        ...base,
-        id: `tw-${task.id}`,
-        ts: Date.parse(task.startedAt ?? task.createdAt),
-        kind: "task.waiting",
-        label: `Waiting on you: ${task.title}`,
-      });
-    }
-  }
-
-  // Add file changes and questions from feed
-  for (const [agentId, items] of Object.entries(feed)) {
-    const agent = agents[agentId];
-    const name = agent?.name ?? agentId;
-    const color = agent?.appearance.color ?? "#6b7280";
-
-    for (const item of items) {
-      if (!("event" in item)) continue;
-      if (item.event.type === "file_changed") {
-        entries.push({
-          id: `fc-${agentId}-${item.ts}-${++seq}`,
-          ts: item.ts,
-          agentId,
-          agentName: name,
-          agentColor: color,
-          kind: "file.changed",
-          label: `File ${item.event.kind}: ${item.event.path.split(/[\\/]/).pop() ?? item.event.path}`,
-          detail: item.event.path,
-        });
-      }
-    }
-  }
-
-  // Sort newest first
-  return entries.sort((a, b) => b.ts - a.ts).slice(0, 300);
+function RequestRow({ task, open, onToggle, onOpenTask }: { task: Task; open: boolean; onToggle: () => void; onOpenTask: (taskId: string) => void }) {
+  const tasks = useStore((s) => s.tasks);
+  const involved = useMemo(() => involvedAgents(task, tasks).length, [task, tasks]);
+  const end = task.finishedAt ? Date.parse(task.finishedAt) : NaN;
+  const took = Number.isNaN(end) ? undefined : formatDuration(Math.max(0, end - Date.parse(task.createdAt)));
+  return (
+    <li className={`tl-request${open ? " tl-open" : ""}`} data-testid="tl-entry">
+      <button type="button" className="tl-request-btn" aria-expanded={open} onClick={onToggle}>
+        <span className={`tl-status tl-status-${task.status}`}>{STATUS_LABEL[task.status]}</span>
+        <span className="tl-request-title">{task.title}</span>
+        <span className="tl-request-meta">
+          <time dateTime={task.createdAt}>{timeAgo(task.createdAt)}</time>
+          <span>
+            {involved} agent{involved === 1 ? "" : "s"}
+          </span>
+          {took && <span>took {took}</span>}
+        </span>
+      </button>
+      {open && <Workflow root={task} onOpen={onOpenTask} />}
+    </li>
+  );
 }
 
-// ── Timeline panel ────────────────────────────────────────────────────────────
+function Drawer({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+  const task = useStore((s) => s.tasks[taskId]);
+  const agent = useStore((s) => (task ? s.agents[task.assigneeId] : undefined));
+  const feed = useStore((s) => (task ? s.feed[task.assigneeId] : undefined));
+  const files = useMemo(() => (task ? filesChangedForTask(task.id, feed ?? []) : []), [task, feed]);
+  if (!task) return null;
+  return (
+    <>
+      <div className="task-sheet-dim" onClick={onClose} aria-hidden="true" />
+      <TaskDrawer task={task} agent={agent} filesChanged={files} onClose={onClose} />
+    </>
+  );
+}
 
 export function Timeline({ onClose }: { onClose: () => void }) {
   const tasks = useStore((s) => s.tasks);
   const agents = useStore((s) => s.agents);
-  const feed = useStore((s) => s.feed);
-  const spaceNames = useStore((s) => s.spaceNames);
-  const world = useStore((s) => s.world);
-
   const [selectedAgent, setSelectedAgent] = useState("");
-  const [selectedRoom, setSelectedRoom] = useState("");
+  const [openId, setOpenId] = useState<string>();
+  const [drawerId, setDrawerId] = useState<string>();
 
   const agentList = useMemo(() => Object.values(agents), [agents]);
-  const plan = useMemo(() => planOffice(agentList), [agentList]);
-
-  const rooms = useMemo(() => {
-    const list: { id: string; name: string }[] = [];
-    const seen = new Set<string>();
-    for (const s of plan.spaces) {
-      seen.add(s.id);
-      list.push({ id: s.id, name: spaceNames[s.id]?.trim() || s.name });
-    }
-    for (const a of agentList) {
-      const sp = a.placement?.space;
-      if (sp && !seen.has(sp)) {
-        seen.add(sp);
-        list.push({ id: sp, name: spaceNames[sp]?.trim() || sp });
-      }
-    }
-    return list;
-  }, [plan.spaces, spaceNames, agentList]);
-
-  const allEntries = useMemo(() => buildTimeline(tasks, feed, agents), [tasks, feed, agents]);
-
-  // Filter by agent
-  const agentFiltered = useMemo(() => {
-    if (!selectedAgent) return allEntries;
-    return allEntries.filter((e) => e.agentId === selectedAgent);
-  }, [allEntries, selectedAgent]);
-
-  // Filter by room — find agents in that room and filter by them
-  const entries = useMemo(() => {
-    if (!selectedRoom) return agentFiltered;
-    const agentsInRoom = new Set(
-      agentList
-        .filter((a) => getAgentRoomId(a, plan.placements) === selectedRoom)
-        .map((a) => a.id)
-    );
-    return agentFiltered.filter((e) => agentsInRoom.has(e.agentId));
-  }, [agentFiltered, selectedRoom, agentList, plan.placements]);
+  const requests = useMemo(() => {
+    const all = mainTasks(tasks);
+    if (!selectedAgent) return all;
+    return all.filter((t) => involvedAgents(t, tasks).includes(selectedAgent));
+  }, [tasks, selectedAgent]);
 
   return (
-    <div className="panel panel-timeline" aria-label="Activity timeline" data-testid="timeline-panel">
+    <div className={`panel panel-timeline${openId ? " tl-has-open" : ""}`} aria-label="Activity timeline" data-testid="timeline-panel">
       <div className="panel-head">
         <h2>Timeline</h2>
-        <span className="panel-count">{entries.length}</span>
+        <span className="panel-count">{requests.length}</span>
         <div className="tl-filters">
-          <select
-            className="task-room-select"
-            value={selectedAgent}
-            onChange={(e) => setSelectedAgent(e.target.value)}
-            aria-label="Filter by agent"
-          >
+          <select className="task-room-select" value={selectedAgent} onChange={(e) => setSelectedAgent(e.target.value)} aria-label="Filter by agent">
             <option value="">All agents</option>
             {agentList.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
             ))}
           </select>
-          {rooms.length > 0 && (
-            <select
-              className="task-room-select"
-              value={selectedRoom}
-              onChange={(e) => setSelectedRoom(e.target.value)}
-              aria-label="Filter by room"
-            >
-              <option value="">All rooms</option>
-              {rooms.map((r) => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
-            </select>
-          )}
         </div>
         <button type="button" className="btn btn-ghost btn-xs tl-close" onClick={onClose} aria-label="Close timeline">
           Close
         </button>
       </div>
       <div className="panel-body tl-body">
-        {entries.length === 0 ? (
-          <p className="empty">No activity yet.</p>
+        {requests.length === 0 ? (
+          <p className="empty">No activity yet. Requests you give the office show up here as workflows.</p>
         ) : (
-          <ol className="tl-list" aria-label="Activity log">
-            {entries.map((e) => (
-              <li key={e.id} className={`tl-entry ${entryKindClass(e.kind)}`} data-testid="tl-entry">
-                <span
-                  className="tl-avatar"
-                  style={{ background: e.agentColor }}
-                  aria-hidden="true"
-                  title={e.agentName}
-                >
-                  {e.agentName.charAt(0).toUpperCase()}
-                </span>
-                <div className="tl-entry-body">
-                  <span className="tl-icon" aria-hidden="true">{entryKindIcon(e.kind)}</span>
-                  <span className="tl-label">{e.label}</span>
-                  {e.detail && <span className="tl-detail" title={e.detail}>{e.detail}</span>}
-                </div>
-                <time className="tl-time" dateTime={new Date(e.ts).toISOString()}>
-                  {timeAgo(new Date(e.ts).toISOString())}
-                </time>
-              </li>
+          <ol className="tl-list" aria-label="Requests">
+            {requests.map((t) => (
+              <RequestRow key={t.id} task={t} open={openId === t.id} onToggle={() => setOpenId((id) => (id === t.id ? undefined : t.id))} onOpenTask={setDrawerId} />
             ))}
           </ol>
         )}
       </div>
+      {drawerId && <Drawer taskId={drawerId} onClose={() => setDrawerId(undefined)} />}
     </div>
   );
 }

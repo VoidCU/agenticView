@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import type { Provider } from "@agenticview/shared";
+import { DEFAULT_IDLE_BEHAVIOUR, type Provider } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { LimitChip, SwitchProviderModal } from "./LimitChip";
 import { UsagePanel } from "./UsagePanel";
@@ -15,9 +15,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [provider, setProvider] = useState<Provider | "">(settings?.defaultProvider ?? "");
   const [model, setModel] = useState(settings?.defaultModel ?? "");
   const [max, setMax] = useState(settings?.maxConcurrentRuns ?? 3);
-  const [limitPolicy, setLimitPolicy] = useState<"ask" | "auto">(settings?.limitPolicy ?? "ask");
+  const [limitPolicy, setLimitPolicy] = useState<"ask" | "auto" | "manager">(settings?.limitPolicy ?? "ask");
   const [loungeBreaks, setLoungeBreaks] = useState(settings?.loungeBreaks ?? true);
   const [idleLoungeMinutes, setIdleLoungeMinutes] = useState(settings?.idleLoungeMinutes ?? 3);
+  const idle = settings?.idleBehaviour ?? DEFAULT_IDLE_BEHAVIOUR;
+  const [deskPct, setDeskPct] = useState(Math.round(idle.stayChance * 100));
+  const [visitPct, setVisitPct] = useState(Math.round(idle.visitChance * 100));
+  const [loungePct, setLoungePct] = useState(Math.round(idle.loungeChance * 100));
+  const pctSum = deskPct + visitPct + loungePct;
+  const pctValid = pctSum === 100 && [deskPct, visitPct, loungePct].every((p) => Number.isInteger(p) && p >= 0 && p <= 100);
   const [preferCheapModels, setPreferCheapModels] = useState(settings?.preferCheapModels ?? false);
   const [failoverOrder, setFailoverOrder] = useState<Provider[]>(settings?.failoverOrder ?? []);
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => getNotificationPref());
@@ -26,6 +32,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    if (!pctValid) return;
     send({
       type: "settings.update",
       settings: {
@@ -37,6 +44,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         loungeBreaks,
         idleLoungeMinutes: Math.min(60, Math.max(0, Math.round(idleLoungeMinutes))),
         preferCheapModels,
+        idleBehaviour: { ...idle, stayChance: deskPct / 100, visitChance: visitPct / 100, loungeChance: loungePct / 100 },
       },
     });
     onClose();
@@ -91,11 +99,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <span>When an agent hits a limit</span>
               <select
                 value={limitPolicy}
-                onChange={(e) => setLimitPolicy(e.target.value as "ask" | "auto")}
+                onChange={(e) => setLimitPolicy(e.target.value as "ask" | "auto" | "manager")}
                 aria-label="Limit policy"
               >
                 <option value="ask">Ask me</option>
                 <option value="auto">Switch automatically</option>
+                <option value="manager">Switch automatically, Manager reviews</option>
               </select>
             </label>
             <label className="field field-toggle">
@@ -107,17 +116,49 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 aria-label="Lounge breaks"
               />
             </label>
-            <label className="field">
-              <span>Go to the lounge after idle (minutes, 0 = off)</span>
-              <input
-                type="number"
-                min={0}
-                max={60}
-                value={idleLoungeMinutes}
-                onChange={(e) => setIdleLoungeMinutes(Number(e.target.value))}
-                aria-label="Idle lounge minutes"
-              />
-            </label>
+            <fieldset className="field-set office-life" aria-describedby="office-life-hint">
+              <legend>Office life</legend>
+              <label className="field">
+                <span>Idle minutes before workers wander (0 = off)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  value={idleLoungeMinutes}
+                  onChange={(e) => setIdleLoungeMinutes(Number(e.target.value))}
+                  aria-label="Idle lounge minutes"
+                />
+              </label>
+              <div className="office-life-pcts">
+                {([
+                  ["Stay at desk", deskPct, setDeskPct],
+                  ["Visit a colleague or board", visitPct, setVisitPct],
+                  ["Go to the lounge", loungePct, setLoungePct],
+                ] as const).map(([label, value, set]) => (
+                  <label key={label} className="field">
+                    <span>{label} %</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={value}
+                      onChange={(e) => set(Number(e.target.value))}
+                      aria-label={`${label} percent`}
+                      aria-invalid={!pctValid}
+                    />
+                  </label>
+                ))}
+              </div>
+              {!pctValid && (
+                <p className="hint hint-error" role="alert">
+                  The three chances must be whole numbers that add up to 100 (now {pctSum}).
+                </p>
+              )}
+              <p className="hint" id="office-life-hint">
+                Each idle roll picks one of these. At most half the lounge spots are used by idle workers; when the lounge is that full, a roll stays at the desk.
+              </p>
+            </fieldset>
             <label className="field field-toggle">
               <span>Prefer cheap models</span>
               <input
@@ -207,7 +248,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <button type="button" className="btn btn-ghost" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
+            <button type="submit" className="btn btn-primary" disabled={!pctValid}>
               Save settings
             </button>
           </div>

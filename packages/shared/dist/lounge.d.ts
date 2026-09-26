@@ -92,6 +92,15 @@ export declare function nearbyRpsPairs(assignment: Record<string, string>, spots
     b: string;
     dist: number;
 }[];
+/**
+ * Every pair of lounging agents that may play rock-paper-scissors: any two agents with a lounge spot,
+ * wherever they sit (one walks over and invites the other; both then walk to the centre table's game
+ * spots). Deterministic order by agent ids; each pair is [a, b] with a < b.
+ */
+export declare function loungeRpsPairs(assignment: Record<string, string>): {
+    a: string;
+    b: string;
+}[];
 /** The layout + assignment the scene uses for a set of lounging agents (same call as Office.tsx). */
 export declare function loungeAssignmentFor(agentIds: string[], prior?: Record<string, string>): {
     layout: LoungeLayout;

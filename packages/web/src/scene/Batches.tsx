@@ -58,7 +58,10 @@ export function useMaterials(p: Palette): Record<Mat, THREE.Material> {
 
 const NO_SHADOW: ReadonlySet<Mat> = new Set<Mat>(["glass", "screen", "lampGlow", "rugOffice", "rugLounge", "rugLounge2", "accent", "book"]);
 
-function Batch({ items, geometry, material, shadows }: { items: Item[]; geometry: THREE.BufferGeometry; material: THREE.Material; shadows: boolean }) {
+/** Where each kit item landed: item index -> (instanced mesh, instance index). Lets a pushed chair move its instances in place. */
+export type InstanceRegistry = Map<number, { mesh: THREE.InstancedMesh; index: number }>;
+
+function Batch({ items, indices, geometry, material, shadows, registry }: { items: Item[]; indices: number[]; geometry: THREE.BufferGeometry; material: THREE.Material; shadows: boolean; registry?: InstanceRegistry }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   useLayoutEffect(() => {
     const mesh = ref.current;
@@ -73,34 +76,36 @@ function Batch({ items, geometry, material, shadows }: { items: Item[]; geometry
       m.compose(new THREE.Vector3(it.x, it.y, it.z), q, new THREE.Vector3(it.sx, it.sy, it.sz));
       mesh.setMatrixAt(i, m);
       mesh.setColorAt(i, c.set(it.color ?? "#ffffff"));
+      registry?.set(indices[i]!, { mesh, index: i });
     });
     mesh.count = items.length;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere();
-  }, [items]);
+  }, [items, indices, registry]);
   return <instancedMesh ref={ref} args={[geometry, material, items.length]} castShadow={shadows} receiveShadow={shadows} raycast={() => null} />;
 }
 
 /** Draw a kit: one instanced mesh per (primitive, material). */
-export function Batches({ items, materials }: { items: Item[]; materials: Record<Mat, THREE.Material> }) {
+export function Batches({ items, materials, registry }: { items: Item[]; materials: Record<Mat, THREE.Material>; registry?: InstanceRegistry }) {
   const groups = useMemo(() => {
-    const map = new Map<string, Item[]>();
-    for (const it of items) {
+    const map = new Map<string, { list: Item[]; indices: number[] }>();
+    items.forEach((it, i) => {
       const key = `${it.prim}|${it.mat}`;
-      let list = map.get(key);
-      if (!list) map.set(key, (list = []));
-      list.push(it);
-    }
+      let g = map.get(key);
+      if (!g) map.set(key, (g = { list: [], indices: [] }));
+      g.list.push(it);
+      g.indices.push(i);
+    });
     return [...map.entries()];
   }, [items]);
   const g = geometries();
   return (
     <group>
-      {groups.map(([key, list]) => {
+      {groups.map(([key, { list, indices }]) => {
         const [prim, mat] = key.split("|") as [Prim, Mat];
         // Keyed by size too: an InstancedMesh cannot grow after creation.
-        return <Batch key={`${key}:${list.length}`} items={list} geometry={g[prim]} material={materials[mat]} shadows={!NO_SHADOW.has(mat)} />;
+        return <Batch key={`${key}:${list.length}`} items={list} indices={indices} geometry={g[prim]} material={materials[mat]} shadows={!NO_SHADOW.has(mat)} registry={registry} />;
       })}
     </group>
   );

@@ -5,6 +5,7 @@ import { classifyError } from "../runtimes/errors.js";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { buildRosterPreamble } from "./preamble.js";
 import { SessionRuntime } from "../runtimes/session.js";
+import { identityLine, memoryBlock, recordFor } from "../agents/memory.js";
 import { MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
 /** Legacy fallback provider order used when failoverOrder is empty. */
 const REVIVE_CANDIDATES_FALLBACK = ["claude-session", "antigravity", "codex", "gemini", "claude"];
@@ -284,13 +285,33 @@ export class Orchestrator {
             const suggested = this.pickReviveProvider(failedProvider);
             const fainted = await registry.update(agent.id, { revive: { phase: "fainted", managerId, suggested, failedTaskId } });
             this.emitAgent(fainted);
-            if (s.limitPolicy === "auto" && suggested) {
+            const managerDecides = s.limitPolicy === "manager";
+            const resetAt = this.deps.usageTracker?.getProviderLimit(failedProvider)?.resetAt ?? agent.limit?.resetAt;
+            if ((s.limitPolicy === "auto" || managerDecides) && suggested) {
                 // Short delay then switch and retry automatically (only when an alternate provider is available).
                 const revivingAgent = await registry.update(agent.id, { revive: { phase: "reviving", managerId, suggested, failedTaskId } });
                 this.emitAgent(revivingAgent);
                 await delay(this.deps.reviveDelayMs ?? 6000);
                 await this.reviveAgent(agent.id, suggested.provider, suggested.model);
+                if (managerDecides) {
+                    const now = new Date().toISOString();
+                    this.addProviderNote(`${agent.name} (${agent.id}) hit ${failedProvider} limit at ${now}, resets ${resetAt ?? "unknown"}; now on ${suggested.provider}/${suggested.model ?? "default"} via failover (task ${failedTaskId} retried). ${this.limitSummary()}`);
+                    // Keep an Inbox entry for the user; choosing another provider there switches the agent again.
+                    const id = newId("lim");
+                    const info = { id, agentId: agent.id, taskId: failedTaskId, suggested, reason: `${errorText} (switched automatically; the Manager reviews the placement)` };
+                    this.deps.bus.emit({ type: "limit.request", ...info });
+                    this.pendingLimits.set(id, {
+                        info,
+                        resolve: (answer, provider, model) => {
+                            if (answer === "choose" && provider)
+                                void this.reviveAgent(agent.id, provider, model);
+                        },
+                    });
+                }
                 return;
+            }
+            if (managerDecides) {
+                this.addProviderNote(`${agent.name} (${agent.id}) hit ${failedProvider} limit at ${new Date().toISOString()}, resets ${resetAt ?? "unknown"}; no failover provider available, so the user was asked (task ${failedTaskId}). ${this.limitSummary()}`);
             }
             // No alternate provider available, or limitPolicy === "ask": prompt the user.
             {
@@ -431,21 +452,85 @@ export class Orchestrator {
         file[key] = { provider, sessionId };
         await writeJsonFile(this.sessionFile(agent.id), file);
     }
-    async buildPrompt(task, agent) {
+    async buildPrompt(task, agent, provider) {
         let text;
         if (task.kind === "request") {
             const preamble = buildRosterPreamble(await this.deps.info(), await this.deps.registry.list(), await this.deps.tasks.list());
             const target = this.deps.world.kind === "hub" && task.projectPath ? `\n\nTarget project: ${task.projectPath} (pass this as projectPath to assign_task)` : "";
-            text = `${preamble}${target}\n\n## User request\n${task.description}`;
-        }
-        else if (task.kind === "work") {
-            text = `${task.title}\n\n${task.description}`;
+            const notes = this.takeProviderNotes();
+            const notesBlock = notes.length ? `\n\n## Provider notes\n${notes.map((n) => `- ${n}`).join("\n")}` : "";
+            text = `${preamble}${target}${notesBlock}\n\n## User request\n${task.description}`;
         }
         else {
-            text = task.description;
+            const body = task.kind === "work" ? `${task.title}\n\n${task.description}` : task.description;
+            if (agent.role === "worker" && provider !== "claude-session") {
+                // Identity + memory make a model/provider switch seamless. A claude-session run gets both from the
+                // session task itself (formatTask: "You are the office agent ..." and "Your recent work", read
+                // from the same memory store in world.ts prepare).
+                const parts = [identityLine(agent)];
+                if (this.deps.memory) {
+                    const block = memoryBlock(await this.deps.memory.recent(this.memoryKey(task), agent.id).catch(() => []), task.id);
+                    if (block)
+                        parts.push(block);
+                }
+                parts.push(task.kind === "work" ? `## Task\n${body}` : body);
+                text = parts.join("\n\n");
+            }
+            else {
+                text = body;
+            }
         }
-        void agent;
         return [{ type: "text", text }, ...task.images.map((path) => ({ type: "image", path }))];
+    }
+    /** Project path the agent memory of a task is kept under ("" = the world root). */
+    memoryKey(task) {
+        return task.projectPath || (this.deps.world.kind === "project" ? this.deps.world.projectPath : "");
+    }
+    /** Append a finished worker task to its agent's memory (any provider). */
+    async remember(task, provider, model) {
+        if (!this.deps.memory || (task.status !== "done" && task.status !== "failed"))
+            return;
+        try {
+            const agent = await this.deps.registry.get(task.assigneeId);
+            if (!agent || agent.role !== "worker")
+                return;
+            let usedModel = model ?? null;
+            if (provider === "claude-session" && task.worker?.sessionId && this.deps.sessions) {
+                usedModel = (await this.deps.sessions()).find((s) => s.id === task.worker.sessionId)?.model ?? null;
+            }
+            const rec = recordFor(task, provider ?? agent.provider, usedModel ?? (provider === "claude-session" ? null : agent.model));
+            if (rec)
+                await this.deps.memory.append(this.memoryKey(task), agent.id, rec);
+        }
+        catch (e) {
+            console.error("[agenticview] recording agent memory failed", e.message);
+        }
+    }
+    /** "Limits now: codex limited until X; antigravity ok; ..." for the configured providers. */
+    limitSummary() {
+        const parts = [];
+        for (const p of PROVIDER_ORDER) {
+            if (!this.deps.runtimes.has(p))
+                continue;
+            const lim = this.deps.usageTracker?.getProviderLimit(p);
+            parts.push(lim?.limited ? `${p} limited${lim.resetAt ? ` until ${lim.resetAt}` : ""}` : `${p} ok`);
+        }
+        return parts.length ? `Limits now: ${parts.join("; ")}.` : "";
+    }
+    /** Notes for the Manager's next preamble (limit policy "manager"). */
+    providerNotes = [];
+    /** Queue a note for the Manager's next request preamble. */
+    addProviderNote(note) {
+        this.providerNotes.push(note);
+        if (this.providerNotes.length > 20)
+            this.providerNotes.splice(0, this.providerNotes.length - 20);
+    }
+    /** Notes waiting for the Manager (read without consuming; for tests and snapshots). */
+    peekProviderNotes() {
+        return [...this.providerNotes];
+    }
+    takeProviderNotes() {
+        return this.providerNotes.splice(0, this.providerNotes.length);
     }
     /**
      * claude-session deadlock guard for a Manager run `runId`. A session runs several tasks at once (one
@@ -495,6 +580,8 @@ export class Orchestrator {
                 cheapProvider: this.deps.settings().preferCheapModels ? () => this.cheapProvider() : undefined,
                 addRoom: this.deps.addRoom,
                 emitBrainstorm: (ev) => this.deps.bus.emit(ev),
+                sessions: this.deps.sessions,
+                providerOf: async (a) => (await this.resolveProviderLive(a)).provider,
             });
         }
         return task.readOnly ? [] : this.deps.workerTools?.(agent, task) ?? [];
@@ -540,6 +627,7 @@ export class Orchestrator {
         let releaseConvo = () => { };
         let runAgent;
         let runProvider;
+        let runModelName;
         try {
             const savedAgent = await registry.get(task.assigneeId);
             const agent = savedAgent && task.readOnly ? { ...savedAgent, tools: { edit: false, shell: false, web: false, screenshot: false } } : savedAgent;
@@ -553,8 +641,15 @@ export class Orchestrator {
                 final = await this.finish(task, "failed", { error: problem });
                 return;
             }
-            const { provider, model } = await this.resolveProviderLive(agent);
+            const resolved = await this.resolveProviderLive(agent);
+            const provider = resolved.provider;
             runProvider = provider;
+            // Per-task tier (assign_task model/effort) applies only while the agent is still on the provider it was chosen for.
+            const tier = task.tier && task.tier.provider === provider ? task.tier : undefined;
+            // A claude-session agent inherits model and effort from the session that serves it.
+            const model = provider === "claude-session" ? undefined : (tier?.model ?? resolved.model);
+            runModelName = model;
+            const runEffort = provider === "claude-session" ? undefined : (tier?.effort ?? agent.effort);
             const runtime = this.deps.runtimes.get(provider);
             await tasks.transition(task.id, "running");
             const key = this.sessionKey(task, agent);
@@ -578,7 +673,7 @@ export class Orchestrator {
                 readOnly: task.readOnly,
                 agent,
                 cwd,
-                prompt: await this.buildPrompt(task, agent),
+                prompt: await this.buildPrompt(task, agent, provider),
                 systemPrompt: task.readOnly ? `You are ${agent.name}, an expert in ${agent.specialty || "general engineering"}. Give your expert view in 5-10 bullet points. Do not edit files or run commands.` : agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
                 sessionId,
                 tools: agent.tools,
@@ -586,7 +681,7 @@ export class Orchestrator {
                 bridgeToken,
                 permissionMode: agent.permissionMode,
                 model,
-                effort: effectiveEffort(provider, model, agent.effort) ?? undefined,
+                effort: effectiveEffort(provider, model, runEffort) ?? undefined,
                 onPermission: (p) => this.requestPermission(task.id, agent.id, p),
             };
             let chain = Promise.resolve();
@@ -676,6 +771,7 @@ export class Orchestrator {
             if (settled && isTerminal(settled.status)) {
                 if (settled.status !== "cancelled")
                     await tasks.awardXp(registry, settled);
+                await this.remember(settled, runProvider, runModelName);
                 const agent = await registry.get(settled.assigneeId);
                 if (agent)
                     this.emitAgent(agent);

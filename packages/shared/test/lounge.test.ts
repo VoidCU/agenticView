@@ -5,6 +5,7 @@ import {
   assignLoungeSpots,
   rpsFacing,
   nearbyRpsPairs,
+  loungeRpsPairs,
   loungeAssignmentFor,
   RPS_PAIR_MAX_DIST,
   type LoungeFurniturePiece,
@@ -214,6 +215,12 @@ describe("nearbyRpsPairs", () => {
         expect(paired.has(`${ids[i]}|${ids[j]}`)).toBe(d <= RPS_PAIR_MAX_DIST);
       }
     }
+  });
+
+  it("loungeRpsPairs pairs any two lounging agents, near or far", () => {
+    expect(loungeRpsPairs({ b: "counter-2", a: "sofa-0" })).toEqual([{ a: "a", b: "b" }]);
+    expect(loungeRpsPairs({ a: "sofa-0", b: "sofa-1", c: "counter-2" })).toHaveLength(3);
+    expect(loungeRpsPairs({ a: "sofa-0" })).toEqual([]);
   });
 
   it("returns no pairs for two far-apart agents", () => {

@@ -4,6 +4,8 @@ import { useStore, useAgentStatus } from "../state/store";
 import { filterTasksByRoom, groupTasksByAgent, isTaskInProject } from "../state/taskGroups";
 import { RetryButton } from "./LimitChip";
 import { timeAgo } from "./ui";
+import { displayModelOf } from "./sessions";
+import { SimpleMarkdown } from "./markdown";
 
 const STATUS_WORD: Record<TaskStatus, string> = {
   running: "running",
@@ -85,7 +87,7 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
           {task.error && !isSolved && <div className="task-error">{task.error}</div>}
           {isWaiting && (
             <div className="task-waiting-box">
-              {questionText && <p className="task-waiting-question">{questionText}</p>}
+              {questionText && <SimpleMarkdown text={questionText} className="task-waiting-question" />}
               <button
                 type="button"
                 className="btn btn-primary btn-xs task-inbox-btn"
@@ -156,7 +158,8 @@ function AgentGroupHeader({
   const agentStatusVal = useAgentStatus(agentId);
 
   const session = agent ? sessions.find((s) => s.agentIds.includes(agentId)) : undefined;
-  const model = session?.model ?? null;
+  // Session agents: the serving session's model (agent.sessionModel), not a stale stored one.
+  const model = agent?.provider === "claude-session" ? displayModelOf(agent, "claude-session", sessions) : session?.model ?? null;
   const spaceId = agent?.placement?.space;
   const room = spaceId ? (roomName ?? (spaceNames[spaceId]?.trim() || spaceId)) : undefined;
 

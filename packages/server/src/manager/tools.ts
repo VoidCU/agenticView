@@ -1,5 +1,21 @@
 import { z } from "zod";
-import { EffortSchema, isTerminal, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, type Agent, type BrainstormParticipant, type Provider, type ServerMessage, type Task } from "@agenticview/shared";
+import {
+  EffortSchema,
+  MODEL_CATALOGUE,
+  effortsFor,
+  findModel,
+  isTerminal,
+  ProviderSchema,
+  ToolAllowanceSchema,
+  PermissionModeSchema,
+  type Agent,
+  type BrainstormParticipant,
+  type Effort,
+  type Provider,
+  type ServerMessage,
+  type Task,
+  type WorkerSessionInfo,
+} from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
@@ -19,6 +35,10 @@ Rules:
 - The office is a honeycomb of rooms. list_spaces shows who sits where; move_worker / arrange_workers reseat workers (group a team in one pod, call people to the meeting room) when the user asks or when it clearly helps.
 - Group agents by role and name their rooms with rename_space. Move collaborators next to each other while they work on the same task.
 - Use brainstorm for design questions that need several experts; repeat the same topic after stillRunning until the summary is ready.
+- Claude Code session agents (provider claude-session) run on the model and effort of the session that serves them; you cannot set a model for them. The user usually keeps one Opus session and one Sonnet session open. Call list_sessions to see each session's model, capacity, load and bound agents, then route with assign_session before assign_task: hard, architectural or cross-cutting work goes to the strongest-model session (e.g. Opus); routine edits, tests and docs go to Sonnet sessions. Balance load across online sessions with free slots, and never leave a task waiting on a full or offline session while another suitable session has a free slot (move the agent with assign_session, or "any").
+- Model tiers for codex, antigravity and gemini agents: assign_task takes optional model and effort for that task only. Default to the cheap tier (codex gpt-6-luna with effort medium; antigravity gemini-3.8-flash-medium; gemini flash). Step up to the strong tier (codex gpt-6-sol; antigravity gemini-3.8-flash-high or gemini-3.1-pro-high; gemini pro) only for genuinely hard tasks (tricky debugging, architecture, large refactors, subtle concurrency or security work), and say why in the task description.
+- Workers keep a memory of their recent tasks that survives provider and model switches, so a task retried on another provider continues where it left off; you do not need to repeat earlier context.
+- "## Provider notes" in the preamble report agents that hit a provider limit and were failed over automatically. Review each with proper analysis: how hard the task is, what limits remain (usage/limit status), and which provider/model/session fits. Then place the agent well with update_agent, assign_session or a per-task model, and retry the failed task with retry_task if it still needs doing (or it was already retried by the failover: then leave it running unless the placement is clearly wrong).
 - You never edit files yourself.
 - End with a short report for the user: what was done, by whom, and anything left open.`;
 
@@ -70,11 +90,81 @@ export interface ManagerToolContext {
   addRoom?: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{ ok: true; spaceId: string } | { ok: false; message: string }>;
   /** Emit a brainstorm.updated event. */
   emitBrainstorm?: (ev: Extract<ServerMessage, { type: "brainstorm.updated" }>) => void;
+  /** Claude Code sessions with live state (claude-session provider). */
+  sessions?: () => Promise<WorkerSessionInfo[]>;
+  /** The provider an agent runs on right now (its own, else the office default / Automatic). */
+  providerOf?: (agent: Agent) => Promise<Provider>;
 }
 
-function agentLine(a: Agent, tasks: Task[]): Record<string, unknown> {
+function agentLine(a: Agent, tasks: Task[], sessions: WorkerSessionInfo[] = []): Record<string, unknown> {
   const active = tasks.find((t) => t.assigneeId === a.id && (t.status === "running" || t.status === "waiting"));
-  return { id: a.id, name: a.name, scope: a.scope, specialty: a.specialty, provider: a.provider ?? "default", model: a.model ?? "default", effort: a.effort ?? "default", level: a.stats.level, tasksDone: a.stats.tasksDone, state: active ? `running ${active.id}` : "idle" };
+  const base = { id: a.id, name: a.name, scope: a.scope, specialty: a.specialty, provider: a.provider ?? "default" };
+  const tail = { level: a.stats.level, tasksDone: a.stats.tasksDone, state: active ? `running ${active.id}` : "idle" };
+  if (a.provider === "claude-session") {
+    const s = a.session?.id ? sessions.find((x) => x.id === a.session!.id) : undefined;
+    return {
+      ...base,
+      // Model and effort come from the serving session.
+      model: s?.model ? `session: ${s.model}` : "session's own model",
+      session: a.session ? { id: a.session.id, name: s?.name ?? a.session.name ?? a.session.id, online: s?.online ?? false } : "any free session",
+      ...tail,
+    };
+  }
+  return { ...base, model: a.model ?? "default", effort: a.effort ?? "default", ...tail };
+}
+
+/** One session as list_sessions reports it. */
+export function sessionLine(s: WorkerSessionInfo, agents: Agent[]): Record<string, unknown> {
+  const load = s.runs?.length ?? 0;
+  return {
+    id: s.id,
+    name: s.name,
+    model: s.model ?? "unknown",
+    online: s.online,
+    capacity: s.capacity,
+    load,
+    freeSlots: Math.max(0, s.capacity - load),
+    boundAgents: agents.filter((a) => a.session?.id === s.id).map((a) => ({ id: a.id, name: a.name })),
+  };
+}
+
+/** Find a session by id or (case-insensitive) name. */
+function findSession(sessions: WorkerSessionInfo[], ref: string): WorkerSessionInfo | undefined {
+  const k = ref.trim().toLowerCase();
+  return sessions.find((s) => s.id === ref.trim()) ?? sessions.find((s) => s.name.toLowerCase() === k);
+}
+
+/** Find an agent by id or (case-insensitive) name. */
+async function findAgent(ctx: Pick<ManagerToolContext, "registry">, ref: string): Promise<Agent | undefined> {
+  const direct = await ctx.registry.get(ref.trim());
+  if (direct) return direct;
+  const k = ref.trim().toLowerCase();
+  return (await ctx.registry.list()).find((a) => a.name.toLowerCase() === k);
+}
+
+const SESSION_INHERITS = "model/effort ignored: Claude Code session agents run on the model and effort of the session that serves them (use assign_session to pick the session)";
+
+/** Validate a per-task model tier for a provider. */
+export function validateTier(provider: Provider, agent: Agent, model: string | undefined, effort: Effort | undefined): { ok: true; tier?: NonNullable<Task["tier"]>; note: string } | { ok: false; error: string } {
+  if (model === undefined && effort === undefined) return { ok: true, note: "" };
+  if (provider === "claude-session") return { ok: true, note: ` (${SESSION_INHERITS})` };
+  const cat = MODEL_CATALOGUE[provider];
+  if (model !== undefined && !findModel(provider, model)) {
+    return { ok: false, error: `ERROR: model "${model}" is not in the ${provider} catalogue. Valid: ${cat.models.map((m) => m.id).join(", ")}` };
+  }
+  let note = "";
+  let useEffort = effort;
+  if (effort !== undefined) {
+    const allowed = effortsFor(provider, model ?? agent.model);
+    if (allowed.length === 0) {
+      note = ` (effort ignored: ${model ?? agent.model ?? provider} has no effort control)`;
+      useEffort = undefined;
+    } else if (!allowed.includes(effort)) {
+      return { ok: false, error: `ERROR: effort "${effort}" is not accepted by ${provider}/${model ?? agent.model ?? "default"}. Valid: ${allowed.join(", ")}` };
+    }
+  }
+  const tier: NonNullable<Task["tier"]> = { provider, ...(model !== undefined ? { model } : {}), ...(useEffort !== undefined ? { effort: useEffort } : {}) };
+  return { ok: true, tier, note: `${note} [this task runs on ${provider}/${model ?? agent.model ?? "default"}${useEffort ? ` effort ${useEffort}` : ""}]` };
 }
 
 /** Resolve the target project for an assignment, or return an error string. */
@@ -101,9 +191,57 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
   return [
     {
       name: "list_agents",
-      description: "List every agent on the roster with scope, specialty, provider, level and current state.",
+      description: "List every agent on the roster with scope, specialty, provider, model, level and current state. Claude Code session agents also show their session (and its model).",
       schema: {},
-      handler: async () => JSON.stringify((await ctx.registry.list()).filter((a) => a.role === "worker").map((a) => agentLine(a, [])), null, 2),
+      handler: async () => {
+        const sessions = (await ctx.sessions?.()) ?? [];
+        const tasks = await ctx.tasks.list();
+        return JSON.stringify((await ctx.registry.list()).filter((a) => a.role === "worker").map((a) => agentLine(a, tasks, sessions)), null, 2);
+      },
+    },
+    {
+      name: "list_sessions",
+      description:
+        "List the user's Claude Code sessions (provider claude-session): each session's id, name, reported model (e.g. Opus or Sonnet), online state, capacity, current load, free slots and the agents bound to it.",
+      schema: {},
+      handler: async () => {
+        const sessions = (await ctx.sessions?.()) ?? [];
+        if (sessions.length === 0) return "No Claude Code sessions known. The user opens one with /agenticview-work.";
+        const agents = await ctx.registry.list();
+        return JSON.stringify(sessions.map((s) => sessionLine(s, agents)), null, 2);
+      },
+    },
+    {
+      name: "assign_session",
+      description:
+        'Bind a Claude Code session agent to a session (it then runs on that session\'s model), or pass session "any" to let any free session take it. Queued tasks of the agent are re-dispatched at once; a task already running stays where it is.',
+      schema: {
+        agent: z.string().min(1).describe("Agent id or name"),
+        session: z.string().min(1).describe('Session id or name (see list_sessions), or "any" to unbind'),
+      },
+      handler: async (args) => {
+        const agent = await findAgent(ctx, String(args.agent));
+        if (!agent) return `ERROR: unknown agent ${String(args.agent)}`;
+        if (agent.role !== "worker") return "ERROR: only workers can be assigned to a session";
+        const provider = ctx.providerOf ? await ctx.providerOf(agent) : agent.provider;
+        if (provider !== "claude-session") return `ERROR: ${agent.name} runs on ${provider ?? "the default provider"}, not a Claude Code session. Use update_agent to switch it to claude-session first.`;
+        const ref = String(args.session).trim();
+        const sessions = (await ctx.sessions?.()) ?? [];
+        let binding: { id: string; name: string } | null = null;
+        let s: WorkerSessionInfo | undefined;
+        if (ref.toLowerCase() !== "any") {
+          s = findSession(sessions, ref);
+          if (!s) return `ERROR: unknown session "${ref}". Known: ${sessions.map((x) => `${x.name} (${x.id})`).join(", ") || "none"}`;
+          binding = { id: s.id, name: s.name };
+        }
+        const next = await ctx.registry.update(agent.id, { session: binding });
+        // agent.updated re-runs session dispatch, so queued runs go to the new session at once.
+        ctx.emitAgent(next);
+        const queued = (await ctx.tasks.list()).filter((t) => t.assigneeId === agent.id && !isTerminal(t.status));
+        const where = s ? `session "${s.name}" (model ${s.model ?? "unknown"}, ${s.online ? "online" : "OFFLINE"}, ${Math.max(0, s.capacity - (s.runs?.length ?? 0))}/${s.capacity} slots free)` : "any free session";
+        const running = queued.filter((t) => t.status === "running" || t.status === "waiting").length;
+        return `${agent.name} now runs on ${where}. ${queued.length - running} queued task(s) re-dispatched${running ? `; ${running} running task(s) finish where they started` : ""}.`;
+      },
     },
     {
       name: "list_tasks",
@@ -146,7 +284,13 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
             cheapNote = ` [preferCheapModels: assigned ${cheap.provider}/${cheap.model}]`;
           }
         }
-        const draft = { name: String(args.name), specialty: String(args.specialty ?? ""), description: args.description as string | undefined, provider: chosenProvider, model: chosenModel, effort: (args.effort as Agent["effort"]) ?? null, systemPrompt: args.systemPrompt as string | undefined, tools: args.tools as Agent["tools"] | undefined, permissionMode: args.permissionMode as Agent["permissionMode"] | undefined };
+        let effortOut: Agent["effort"] = (args.effort as Agent["effort"]) ?? null;
+        if (chosenProvider === "claude-session") {
+          if (explicitModel != null || args.effort != null) cheapNote += ` (${SESSION_INHERITS})`;
+          chosenModel = null;
+          effortOut = null;
+        }
+        const draft = { name: String(args.name), specialty: String(args.specialty ?? ""), description: args.description as string | undefined, provider: chosenProvider, model: chosenModel, effort: effortOut, systemPrompt: args.systemPrompt as string | undefined, tools: args.tools as Agent["tools"] | undefined, permissionMode: args.permissionMode as Agent["permissionMode"] | undefined };
         const agent = await ctx.registry.create(draft);
         const problem = await ctx.checkProvider(agent);
         if (problem) {
@@ -184,6 +328,10 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
           return `ERROR: ${problem}`;
         }
         ctx.emitAgent(next);
+        if (next.provider === "claude-session") {
+          const ignored = (args.model != null || args.effort != null) ? ` (${SESSION_INHERITS})` : "";
+          return `Updated agent ${next.id} "${next.name}" (provider claude-session, model and effort from its session ${next.session?.name ?? "(any free session)"})${ignored}`;
+        }
         return `Updated agent ${next.id} "${next.name}" (provider ${next.provider ?? "default"}, model ${next.model ?? "default"}, effort ${next.effort ?? "default"})`;
       },
     },
@@ -195,6 +343,8 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         title: z.string().min(1).max(120),
         description: z.string().min(1).describe("Self-contained instructions: what, where, how to verify"),
         projectPath: z.string().optional().describe("Target project path (hub only, or a global agent working in another known project)"),
+        model: z.string().optional().describe("Per-task model tier for THIS task only (codex: gpt-6-luna cheap | gpt-6-sol strong; antigravity: gemini-3.8-flash-medium cheap | gemini-3.8-flash-high / gemini-3.1-pro-high strong; gemini: flash cheap | pro strong). Ignored for claude-session agents."),
+        effort: EffortSchema.optional().describe("Per-task reasoning effort for THIS task only (validated for the model). Ignored for claude-session agents."),
       },
       handler: async (args) => {
         const agent = await ctx.registry.get(String(args.agentId));
@@ -204,6 +354,9 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         if (!target.ok) return target.error;
         const problem = await ctx.checkProvider(agent);
         if (problem) return `ERROR: ${problem}`;
+        const provider: Provider = ctx.providerOf ? await ctx.providerOf(agent) : (agent.provider ?? "claude");
+        const tier = validateTier(provider, agent, args.model as string | undefined, args.effort as Effort | undefined);
+        if (!tier.ok) return tier.error;
         const conflict = await ctx.sessionConflict?.(agent);
         if (conflict) {
           ctx.notify?.(conflict);
@@ -217,9 +370,10 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
           assigneeId: agent.id,
           projectPath: target.projectPath,
           parentId: ctx.requestTask.id,
+          ...(tier.tier ? { tier: tier.tier } : {}),
         });
         ctx.startTask(task.id);
-        return `Started task ${task.id} for ${agent.name}`;
+        return `Started task ${task.id} for ${agent.name}${tier.note}`;
       },
     },
     {
@@ -306,6 +460,20 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         }
         await ctx.tasks.setResolution(taskId, { byTaskId, note, at: new Date().toISOString() });
         return `Resolved task ${taskId}${byTaskId ? ` (completed by ${byTaskId})` : ""}`;
+      },
+    },
+    {
+      name: "retry_task",
+      description: "Retry a failed task on its assignee's current provider/model/session (same as Retry in the office). The agent's memory carries its earlier attempt, so it continues where it left off.",
+      schema: { taskId: z.string() },
+      handler: async (args) => {
+        const taskId = String(args.taskId);
+        const task = await ctx.tasks.get(taskId);
+        if (!task) return `ERROR: unknown task ${taskId}`;
+        if (task.status !== "failed") return `ERROR: only failed tasks can be retried (status is ${task.status})`;
+        await ctx.tasks.transition(taskId, "queued", { error: undefined, result: undefined });
+        ctx.startTask(taskId);
+        return `Retrying task ${taskId}; call await_tasks with it to collect the result`;
       },
     },
     {

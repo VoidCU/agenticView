@@ -2,6 +2,20 @@ import { AgentSchema, defaultAgent, MANAGER_TOOLS, planOffice, } from "@agenticv
 import { join } from "node:path";
 import { JsonStore } from "../store/jsonStore.js";
 import { globalRoot, projectRoot } from "../store/paths.js";
+/**
+ * Invariants applied to every stored agent:
+ * - a claude-session agent inherits model and effort from the session that serves it, so none is stored;
+ * - `sessionModel` is wire-only and never persisted.
+ */
+export function normalizeAgent(agent) {
+    const out = { ...agent };
+    delete out.sessionModel;
+    if (out.provider === "claude-session") {
+        out.model = null;
+        out.effort = null;
+    }
+    return out;
+}
 export class ScopeError extends Error {
     constructor(msg) {
         super(msg);
@@ -40,13 +54,13 @@ export class AgentRegistry {
     async create(input) {
         const scope = input.scope ?? (this.world.kind === "project" ? "project" : "global");
         const store = this.storeFor(scope);
-        const agent = defaultAgent({
+        const agent = normalizeAgent(defaultAgent({
             ...input,
             role: input.role ?? "worker",
             scope,
             provider: input.provider ?? null,
             model: input.model ?? null,
-        });
+        }));
         if (agent.role === "worker") {
             // Take the next free desk now so the seat is stable even as the roster changes around it.
             const seat = planOffice([...(await this.list()), agent]).placements[agent.id];
@@ -60,7 +74,7 @@ export class AgentRegistry {
         const cur = await this.get(id);
         if (!cur)
             throw new Error(`Unknown agent ${id}`);
-        const next = AgentSchema.parse({
+        const next = normalizeAgent(AgentSchema.parse({
             ...cur,
             ...patch,
             id: cur.id,
@@ -68,7 +82,7 @@ export class AgentRegistry {
             scope: cur.scope,
             createdAt: cur.createdAt,
             updatedAt: new Date().toISOString(),
-        });
+        }));
         await this.storeFor(cur.scope).write(id, next);
         return next;
     }

@@ -173,7 +173,7 @@ export function App() {
         target.isContentEditable
       ) return;
       // Skip when a modal/overlay is open for M and V (avoid accidental toggle)
-      const modalOpen = !!modal || showShortcuts;
+      const modalOpen = !!modal || showShortcuts || !!playAgentId;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       switch (e.key) {
         case "i":
@@ -213,7 +213,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [modal, showShortcuts, walking, setWalking, toggleMap]);
+  }, [modal, showShortcuts, playAgentId, walking, setWalking, toggleMap]);
 
   if (!hasToken) return <NoToken />;
 
@@ -254,7 +254,7 @@ export function App() {
         )}
         {walking && (
           <div className="walk-hint" role="status" aria-live="polite" data-testid="walk-hint">
-            Press Esc to exit
+            E bonk · G play rock-paper-scissors · Esc exit
           </div>
         )}
         {walking && <div className="walk-crosshair" aria-hidden="true" />}

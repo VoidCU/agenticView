@@ -151,15 +151,32 @@ describe("CreateAgentModal", () => {
       expect(send.mock.calls[0]![0].patch).toMatchObject({ model: "claude-opus-5-5", effort: "xhigh" });
     });
 
-    it("offers a requested model, effort and a Session picker for a Claude Code session", async () => {
+    it("hides model and effort for a Claude Code session agent, which inherits them from its session", async () => {
+      const send = vi.fn();
+      useStore.setState({ send });
       render(<CreateAgentModal onClose={vi.fn()} />);
+      await userEvent.selectOptions(screen.getByLabelText(/^model/i), "opus");
       await userEvent.selectOptions(screen.getByLabelText(/provider/i), "claude-session");
-      const model = screen.getByLabelText(/^model/i) as HTMLSelectElement;
-      expect(model).not.toBeDisabled();
-      expect(model.options[0]?.textContent).toMatch(/whatever the session runs/i);
-      expect(effortGroup()).not.toBeNull();
+      expect(screen.queryByLabelText(/^model/i)).toBeNull();
+      expect(effortGroup()).toBeNull();
+      expect(screen.getByTestId("session-inherit").textContent).toBe("Model & effort come from whichever session picks it up");
       const session = screen.getByLabelText(/^session$/i) as HTMLSelectElement;
       expect([...session.options].map((o) => o.textContent)).toEqual(["Any free session", "Open a new session…"]);
+      await userEvent.type(screen.getByLabelText(/^name/i), "Nova");
+      await userEvent.click(screen.getByRole("button", { name: /create agent/i }));
+      expect(send.mock.calls[0]![0].agent).toMatchObject({ provider: "claude-session", model: null, effort: null });
+    });
+
+    it("names the bound session and its model, and clears a stored model/effort on save", async () => {
+      const send = vi.fn();
+      useStore.setState({
+        send,
+        sessions: [{ id: "s-o", name: "Opus tab", model: "claude-opus-5-5", cwd: null, firstSeen: "", lastSeen: "", named: true, capacity: 4, online: true, currentTaskId: null, runs: [], agentIds: [] }],
+      });
+      render(<CreateAgentModal onClose={vi.fn()} edit={{ ...worker, provider: "claude-session", model: "sonnet", effort: "high", session: { id: "s-o", name: "Opus tab" } }} />);
+      expect(screen.getByTestId("session-inherit").textContent).toBe("Model & effort come from the session: Opus tab · claude-opus-5-5");
+      await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+      expect(send.mock.calls[0]![0].patch).toMatchObject({ model: null, effort: null, session: { id: "s-o", name: "Opus tab" } });
     });
   });
 });

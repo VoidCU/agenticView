@@ -62,6 +62,16 @@ export const AgentSchema = z.object({
     revive: AgentReviveSchema.optional(),
     /** True when the worker has been idle long enough to be in the lounge. Cleared when assigned a task. */
     lounging: z.boolean().optional(),
+    /**
+     * Idle behaviour: a short visit to a colleague's desk or the meeting-room whiteboard. Set and cleared
+     * by the server (purely random, no model call); the agent keeps its own placement meanwhile.
+     */
+    visiting: z.object({ targetAgentId: z.string().optional(), spaceId: z.string().optional(), until: z.string() }).optional(),
+    /**
+     * Wire-only (never persisted): claude-session agents run on the model of the Claude Code session that
+     * serves them. The server fills this with that session's reported model so the UI can show it.
+     */
+    sessionModel: z.string().nullable().optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
 });

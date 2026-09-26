@@ -165,6 +165,12 @@ export declare const AgentPatchSchema: z.ZodObject<{
         resetAt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>>;
     lounging: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
+    visiting: z.ZodOptional<z.ZodOptional<z.ZodObject<{
+        targetAgentId: z.ZodOptional<z.ZodString>;
+        spaceId: z.ZodOptional<z.ZodString>;
+        until: z.ZodString;
+    }, z.core.$strip>>>;
+    sessionModel: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
     description: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -302,6 +308,12 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             resetAt: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>>;
         lounging: z.ZodOptional<z.ZodOptional<z.ZodBoolean>>;
+        visiting: z.ZodOptional<z.ZodOptional<z.ZodObject<{
+            targetAgentId: z.ZodOptional<z.ZodString>;
+            spaceId: z.ZodOptional<z.ZodString>;
+            until: z.ZodString;
+        }, z.core.$strip>>>;
+        sessionModel: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodString>>>;
         description: z.ZodOptional<z.ZodString>;
         systemPrompt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -376,6 +388,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         maxConcurrentRuns: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
         limitPolicy: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
             auto: "auto";
+            manager: "manager";
             ask: "ask";
         }>>>;
         failoverOrder: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodEnum<{
@@ -388,6 +401,14 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         loungeBreaks: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
         preferCheapModels: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
         idleLoungeMinutes: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
+        idleBehaviour: z.ZodOptional<z.ZodOptional<z.ZodObject<{
+            stayChance: z.ZodDefault<z.ZodNumber>;
+            visitChance: z.ZodDefault<z.ZodNumber>;
+            loungeChance: z.ZodDefault<z.ZodNumber>;
+            minRollSeconds: z.ZodDefault<z.ZodNumber>;
+            maxRollSeconds: z.ZodDefault<z.ZodNumber>;
+            visitSeconds: z.ZodDefault<z.ZodNumber>;
+        }, z.core.$strip>>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"project.open">;

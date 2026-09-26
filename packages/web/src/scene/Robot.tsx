@@ -11,6 +11,10 @@ import { dragPoint, livePositions, useDrag } from "./motion";
 import { agentActivityText } from "./selectors";
 import { useWalk } from "../state/walk";
 import { useHudPrefs } from "../state/hudPrefs";
+import { bonk, bonkedAt, bonkLooking, bonkState, bonkWobble } from "../state/bonk";
+import { ROBOT_SCALE, basicMat, physMat, robotGeoms, stdMat } from "./robotParts";
+
+export { ROBOT_SCALE };
 
 export interface RobotTarget extends Point {
   yaw: number;
@@ -40,10 +44,11 @@ interface Props {
   fainted?: boolean;
 }
 
+const HAND_MAT = () => stdMat({ color: "#2a2d38", roughness: 0.5, metalness: 0.3 });
+const FOOT_MAT = () => stdMat({ color: "#2a2d38", roughness: 0.55, metalness: 0.3 });
+
 const WALK_SPEED = 3.1;
 const TURN_RATE = 9;
-/** Robots are scaled to office furniture: about desk-and-a-half tall. */
-export const ROBOT_SCALE = 0.72;
 
 /** Per-status glow pulse frequencies (rad/s). */
 const STATUS_PULSE: Record<string, number> = { thinking: 2.8, editing: 5.5, waiting: 6.0, error: 11.0 };
@@ -61,68 +66,41 @@ function Eyes({
   statusColor: string;
   blink: RefObject<THREE.Group | null>;
 }) {
+  const G = robotGeoms();
   const isBusy = status === "thinking" || status === "editing" || status === "waiting" || status === "error";
   const visorColor = isBusy ? statusColor : accent;
   if (kind === "visor") {
     return (
       <group ref={blink} position={[0, 1.02, 0.5]}>
-        <mesh>
-          <boxGeometry args={[0.62, 0.18, 0.14]} />
-          <meshStandardMaterial color="#11131c" roughness={0.3} metalness={0.4} />
-        </mesh>
-        <mesh position={[0, 0, 0.075]}>
-          <boxGeometry args={[0.5, 0.06, 0.01]} />
-          <meshStandardMaterial color={visorColor} emissive={visorColor} emissiveIntensity={isBusy ? 1.9 : 1.4} toneMapped={false} />
-        </mesh>
+        <mesh geometry={G.visorBox} material={stdMat({ color: "#11131c", roughness: 0.3, metalness: 0.4 })} />
+        <mesh position={[0, 0, 0.075]} geometry={G.visorStrip} material={stdMat({ color: visorColor, emissive: visorColor, emissiveIntensity: isBusy ? 1.9 : 1.4, toneMapped: false })} />
       </group>
     );
   }
   if (kind === "dots") {
+    const dot = stdMat({ color: isBusy ? statusColor : "#11131c", emissive: isBusy ? statusColor : "#ffffff", emissiveIntensity: isBusy ? 0.9 : 0.25, toneMapped: false });
     return (
       <group ref={blink} position={[0, 1.02, 0.52]}>
-        <mesh position={[-0.17, 0, 0]}>
-          <sphereGeometry args={[0.07, 12, 12]} />
-          <meshStandardMaterial
-            color={isBusy ? statusColor : "#11131c"}
-            emissive={isBusy ? statusColor : "#ffffff"}
-            emissiveIntensity={isBusy ? 0.9 : 0.25}
-            toneMapped={false}
-          />
-        </mesh>
-        <mesh position={[0.17, 0, 0]}>
-          <sphereGeometry args={[0.07, 12, 12]} />
-          <meshStandardMaterial
-            color={isBusy ? statusColor : "#11131c"}
-            emissive={isBusy ? statusColor : "#ffffff"}
-            emissiveIntensity={isBusy ? 0.9 : 0.25}
-            toneMapped={false}
-          />
-        </mesh>
+        <mesh position={[-0.17, 0, 0]} geometry={G.dotEye} material={dot} />
+        <mesh position={[0.17, 0, 0]} geometry={G.dotEye} material={dot} />
       </group>
     );
   }
+  const white = stdMat({ color: "#ffffff", roughness: 0.25, emissive: "#ffffff", emissiveIntensity: 0.15 });
+  const pupil = stdMat({ color: isBusy ? statusColor : "#11131c", roughness: 0.2, emissive: isBusy ? statusColor : "#000000", emissiveIntensity: isBusy ? 0.7 : 0 });
   return (
     <group ref={blink} position={[0, 1.02, 0.46]}>
-      {[-0.2, 0.2].map((x) => (
+      {EYE_X.map((x) => (
         <group key={x} position={[x, 0, 0]}>
-          <mesh>
-            <sphereGeometry args={[0.13, 16, 16]} />
-            <meshStandardMaterial color="#ffffff" roughness={0.25} emissive="#ffffff" emissiveIntensity={0.15} />
-          </mesh>
-          <mesh position={[0, 0, 0.1]}>
-            <sphereGeometry args={[0.06, 12, 12]} />
-            <meshStandardMaterial
-              color={isBusy ? statusColor : "#11131c"}
-              roughness={0.2}
-              emissive={isBusy ? statusColor : "#000000"}
-              emissiveIntensity={isBusy ? 0.7 : 0}
-            />
-          </mesh>
+          <mesh geometry={G.eyeWhite} material={white} />
+          <mesh position={[0, 0, 0.1]} geometry={G.pupil} material={pupil} />
         </group>
       ))}
     </group>
   );
 }
+
+const EYE_X = [-0.2, 0.2] as const;
 
 export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive, onGrab, onBodyClick, children, fainted = false }: Props) {
   const _status = useAgentStatus(agent.id);
@@ -134,9 +112,9 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   const permission = useStore((s) => s.permissions.find((p) => p.agentId === agent.id));
   const sessionInfo = useStore((s) => (agent.provider === "claude-session" && agent.session ? s.sessions.find((x) => x.id === agent.session!.id) : undefined));
   const question = useStore((s) => s.questions.find((q) => q.agentId === agent.id));
-  const tasks = useStore((s) => s.tasks);
-  const feed = useStore((s) => s.feed[agent.id]);
-  const activity = useMemo(() => agentActivityText(agent, tasks, feed), [agent, tasks, feed]);
+  // Select the derived string, not the tasks map + feed: the robot (and its tag's own React root) only
+  // re-renders when the visible activity text changes, not on every run.event / task update.
+  const activity = useStore((s) => agentActivityText(agent, s.tasks, s.feed[agent.id]));
   const held = useDrag((s) => s.heldId === agent.id && s.active);
   // Hide tags/bubbles in walk mode or when showTags is disabled.
   const walking = useWalk((s) => s.walking);
@@ -148,6 +126,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   const body = useRef<THREE.Group>(null);
   const bodyMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const glowMat = useRef<THREE.MeshBasicMaterial>(null);
+  const glowMesh = useRef<THREE.Mesh>(null);
   const footL = useRef<THREE.Mesh>(null);
   const footR = useRef<THREE.Mesh>(null);
   const armL = useRef<THREE.Group>(null);
@@ -155,6 +134,9 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   const antennaTip = useRef<THREE.Mesh>(null);
   const eyes = useRef<THREE.Group>(null);
   const tagWrapRef = useRef<HTMLDivElement>(null);
+  const tagScale = useRef<{ el: HTMLDivElement | null; s: number }>({ el: null, s: 0 });
+  const G = robotGeoms();
+  const armMat = physMat({ color: agent.appearance.color, roughness: 0.3, metalness: 0.12, clearcoat: 0.5, clearcoatRoughness: 0.2 });
   const seed = useMemo(() => agent.id.split("").reduce((n, c) => n + c.charCodeAt(0), 0) % 100, [agent.id]);
   const statusColor = STATUS_COLORS[status];
   const busy = status === "thinking" || status === "editing";
@@ -168,16 +150,19 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   // Extended motion state: vx/vz for path-update velocity blending.
   const motion = useRef<{
     x: number; z: number; yaw: number;
-    path: Point[]; key: string;
+    path: Point[];
+    /** Target the current path leads to (NaN = none yet / reset by a drag). Numbers, not a string key: no per-frame allocation. */
+    tx: number; tz: number;
     walk: number; phase: number; lift: number;
+    seat: number; // eased seat height: target.yOffset once arrived, 0 while walking
     vx: number; vz: number; // current velocity for smooth path transitions
   } | null>(null);
   if (!motion.current) {
     const start = spawnAt ?? target;
     motion.current = {
       x: start.x, z: start.z, yaw: target.yaw,
-      path: [], key: spawnAt ? "" : `${target.x.toFixed(3)},${target.z.toFixed(3)}`,
-      walk: 0, phase: 0, lift: 0,
+      path: [], tx: spawnAt ? NaN : target.x, tz: spawnAt ? NaN : target.z,
+      walk: 0, phase: 0, lift: 0, seat: spawnAt ? 0 : (target.yOffset ?? 0),
       vx: 0, vz: 0,
     };
   }
@@ -189,18 +174,18 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     const g = root.current;
     if (!g) return;
 
-    const key = `${target.x.toFixed(3)},${target.z.toFixed(3)}`;
     if (held) {
       // Carried by the pointer: float above the floor, drop into place on release.
       st.x += (dragPoint.x - st.x) * Math.min(1, dt * 18);
       st.z += (dragPoint.z - st.z) * Math.min(1, dt * 18);
-      st.path = [];
-      st.key = "";
+      st.path.length = 0;
+      st.tx = NaN;
       st.lift += (0.7 - st.lift) * Math.min(1, dt * 10);
     } else {
       st.lift += (0 - st.lift) * Math.min(1, dt * 10);
-      if (key !== st.key) {
-        st.key = key;
+      if (!(Math.abs(target.x - st.tx) < 5e-4 && Math.abs(target.z - st.tz) < 5e-4)) {
+        st.tx = target.x;
+        st.tz = target.z;
         if (Math.hypot(target.x - st.x, target.z - st.z) < 0.05) {
           st.path = [];
           onArrive?.(agent.id);
@@ -252,16 +237,27 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
       }
       const isWalking = st.path.length > 0;
       st.walk += ((isWalking ? 1 : 0) - st.walk) * Math.min(1, dt * 8);
-      // Smoothly rotate to face direction of travel; snap to target.yaw at rest.
+      // Smoothly rotate to face direction of travel; snap to target.yaw at rest. A bonked idle robot
+      // looks at you for a moment; a busy one only glances during the wobble, then turns back to work.
       const desired = isWalking && heading !== undefined
         ? heading
-        : faceViewer
+        : faceViewer || bonkLooking(bonkState(agent.id), Date.now())
           ? Math.atan2(camera.position.x - st.x, camera.position.z - st.z)
           : target.yaw;
       st.yaw += angleDiff(desired, st.yaw) * Math.min(1, dt * TURN_RATE);
     }
-    livePositions.set(agent.id, { x: st.x, z: st.z, walking: st.path.length > 0, waiting: status === "waiting" });
-    g.position.set(st.x, st.lift + (target.yOffset ?? 0), st.z);
+    // Mutate the shared entry in place: no per-frame object per robot.
+    const lp = livePositions.get(agent.id);
+    if (lp) {
+      lp.x = st.x;
+      lp.z = st.z;
+      lp.walking = st.path.length > 0;
+      lp.waiting = status === "waiting";
+    } else livePositions.set(agent.id, { x: st.x, z: st.z, walking: st.path.length > 0, waiting: status === "waiting" });
+    // Hop onto the seat only once arrived; walk on the floor.
+    const seatGoal = !held && st.path.length === 0 && Math.abs(target.x - st.x) + Math.abs(target.z - st.z) < 0.1 ? (target.yOffset ?? 0) : 0;
+    st.seat += (seatGoal - st.seat) * Math.min(1, dt * 8);
+    g.position.set(st.x, st.lift + st.seat, st.z);
 
     // Walk cycle: feet step, arms swing, the body bobs and leans into the stride.
     const w = st.walk;
@@ -308,6 +304,12 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
         b.scale.set(breath, 2 - breath, breath);
         b.position.y = Math.sin(t * 2.2 + seed) * 0.04 * idle + Math.abs(Math.cos(st.phase)) * 0.07 * w;
       }
+      // Bonk wobble: squash-and-stretch on top of whatever the body is doing (no allocations).
+      const wob = bonkWobble(Date.now() - bonkedAt(agent.id));
+      if (wob !== 0) {
+        const side = 1 + 0.14 * wob;
+        b.scale.set(b.scale.x * side, b.scale.y * (1 - 0.22 * wob), b.scale.z * side);
+      }
     }
     if (antennaTip.current) {
       const m = antennaTip.current.material as THREE.MeshStandardMaterial;
@@ -334,6 +336,8 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     if (glowMat.current) {
       const pulse = STATUS_PULSE[status];
       glowMat.current.opacity = pulse ? 0.18 + Math.sin(t * pulse * 0.7 + seed) * 0.1 : 0;
+      // Opacity 0 still costs a (transparent) draw call per robot: hide it instead.
+      if (glowMesh.current) glowMesh.current.visible = Boolean(pulse);
     }
 
     // Clamp tag scaling when zoomed in
@@ -345,13 +349,19 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     const fovRad = (fov * Math.PI) / 180;
     const dreiScale = (1 / (2 * Math.tan(fovRad / 2) * Math.max(1, camDist))) * 18;
     const clampedScale = Math.min(1.15, Math.max(0.55, dreiScale)) / dreiScale;
-    if (tagWrapRef.current) {
-      tagWrapRef.current.style.transform = `scale(${clampedScale.toFixed(3)})`;
+    // Only touch the DOM when the clamp changes visibly (was a style write per robot per frame).
+    const tagEl = tagWrapRef.current;
+    if (tagEl && (tagEl !== tagScale.current.el || Math.abs(clampedScale - tagScale.current.s) > 0.004)) {
+      tagScale.current.el = tagEl;
+      tagScale.current.s = clampedScale;
+      tagEl.style.transform = `scale(${clampedScale.toFixed(3)})`;
     }
   });
 
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
+    // Alt+click: a playful bonk instead of selecting.
+    if (e.altKey) { bonk(agent.id); return; }
     if (Date.now() - useDrag.getState().droppedAt < 250) return;
     select(selected ? undefined : agent.id);
     onBodyClick?.(agent.id);
@@ -364,12 +374,12 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           <group
             ref={body}
             onClick={onClick}
+            userData={{ robotAgentId: agent.id }}
             onPointerDown={onGrab ? (e) => onGrab(agent.id, e) : undefined}
             onPointerOver={() => (document.body.style.cursor = onGrab ? "grab" : "pointer")}
             onPointerOut={() => (document.body.style.cursor = "")}
           >
-            <mesh position={[0, 0.9, 0]} castShadow>
-              <sphereGeometry args={[0.6, 28, 22]} />
+            <mesh position={[0, 0.9, 0]} castShadow geometry={G.body}>
               <meshPhysicalMaterial
                 ref={bodyMat}
                 color={agent.appearance.color}
@@ -382,83 +392,51 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
               />
             </mesh>
             <Eyes kind={fainted ? "visor" : agent.appearance.eyes} accent={fainted ? "#666880" : agent.appearance.accent} status={status} statusColor={fainted ? "#555770" : statusColor} blink={eyes} />
-            <mesh position={[0, 1.66, 0]}>
-              <cylinderGeometry args={[0.03, 0.03, 0.34, 8]} />
-              <meshStandardMaterial color="#c9ced9" metalness={0.6} roughness={0.35} />
-            </mesh>
-            <mesh ref={antennaTip} position={[0, 1.88, 0]}>
-              <sphereGeometry args={[0.09, 12, 12]} />
+            <mesh position={[0, 1.66, 0]} geometry={G.stem} material={stdMat({ color: "#c9ced9", metalness: 0.6, roughness: 0.35 })} />
+            <mesh ref={antennaTip} position={[0, 1.88, 0]} geometry={G.tip}>
               <meshStandardMaterial color={statusColor} emissive={statusColor} emissiveIntensity={0.8} toneMapped={false} />
             </mesh>
             {accents.secondAntenna && (
               <group position={[0.22, 1.5, 0]} rotation={[0, 0, -0.45]}>
-                <mesh position={[0, 0.14, 0]}>
-                  <cylinderGeometry args={[0.022, 0.022, 0.28, 8]} />
-                  <meshStandardMaterial color="#c9ced9" metalness={0.6} roughness={0.35} />
-                </mesh>
-                <mesh position={[0, 0.32, 0]}>
-                  <sphereGeometry args={[0.06, 10, 10]} />
-                  <meshStandardMaterial color={accent} emissive={accent} emissiveIntensity={0.9} toneMapped={false} />
-                </mesh>
+                <mesh position={[0, 0.14, 0]} geometry={G.stem2} material={stdMat({ color: "#c9ced9", metalness: 0.6, roughness: 0.35 })} />
+                <mesh position={[0, 0.32, 0]} geometry={G.tip2} material={stdMat({ color: accent, emissive: accent, emissiveIntensity: 0.9, toneMapped: false })} />
               </group>
             )}
             {accents.crown && (
-              <mesh position={[0, 1.46, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <torusGeometry args={[0.36, 0.045, 8, 24]} />
-                <meshStandardMaterial color="#ffd166" emissive="#ffd166" emissiveIntensity={0.7} metalness={0.8} roughness={0.25} toneMapped={false} />
-              </mesh>
+              <mesh
+                position={[0, 1.46, 0]}
+                rotation={[Math.PI / 2, 0, 0]}
+                geometry={G.crown}
+                material={stdMat({ color: "#ffd166", emissive: "#ffd166", emissiveIntensity: 0.7, metalness: 0.8, roughness: 0.25, toneMapped: false })}
+              />
             )}
             {/* Little arms, pivoting at the shoulder. */}
-            {[
-              [-1, armL],
-              [1, armR],
-            ].map(([side, ref]) => (
-              <group key={side as number} ref={ref as RefObject<THREE.Group>} position={[(side as number) * 0.6, 0.95, 0]}>
-                <mesh position={[(side as number) * 0.03, -0.17, 0]} rotation={[0, 0, (side as number) * 0.12]} castShadow>
-                  <capsuleGeometry args={[0.065, 0.24, 4, 10]} />
-                  <meshPhysicalMaterial color={agent.appearance.color} roughness={0.3} metalness={0.12} clearcoat={0.5} clearcoatRoughness={0.2} />
-                </mesh>
-                <mesh position={[(side as number) * 0.05, -0.36, 0]}>
-                  <sphereGeometry args={[0.08, 12, 10]} />
-                  <meshStandardMaterial color="#2a2d38" roughness={0.5} metalness={0.3} />
-                </mesh>
-              </group>
-            ))}
-            <mesh position={[0, 0.34, 0]}>
-              <cylinderGeometry args={[0.34, 0.42, 0.16, 20]} />
-              <meshStandardMaterial color="#232635" roughness={0.6} metalness={0.3} />
-            </mesh>
+            <group ref={armL} position={[-0.6, 0.95, 0]}>
+              <mesh position={[-0.03, -0.17, 0]} rotation={[0, 0, -0.12]} castShadow geometry={G.arm} material={armMat} />
+              <mesh position={[-0.05, -0.36, 0]} geometry={G.hand} material={HAND_MAT()} />
+            </group>
+            <group ref={armR} position={[0.6, 0.95, 0]}>
+              <mesh position={[0.03, -0.17, 0]} rotation={[0, 0, 0.12]} castShadow geometry={G.arm} material={armMat} />
+              <mesh position={[0.05, -0.36, 0]} geometry={G.hand} material={HAND_MAT()} />
+            </group>
+            <mesh position={[0, 0.34, 0]} geometry={G.base} material={stdMat({ color: "#232635", roughness: 0.6, metalness: 0.3 })} />
           </group>
         </group>
-        {[
-          [-0.19, footL],
-          [0.19, footR],
-        ].map(([x, ref]) => (
-          <mesh key={x as number} ref={ref as RefObject<THREE.Mesh>} position={[x as number, 0.07, 0.04]} castShadow>
-            <boxGeometry args={[0.2, 0.1, 0.3]} />
-            <meshStandardMaterial color="#2a2d38" roughness={0.55} metalness={0.3} />
-          </mesh>
-        ))}
+        <mesh ref={footL} position={[-0.19, 0.07, 0.04]} castShadow geometry={G.foot} material={FOOT_MAT()} />
+        <mesh ref={footR} position={[0.19, 0.07, 0.04]} castShadow geometry={G.foot} material={FOOT_MAT()} />
       </group>
-      <mesh position={[0, 0.03, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[(selected ? 0.86 : 0.78) * ROBOT_SCALE, 0.038, 8, 40]} />
-        <meshStandardMaterial
-          color={statusColor}
-          emissive={statusColor}
-          emissiveIntensity={busy || status === "waiting" || status === "error" ? 1.6 : 0.55}
-          toneMapped={false}
-        />
-      </mesh>
-      {/* Always-present inner glow ring; animated opacity via glowMat ref when active. */}
-      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[0.3 * ROBOT_SCALE, 0.95 * ROBOT_SCALE, 32]} />
+      <mesh
+        position={[0, 0.03, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        geometry={selected ? G.ringSelected : G.ring}
+        material={stdMat({ color: statusColor, emissive: statusColor, emissiveIntensity: busy || status === "waiting" || status === "error" ? 1.6 : 0.55, toneMapped: false })}
+      />
+      {/* Inner glow ring; animated opacity via glowMat ref when active, hidden (no draw call) when idle. */}
+      <mesh ref={glowMesh} position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} geometry={G.glow} visible={false}>
         <meshBasicMaterial ref={glowMat} color={statusColor} transparent opacity={0} toneMapped={false} />
       </mesh>
       {accents.glowRing && (
-        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.95 * ROBOT_SCALE, 1.25 * ROBOT_SCALE, 48]} />
-          <meshBasicMaterial color={accent === "#ffffff" ? agent.appearance.color : accent} transparent opacity={0.22} toneMapped={false} />
-        </mesh>
+        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} geometry={G.glowAccent} material={basicMat({ color: accent === "#ffffff" ? agent.appearance.color : accent, opacity: 0.22 })} />
       )}
       {tagsVisible && (
       <Html center distanceFactor={18} position={[0, 2.35 * ROBOT_SCALE + 0.15, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
@@ -551,6 +529,11 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
         </div>
       </Html>
       )}
+      {!tagsVisible && bubble?.bonk && bubbleText && (
+        <Html center distanceFactor={10} position={[0, 2.35 * ROBOT_SCALE + 0.1, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+          <div className="bubble bubble-text bubble-bonk" data-testid="bonk-bubble">{bubbleText}</div>
+        </Html>
+      )}
       {fainted && tagsVisible && (
         <Html center position={[0, 2.2 * ROBOT_SCALE, 0]} distanceFactor={18} zIndexRange={[18, 0]} style={{ pointerEvents: "none" }}>
           <div className="faint-zz" aria-label="Fainted – quota exceeded">
@@ -560,7 +543,8 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           </div>
         </Html>
       )}
-      {children}
+      {/* Extra overlays (file chips) follow the tags: unmounted, not just hidden, in walk mode / tags off. */}
+      {tagsVisible && children}
     </group>
   );
 }

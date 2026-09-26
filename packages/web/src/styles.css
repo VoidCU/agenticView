@@ -151,12 +151,14 @@ h3 {
   pointer-events: none;
 }
 
-.hud-left > * { pointer-events: auto; }
+.hud-left > *, .hud-right > * { pointer-events: auto; }
 
 .hud-right {
   grid-area: right;
   min-height: 0;
   display: flex;
+  /* Like .hud-left: the empty column (e.g. around the collapsed Chat tab) must not swallow canvas drags. */
+  pointer-events: none;
 }
 
 .hud-bottom {
@@ -2402,8 +2404,27 @@ h3 {
 .simple-md { overflow-wrap: anywhere; }
 .simple-md p.smd-p { white-space: pre-wrap; margin: 0 0 8px; }
 .simple-md p.smd-p:last-child { margin-bottom: 0; }
-.simple-md ul.smd-list { margin: 0 0 8px; padding-left: 18px; }
+.simple-md ul.smd-list,
+.simple-md ol.smd-list { margin: 0 0 8px; padding-left: 18px; }
 .simple-md li { margin-bottom: 3px; }
+.simple-md > :last-child { margin-bottom: 0; }
+.simple-md code { font-family: var(--mono); font-size: 0.92em; background: rgba(127, 127, 127, 0.14); border-radius: 4px; padding: 0 4px; }
+.simple-md pre.smd-code {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(127, 127, 127, 0.12);
+  border: 1px solid var(--line);
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.simple-md pre.smd-code code { background: none; padding: 0; font-size: inherit; }
+/* Chat bubbles: tighter rhythm than the board sheet. */
+.msg .msg-md { white-space: normal; }
+.msg .msg-md p.smd-p { margin-bottom: 6px; }
+.msg .msg-md p.smd-p:last-child { margin-bottom: 0; }
 
 /* Legacy drawer aliases (keep for backward-compat with existing tests' className checks) */
 .kanban-drawer { display: contents; }
@@ -3924,6 +3945,15 @@ kbd {
   text-transform: uppercase;
   color: var(--muted);
 }
+.rps-btn-key {
+  margin-left: 3px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--faint, var(--muted));
+  opacity: 0.85;
+}
 
 .rps-waiting {
   font-size: 13px;
@@ -3948,3 +3978,139 @@ kbd {
   border-radius: 50%;
   background: var(--line);
 }
+
+/* Settings: Office life (idle behaviour) */
+.office-life {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+}
+.office-life-pcts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 560px) {
+  .office-life-pcts { grid-template-columns: 1fr; }
+}
+.hint-error { color: var(--red, #ef4444); }
+
+/* ── Inbox & question toast: structured entries ─────────────────────────────── */
+.inbox-item-header { flex-direction: column; align-items: stretch; gap: 2px; }
+.inbox-item-who { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.inbox-agent { font-weight: 650; }
+.inbox-kind {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.inbox-kind-question { color: var(--waiting); }
+.inbox-kind-permission { color: var(--thinking); }
+.inbox-kind-limit { color: var(--error, #ef4444); }
+.inbox-tool { font-family: var(--mono); font-size: 12px; }
+.inbox-item .inbox-item-task,
+.toast-task {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: -4px 0 0;
+}
+.inbox-question-text,
+.inbox-limit-reason,
+.toast-question-text { font-size: 13px; line-height: 1.5; color: var(--text); font-weight: 400; }
+.inbox-question-text p.smd-p,
+.toast-question-text p.smd-p { margin-bottom: 6px; }
+.inbox-detail { font-family: var(--mono); }
+.inbox-actions-row {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+.toast-question .toast-title { display: flex; align-items: center; gap: 8px; }
+.toast-question .toast-question-text { margin: 6px 0 10px; max-height: 40vh; overflow-y: auto; }
+.toast-question .toast-task { margin-top: 2px; }
+
+/* ── Timeline: requests and their workflows ─────────────────────────────────── */
+.hud-timeline { width: clamp(300px, 32vw, 440px); }
+.panel-timeline { position: relative; overflow: hidden; }
+.tl-list { gap: 6px; }
+.tl-request { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-solid); }
+.tl-request.tl-open { border-color: var(--line-strong); }
+.tl-request-btn {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.tl-request-btn:hover { background: var(--input); }
+.tl-request-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.tl-status {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--input);
+  color: var(--muted);
+  align-self: center;
+}
+.tl-status-done { color: var(--green); }
+.tl-status-failed, .tl-status-cancelled { color: var(--red); }
+.tl-status-running, .tl-status-assigned { color: var(--blue); }
+.tl-status-waiting { color: var(--amber); }
+.tl-request-title { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.tl-request-meta { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+
+.wf-list { list-style: none; margin: 0; padding: 4px 10px 10px 8px; }
+.wf-step { display: grid; grid-template-columns: 22px 1fr; gap: 8px; position: relative; }
+.wf-rail { position: relative; display: flex; justify-content: center; }
+/* The connecting line between nodes. */
+.wf-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--line); }
+.wf-step:first-child .wf-rail::before { top: 10px; }
+.wf-step:last-child .wf-rail::before { bottom: calc(100% - 12px); }
+.wf-node {
+  position: relative;
+  margin-top: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  background: var(--panel-solid);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.wf-final .wf-node { color: var(--green); }
+.wf-bad .wf-node { color: var(--red); }
+.wf-question .wf-node { color: var(--amber); }
+.wf-card { padding: 4px 0 10px; min-width: 0; }
+.wf-head { display: flex; gap: 6px; align-items: baseline; border: 0; background: none; padding: 0; color: var(--text); text-align: left; cursor: pointer; }
+.wf-head:hover .wf-title { text-decoration: underline; }
+.wf-title { font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.wf-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--amber); }
+.wf-meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--muted); margin-top: 1px; }
+.wf-summary { margin: 3px 0 0; font-size: 12px; color: var(--text); opacity: 0.9; overflow-wrap: anywhere; }
+.wf-full { margin-top: 4px; font-size: 12px; }
+.wf-more { font-size: 11px; margin-top: 2px; }
+/* Desktop: the Timeline sits in the left column (over the Tasks panel), below the top bar at any
+   top-bar height, instead of a fixed offset that could cover the provider chips. */
+@media (min-width: 900px) {
+  .hud-timeline { position: relative; grid-area: left; left: auto; top: auto; bottom: auto; justify-self: start; min-height: 0; }
+}
+.task-waiting-question p.smd-p { margin-bottom: 4px; }
+.task-waiting-question pre.smd-code { font-size: 11px; padding: 4px 6px; }

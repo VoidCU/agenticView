@@ -5,21 +5,24 @@
  *  - Camera is placed at eye height; OrbitControls disabled.
  *  - WASD/arrows move the player; smooth acceleration/deceleration.
  *  - Mouse look via Pointer Lock API (click canvas → captured; Esc → released + exit walk mode).
- *  - Walking head-bob (vertical sine + lateral cosine).
+ *  - Subtle walking head-bob (a few mm; eased in/out with speed; none when standing still).
  *  - Collision via movePlayer (AABB sub-step + isWalkable outer wall).
  *  - Screen-centre raycast: clicking while locked fires select on the nearest
- *    DeskMonitor or whiteboard within MAX_INTERACT_DIST.
+ *    DeskMonitor or whiteboard within MAX_INTERACT_DIST; E (or a click) on a robot within
+ *    BONK_RANGE gives it a playful bonk (state/bonk.ts).
  *  - Keys ignored while typing in inputs or a modal is open.
  */
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useMemo } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { spaceAt, type Space } from "@agenticview/shared";
 import { useWalk } from "../state/walk";
 import { useStore } from "../state/store";
-import { movePlayer, walkDelta, clampPitch, applyVelocity } from "./walkPhysics";
-import { type Solid } from "./colliders";
+import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, BOB_FREQ, bobWeightStep, headBobSide, headBobY } from "./walkPhysics";
+import { PLAYER_RADIUS, type Solid } from "./colliders";
+import { chairField } from "./pushChairs";
 import { usePositions } from "../state/positions";
+import { bonk, BONK_RANGE } from "../state/bonk";
 
 // ---- Constants ----
 
@@ -28,12 +31,6 @@ const EYE_HEIGHT = 1.7;
 /** Mouse sensitivity (radians per pixel via pointer lock movementX/Y). */
 const MOUSE_SENSITIVITY = 0.0022;
 
-/** Head-bob amplitude (Y, world units). */
-const BOB_AMP_Y = 0.055;
-/** Head-bob amplitude (X, lateral sway). */
-const BOB_AMP_X = 0.022;
-/** Head-bob frequency (cycles per world-unit walked). */
-const BOB_FREQ = 3.8;
 
 /** Max distance for monitor/whiteboard interaction raycast. */
 const MAX_INTERACT_DIST = 7;
@@ -80,12 +77,18 @@ export function WalkModeController({
     vx: 0,    // horizontal velocity X
     vz: 0,    // horizontal velocity Z
     bobPhase: 0,
+    bobWeight: 0,
     locked: false,       // is pointer lock active?
     clickPending: false, // user pressed primary button while locked
+    bonkPending: false,  // user pressed E: bonk the agent under the crosshair if close
+    challengePending: false, // user pressed G: challenge the agent under the crosshair to RPS
   });
 
   const keys = useRef(new Set<string>());
-  const lastPlayerPosition = useRef<{ x: number; z: number; yaw: number; spaceId: string } | null>(null);
+  // Pushable chairs: clearance test built once per floor plan; one scratch point for the walker.
+  const chairClear = useMemo(() => chairField.clearFn(solids, (x, z) => isWalkable(spaces, x, z)), [solids, spaces]);
+  const walker = useRef({ x: 0, z: 0 });
+  const lastPlayerPosition = useRef<{ x: number; z: number; yaw: number; spaceId: string; at: number } | null>(null);
 
   useEffect(() => () => {
     usePositions.getState().setPlayer(undefined);
@@ -124,7 +127,7 @@ export function WalkModeController({
     // Lock acquired.
     const onLockChange = () => {
       st.current.locked = isLocked(canvas);
-      if (!st.current.locked) {
+      if (!st.current.locked && !useWalk.getState().paused) {
         // Pointer lock released (user pressed Esc, or browser forced unlock).
         setWalking(false);
       }
@@ -165,6 +168,8 @@ export function WalkModeController({
         // If locked, exitPointerLock triggers the pointerlockchange handler.
         return;
       }
+      if (e.code === "KeyE" && !e.repeat) st.current.bonkPending = true;
+      if (e.code === "KeyG" && !e.repeat) st.current.challengePending = true;
       keys.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
@@ -179,6 +184,7 @@ export function WalkModeController({
   // ---- Raycaster for screen-centre interaction ----
 
   const raycaster = useRef(new THREE.Raycaster());
+  const scratch = useRef({ euler: new THREE.Euler(0, 0, 0, "YXZ"), centre: new THREE.Vector2(0, 0), world: new THREE.Vector3() });
 
   // ---- Per-frame update ----
 
@@ -199,53 +205,61 @@ export function WalkModeController({
       const next = movePlayer(spaces, cur.x, cur.z, cur.vx * dt, cur.vz * dt, solids);
       cur.x = next.x;
       cur.z = next.z;
+    }
+    // Chairs: shove the ones you walk into, glide the ones still sliding, and keep you out of fixed
+    // (or blocked) ones. Runs every frame so a shoved chair settles even after you stop.
+    {
+      const w = walker.current;
+      w.x = cur.x;
+      w.z = cur.z;
+      chairField.interact(w, PLAYER_RADIUS, dt, chairClear, performance.now());
+      if ((w.x !== cur.x || w.z !== cur.z) && isWalkable(spaces, w.x, w.z)) {
+        cur.x = w.x;
+        cur.z = w.z;
+      }
+    }
+    if (moveDist > 1e-4) {
       cur.bobPhase += moveDist * BOB_FREQ;
     }
 
     // Head-bob: applied only while moving.
     const speed = Math.hypot(cur.vx, cur.vz);
-    const bobWeight = Math.min(1, speed / 2);
-    const bobY = Math.sin(cur.bobPhase * 2) * BOB_AMP_Y * bobWeight;
-    const bobX = Math.cos(cur.bobPhase) * BOB_AMP_X * bobWeight;
+    cur.bobWeight = bobWeightStep(cur.bobWeight, speed, dt);
+    const bobY = headBobY(cur.bobPhase, cur.bobWeight);
+    const side = headBobSide(cur.bobPhase, cur.bobWeight);
 
     // Apply camera.
-    camera.position.set(cur.x + bobX, EYE_HEIGHT + bobY, cur.z);
+    // Sway along the camera's right vector (cos yaw, -sin yaw), not world X.
+    camera.position.set(cur.x + Math.cos(cur.yaw) * side, EYE_HEIGHT + bobY, cur.z - Math.sin(cur.yaw) * side);
 
     const currentSpace = spaceAt(spaces, cur.x, cur.z);
     if (currentSpace) {
       const prev = lastPlayerPosition.current;
-      if (!prev || prev.spaceId !== currentSpace.id || Math.hypot(cur.x - prev.x, cur.z - prev.z) >= 0.12 || Math.abs(cur.yaw - prev.yaw) >= 0.045) {
-        lastPlayerPosition.current = { x: cur.x, z: cur.z, yaw: cur.yaw, spaceId: currentSpace.id };
+      // MiniMap marker: at most 4 Hz (room changes immediately). Turning used to publish every frame.
+      const nowMs = performance.now();
+      if (!prev || prev.spaceId !== currentSpace.id || (nowMs - prev.at >= 250 && (Math.hypot(cur.x - prev.x, cur.z - prev.z) >= 0.12 || Math.abs(cur.yaw - prev.yaw) >= 0.045))) {
+        lastPlayerPosition.current = { x: cur.x, z: cur.z, yaw: cur.yaw, spaceId: currentSpace.id, at: nowMs };
         usePositions.getState().setPlayer({ x: cur.x, z: cur.z, yaw: cur.yaw, spaceId: currentSpace.id });
       }
     }
 
     // Build rotation from yaw + pitch.
-    const euler = new THREE.Euler(cur.pitch, cur.yaw, 0, "YXZ");
+    const euler = scratch.current.euler.set(cur.pitch, cur.yaw, 0, "YXZ");
     camera.quaternion.setFromEuler(euler);
 
-    // Screen-centre raycast: fire when click was pending.
-    if (cur.clickPending) {
+    // Screen-centre raycast: fire when a click or E press is pending.
+    if (cur.clickPending || cur.bonkPending || cur.challengePending) {
+      const intent: WalkIntent = cur.clickPending ? "click" : cur.bonkPending ? "bonk" : "challenge";
       cur.clickPending = false;
-      raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
+      cur.bonkPending = false;
+      cur.challengePending = false;
+      raycaster.current.setFromCamera(scratch.current.centre, camera);
       const hits = raycaster.current.intersectObjects(scene.children, true);
-      for (const hit of hits) {
-        if (hit.distance > MAX_INTERACT_DIST) break;
-        // Walk up the hierarchy looking for userData.agentId or userData.boardSpaceId.
-        let obj: THREE.Object3D | null = hit.object;
-        while (obj) {
-          if (obj.userData?.agentId) {
-            select(obj.userData.agentId as string);
-            break;
-          }
-          if (obj.userData?.boardSpaceId) {
-            onBoard?.(obj.userData.boardSpaceId as string);
-            break;
-          }
-          obj = obj.parent;
-        }
-        if (obj) break;
-      }
+      const action = walkInteraction(hits, camera.position, scratch.current.world, intent);
+      if (action?.kind === "bonk") bonk(action.id);
+      else if (action?.kind === "select") select(action.id);
+      else if (action?.kind === "board") onBoard?.(action.id);
+      else if (action?.kind === "challenge") window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: action.id } }));
     }
   });
 
@@ -282,4 +296,45 @@ export function WalkMode({ spaces, startX, startZ, solids, onBoard }: WalkModePr
       onBoard={onBoard}
     />
   );
+}
+
+export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge"; id: string };
+/** What triggered the crosshair raycast: a click, E (bonk) or G (challenge to rock-paper-scissors). */
+export type WalkIntent = "click" | "bonk" | "challenge";
+/** Walk mode: challenge an agent to RPS from this close (anywhere: desk, corridor, lounge). */
+export const CHALLENGE_RANGE = 3;
+
+/**
+ * What a screen-centre click (or E press, `bonkOnly`) does, given the raycast hits (nearest first).
+ * A robot within BONK_RANGE (horizontal, from the camera to the robot's origin) gets bonked; a
+ * farther robot or a desk monitor selects its agent; a whiteboard opens its board.
+ * `tmp` is a caller-owned scratch vector so this never allocates.
+ */
+export function walkInteraction(
+  hits: ReadonlyArray<{ distance: number; object: THREE.Object3D }>,
+  cam: { x: number; z: number },
+  tmp: THREE.Vector3,
+  intent: WalkIntent = "click",
+): WalkAction | undefined {
+  const clickOnly = intent !== "click";
+  for (const hit of hits) {
+    if (hit.distance > MAX_INTERACT_DIST) return undefined;
+    let obj: THREE.Object3D | null = hit.object;
+    while (obj) {
+      const ud = obj.userData;
+      if (ud?.robotAgentId) {
+        const root = obj.parent?.parent?.parent ?? obj; // body -> tilt -> yaw -> root group
+        root.getWorldPosition(tmp);
+        const dist = Math.hypot(tmp.x - cam.x, tmp.z - cam.z);
+        const id = ud.robotAgentId as string;
+        if (intent === "challenge") return dist <= CHALLENGE_RANGE ? { kind: "challenge", id } : undefined;
+        if (dist <= BONK_RANGE) return { kind: "bonk", id };
+        return clickOnly ? undefined : { kind: "select", id };
+      }
+      if (ud?.agentId) return clickOnly ? undefined : { kind: "select", id: ud.agentId as string };
+      if (ud?.boardSpaceId) return clickOnly ? undefined : { kind: "board", id: ud.boardSpaceId as string };
+      obj = obj.parent;
+    }
+  }
+  return undefined;
 }
