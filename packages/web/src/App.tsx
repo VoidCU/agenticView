@@ -20,6 +20,7 @@ import { useWalk } from "./state/walk";
 import { useMapOpen } from "./state/map";
 import { ScoreboardModal } from "./hud/ScoreboardModal";
 import { PlayRpsModal } from "./hud/PlayRpsModal";
+import { useHudPrefs } from "./state/hudPrefs";
 
 type Modal = "create" | "settings" | "sessions" | "inbox" | "scoreboard" | undefined;
 type Tab = "office" | "tasks" | "chat";
@@ -97,7 +98,11 @@ export function App() {
   const [tab, setTab] = useState<Tab>("office");
   const [showTimeline, setShowTimeline] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [tasksCollapsed, setTasksCollapsed] = useState(false);
+  const tasksCollapsed = useHudPrefs((s) => s.tasksCollapsed);
+  const setTasksCollapsed = useHudPrefs((s) => s.setTasksCollapsed);
+  const chatCollapsed = useHudPrefs((s) => s.chatCollapsed);
+  const setChatCollapsed = useHudPrefs((s) => s.setChatCollapsed);
+  const showTags = useHudPrefs((s) => s.showTags);
   const hasToken = Boolean(getToken());
   const world = useStore((s) => s.world);
   const connected = useStore((s) => s.connected);
@@ -107,6 +112,15 @@ export function App() {
 
   // Desktop notifications
   useDesktopNotifications();
+
+  // Prevent browser text selection only for gestures that begin on the 3D canvas.
+  useEffect(() => {
+    const previous = document.body.style.userSelect;
+    const up = () => { document.body.style.userSelect = previous; };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => { window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); up(); };
+  }, [hasToken]);
 
   useEffect(() => {
     if (!hasToken) return;
@@ -170,7 +184,7 @@ export function App() {
         case "t":
         case "T":
           e.preventDefault();
-          setTasksCollapsed((c) => !c);
+          setTasksCollapsed(!useHudPrefs.getState().tasksCollapsed);
           break;
         case "l":
         case "L":
@@ -205,7 +219,12 @@ export function App() {
 
   const hub = world?.kind === "hub";
   return (
-    <div className="app" data-tab={tab}>
+    <div className={`app${walking ? " app-walking" : ""}`} data-tab={tab} data-tags={showTags ? "on" : "off"} onPointerDownCapture={(event) => {
+      if (event.button === 0 && event.target instanceof Element && event.target.closest(".office canvas")) {
+        document.body.style.userSelect = "none";
+        window.getSelection()?.removeAllRanges();
+      }
+    }}>
       <Office onCreate={() => setModal("create")} />
       <div className="hud">
         <TopBar
@@ -217,13 +236,16 @@ export function App() {
           timelineActive={showTimeline}
           onWalk={() => setWalking(!walking)}
           walkActive={walking}
+          onToggleTags={() => useHudPrefs.getState().setShowTags(!useHudPrefs.getState().showTags)}
+          onToggleChat={() => setChatCollapsed(!chatCollapsed)}
+          chatCollapsed={chatCollapsed}
         />
         <div className="hud-left">
           {hub && <ProjectsPanel />}
           <TaskBoard onOpenInbox={() => setModal("inbox")} externalCollapsed={tasksCollapsed} onCollapseChange={setTasksCollapsed} />
         </div>
         <div className="hud-right">
-          <ChatPanel />
+          <ChatPanel collapsed={chatCollapsed} onCollapseChange={setChatCollapsed} />
         </div>
         {showTimeline && (
           <div className="hud-timeline">
@@ -232,9 +254,10 @@ export function App() {
         )}
         {walking && (
           <div className="walk-hint" role="status" aria-live="polite" data-testid="walk-hint">
-            WASD to move · drag to look · Esc to exit
+            Press Esc to exit
           </div>
         )}
+        {walking && <div className="walk-crosshair" aria-hidden="true" />}
         <div className="hud-bottom">
           <CommandBar />
           <nav className="tabs" aria-label="Panels">

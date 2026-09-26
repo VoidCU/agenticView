@@ -135,7 +135,7 @@ function Header({ agent }: { agent: Agent }) {
   );
 }
 
-export function ChatPanel() {
+export function ChatPanel({ collapsed = false, onCollapseChange }: { collapsed?: boolean; onCollapseChange?: (value: boolean) => void }) {
   const selectedId = useStore((s) => s.selectedAgentId);
   const agent = useStore((s) => (s.selectedAgentId ? s.agents[s.selectedAgentId] : undefined));
   const items = useStore((s) => (s.selectedAgentId ? s.feed[s.selectedAgentId] : undefined)) ?? [];
@@ -143,7 +143,6 @@ export function ChatPanel() {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     setText("");
     setAttachments([]);
@@ -203,11 +202,14 @@ export function ChatPanel() {
     }
   };
 
+  if (collapsed) return <button type="button" className="panel-tab panel-tab-chat" aria-expanded="false" onClick={() => onCollapseChange?.(false)}>Chat <span aria-hidden="true">‹</span></button>;
+
   if (!agent) {
     return (
       <aside className="panel panel-chat" aria-label="Chat">
         <div className="panel-head">
           <h2>Chat</h2>
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => onCollapseChange?.(true)} aria-label="Collapse chat">Collapse</button>
         </div>
         <div className="panel-body">
           <p className="empty">Click a robot to talk to it. The manager plans and delegates; workers do the coding.</p>
@@ -219,6 +221,7 @@ export function ChatPanel() {
   const uploading = attachments.some((a) => !a.path && !a.error);
   return (
     <aside className="panel panel-chat" aria-label={`Chat with ${agent.name}`} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+      <button type="button" className="chat-collapse btn btn-ghost btn-xs" onClick={() => onCollapseChange?.(true)} aria-label="Collapse chat">Collapse</button>
       <Header agent={agent} />
       <SessionNotice agent={agent} />
       <WorkLog agent={agent} />

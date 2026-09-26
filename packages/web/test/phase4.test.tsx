@@ -149,7 +149,7 @@ describe("SettingsModal: preferCheapModels and notifications", () => {
     const send = vi.fn();
     useStore.getState().apply(snapshot([manager], []));
     // snapshot sets preferCheapModels: true
-    useStore.setState({ send, settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3, limitPolicy: "ask", loungeBreaks: true, preferCheapModels: true, idleLoungeMinutes: 3 } });
+    useStore.setState({ send, settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3, limitPolicy: "ask", failoverOrder: [], loungeBreaks: true, preferCheapModels: true, idleLoungeMinutes: 3 } });
     render(<SettingsModal onClose={vi.fn()} />);
     const cb = screen.getByRole("checkbox", { name: /prefer cheap models/i });
     await userEvent.click(cb);

@@ -286,6 +286,12 @@ export function TaskBoard({
 
   const total = filteredTasks.length;
 
+  if (collapsed) {
+    return <button type="button" className="panel-tab panel-tab-tasks" aria-expanded="false" onClick={() => setCollapsed(false)} aria-label={`Expand tasks, ${total} total`}>
+      Tasks <span className="panel-count">{total}</span> <span aria-hidden="true">›</span>
+    </button>;
+  }
+
   const collapseAll = () => setCollapsedGroups(new Set(agentGroups.map(([id]) => id)));
   const expandAll = () => setCollapsedGroups(new Set());
 

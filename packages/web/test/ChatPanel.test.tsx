@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatPanel } from "../src/hud/ChatPanel";
+import { useState } from "react";
 import { useStore } from "../src/state/store";
 import { manager, worker, snapshot } from "./fixtures";
 
@@ -16,6 +17,17 @@ afterEach(() => {
 });
 
 describe("ChatPanel", () => {
+  it("collapses and expands without unmounting its hooks", async () => {
+    function Harness() {
+      const [collapsed, setCollapsed] = useState(false);
+      return <ChatPanel collapsed={collapsed} onCollapseChange={setCollapsed} />;
+    }
+    render(<Harness />);
+    await userEvent.click(screen.getByRole("button", { name: "Collapse chat" }));
+    await userEvent.click(screen.getByRole("button", { name: /chat/i }));
+    expect(screen.getByRole("heading", { name: "Pixel" })).toBeInTheDocument();
+  });
+
   it("renders the selected agent's feed with user lines on the right and agent text on the left", () => {
     const s = useStore.getState();
     s.pushUser(worker.id, "Please add a button");

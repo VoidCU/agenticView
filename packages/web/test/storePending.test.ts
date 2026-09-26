@@ -8,7 +8,7 @@ const snapshot = (extra: Partial<Extract<ServerMessage, { type: "snapshot" }>> =
   agents: [],
   tasks: [],
   providers: [],
-  settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3, limitPolicy: "ask" as const, loungeBreaks: true, preferCheapModels: true, idleLoungeMinutes: 3 },
+  settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3, limitPolicy: "ask" as const, failoverOrder: [], loungeBreaks: true, preferCheapModels: true, idleLoungeMinutes: 3 },
   permissions: [],
   questions: [],
   ...extra,
