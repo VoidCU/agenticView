@@ -1,6 +1,6 @@
 {
   "name": "agenticview",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "private": true,
   "type": "module",
   "description": "Gamified 3D office for your coding agents (Claude, Codex, Antigravity, Gemini) as a Claude Code plugin",
