@@ -17,6 +17,9 @@ import { PALETTES, carpetTexture, useSceneTheme, woodTexture, type Palette } fro
 import { dragPoint, livePos, useDrag, useFocus } from "./motion";
 import { PodBoard } from "../hud/PodBoard";
 import { BOARD_COLORS, podBoard } from "../state/boards";
+import { keyToRoom } from "./roomKeys";
+
+import { MiniMap } from "./MiniMap";
 
 const DEG = Math.PI / 180;
 
@@ -726,10 +729,25 @@ export function Office({ onCreate }: { onCreate: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      // Ignore when typing in a text field.
       const el = document.activeElement;
       if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
-      setFocus(undefined);
+      // Ignore when a modal dialog is open.
+      if (document.querySelector('[role="dialog"]')) return;
+
+      if (e.key === "Escape") {
+        setFocus(undefined);
+        return;
+      }
+
+      // 1–9: focus the nth room in viewOrder.
+      if (e.key >= "1" && e.key <= "9" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const state = useStore.getState();
+        const list = sortedAgents(state.agents);
+        const { spaces } = layoutFor(list, state.spaceNames);
+        const id = keyToRoom(e.key, spaces);
+        if (id) setFocus(id);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -751,6 +769,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
           <Scene onCreate={onCreate} palette={palette} onBoard={setBoardSpace} />
         </Suspense>
       </Canvas>
+      <MiniMap />
       {boardSpace && <PodBoard space={boardSpace} onClose={closeBoard} />}
       {focus && (
         <button type="button" className="overview-btn" onClick={() => setFocus(undefined)} title="Back to the whole floor (Esc)">
