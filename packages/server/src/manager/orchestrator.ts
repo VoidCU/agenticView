@@ -7,6 +7,7 @@ import {
   ProviderSchema,
   PROVIDER_ORDER,
   WORK_COMMAND,
+  FAILOVER_PROVIDER_MODELS,
   type Agent,
   type PromptPart,
   type Provider,
@@ -62,8 +63,8 @@ export interface WorldDeps {
   reviveClearMs?: number;
 }
 
-/** Provider preference order for revive (skip claude which just hit the limit). */
-const REVIVE_CANDIDATES: readonly Provider[] = ["claude-session", "antigravity", "codex", "gemini", "claude"];
+/** Legacy fallback provider order used when failoverOrder is empty. */
+const REVIVE_CANDIDATES_FALLBACK: readonly Provider[] = ["claude-session", "antigravity", "codex", "gemini", "claude"];
 
 /** Ordered cheapest-first choices for preferCheapModels. */
 const CHEAP_CANDIDATES: ReadonlyArray<{ provider: Provider; model: string }> = [
@@ -304,16 +305,30 @@ export class Orchestrator {
     return undefined;
   }
 
-  /** Pick the best available provider to revive an agent on, skipping the one that just failed. */
+  /**
+   * Pick the next provider after `failedProvider` in the configured failoverOrder, skipping
+   * providers that have no runtime or are currently limited.  Falls back to
+   * REVIVE_CANDIDATES_FALLBACK when failoverOrder is empty.
+   */
   pickReviveProvider(failedProvider: Provider): { provider: Provider; model?: string } | undefined {
     const s = this.deps.settings();
-    for (const p of REVIVE_CANDIDATES) {
+    const order: readonly Provider[] = s.failoverOrder.length > 0 ? s.failoverOrder : REVIVE_CANDIDATES_FALLBACK;
+    // Find the position of the failed provider in the order (wrap around the list).
+    const startIdx = order.indexOf(failedProvider);
+    // Build a candidate list that starts at the entry after failedProvider.
+    // If failedProvider isn't in the list we try all entries from the beginning.
+    const candidates: Provider[] =
+      startIdx >= 0
+        ? [...order.slice(startIdx + 1), ...order.slice(0, startIdx)]
+        : [...order];
+    for (const p of candidates) {
       if (p === failedProvider) continue;
       const rt = this.deps.runtimes.get(p);
       if (!rt) continue;
       const lim = this.deps.usageTracker?.getProviderLimit(p);
       if (lim?.limited) continue;
-      const model = s.providerModels[p] ?? undefined;
+      // Use per-failover default model, then fall back to the globally configured model.
+      const model = FAILOVER_PROVIDER_MODELS[p] ?? s.providerModels[p] ?? undefined;
       return { provider: p, model };
     }
     return undefined;
@@ -658,9 +673,9 @@ export class Orchestrator {
           const updatedAgent = await registry.update(agent.id, { limit: lim });
           this.emitAgent(updatedAgent);
           await this.deps.emitProviders?.();
-          // Trigger revive for workers whose provider hit a quota or rate-limit.
+          // Trigger revive for workers whose provider hit a quota, rate-limit, or crash.
           const cls = classifyError(errorText ?? "");
-          if (agent.role === "worker" && (cls === "quota" || cls === "rate-limit")) {
+          if (agent.role === "worker" && (cls === "quota" || cls === "rate-limit" || cls === "crash")) {
             void this.triggerRevive(agent, provider, task.id, errorText ?? "");
           }
         }
@@ -690,7 +705,7 @@ export class Orchestrator {
         this.emitAgent(updatedAgent);
         await this.deps.emitProviders?.();
         const cls = classifyError(errorText ?? "");
-        if (runAgent.role === "worker" && (cls === "quota" || cls === "rate-limit")) {
+        if (runAgent.role === "worker" && (cls === "quota" || cls === "rate-limit" || cls === "crash")) {
           void this.triggerRevive(runAgent, runProvider, task.id, errorText ?? "");
         }
       }

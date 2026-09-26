@@ -16,13 +16,15 @@ import type { Agent, Placement } from "./agent.js";
  */
 
 /** Circumradius of one hex room (center to corner). */
-export const HEX_R = 5;
+export const HEX_R = 7;
 /** Center to the middle of a wall (where the doorway is). */
 export const HEX_APOTHEM = (HEX_R * Math.sqrt(3)) / 2;
 /** Everyone walks along this circle inside a room; furniture stays inside it or out in the corners. */
-export const WALK_R = 2.85;
+export const WALK_R = 3.99;
 /** Widest honeycomb the office grows to. */
 export const MAX_RINGS = 3;
+/** Desks per pod (2 rows of 3). */
+export const POD_SEATS = 6;
 
 export type SpaceKind = "office" | "pod" | "meeting" | "lounge";
 
@@ -62,7 +64,7 @@ export const AXIAL_DIRS: ReadonlyArray<readonly [number, number]> = [
 const DEG = Math.PI / 180;
 export const DOOR_ANGLES: readonly number[] = [30 * DEG, -30 * DEG, -90 * DEG, -150 * DEG, 150 * DEG, 90 * DEG];
 
-export const SEATS_BY_KIND: Record<SpaceKind, number> = { office: 0, pod: 4, meeting: 6, lounge: 4 };
+export const SEATS_BY_KIND: Record<SpaceKind, number> = { office: 0, pod: POD_SEATS, meeting: 6, lounge: 4 };
 
 export function axialToWorld(q: number, r: number, size = HEX_R): Point {
   return { x: size * 1.5 * q, z: size * Math.sqrt(3) * (r + q / 2) };
@@ -203,19 +205,21 @@ export function yawToward(from: Point, to: Point): number {
 export function seatLocal(kind: SpaceKind, seat: number): SeatPose {
   switch (kind) {
     case "pod": {
-      // A 2x2 desk cluster, desks back to back; each robot sits outside facing its monitor.
-      const sx = seat % 2 === 0 ? -0.65 : 0.65;
-      const sz = seat < 2 ? -1.22 : 1.22;
+      // 6-desk pod: 2 rows of 3, desks back to back; each robot sits outside facing its monitor.
+      const col = seat % 3; // 0, 1, 2
+      const row = seat < 3 ? 0 : 1;
+      const sx = (col - 1) * 1.2; // -1.2, 0, +1.2
+      const sz = row === 0 ? -1.4 : 1.4;
       return { x: sx, z: sz, yaw: sz < 0 ? 0 : Math.PI };
     }
     case "meeting": {
       const a = seat * 60 * DEG;
-      const p = { x: 1.9 * Math.cos(a), z: 1.9 * Math.sin(a) };
+      const p = { x: 2.7 * Math.cos(a), z: 2.7 * Math.sin(a) };
       return { ...p, yaw: yawToward(p, { x: 0, z: 0 }) };
     }
     case "lounge": {
       const a = (45 + seat * 90) * DEG;
-      const p = { x: 1.6 * Math.cos(a), z: 1.6 * Math.sin(a) };
+      const p = { x: 2.2 * Math.cos(a), z: 2.2 * Math.sin(a) };
       return { ...p, yaw: yawToward(p, { x: 0, z: 0 }) };
     }
     default:
@@ -231,7 +235,7 @@ export function seatPose(s: Space, seat: number): SeatPose {
 /** Where the manager stands in its own office: behind the desk, looking toward the camera. */
 export function managerHome(s: Space): SeatPose {
   const a = 225 * DEG;
-  return { x: s.x + 1.35 * Math.cos(a), z: s.z + 1.35 * Math.sin(a), yaw: Math.PI / 4 };
+  return { x: s.x + 1.89 * Math.cos(a), z: s.z + 1.89 * Math.sin(a), yaw: Math.PI / 4 };
 }
 
 /** Where the manager stops to talk to whoever sits at `seat`: a step toward the walkway, facing them. */

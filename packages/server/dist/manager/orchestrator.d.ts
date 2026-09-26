@@ -104,7 +104,11 @@ export declare class Orchestrator {
         provider: Provider;
         model: string;
     } | undefined>;
-    /** Pick the best available provider to revive an agent on, skipping the one that just failed. */
+    /**
+     * Pick the next provider after `failedProvider` in the configured failoverOrder, skipping
+     * providers that have no runtime or are currently limited.  Falls back to
+     * REVIVE_CANDIDATES_FALLBACK when failoverOrder is empty.
+     */
     pickReviveProvider(failedProvider: Provider): {
         provider: Provider;
         model?: string;

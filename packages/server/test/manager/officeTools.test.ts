@@ -39,7 +39,7 @@ describe("office bridge tools", () => {
     expect(reg.describe("run1", token).map((t) => t.name)).toEqual(["list_spaces", "rename_space", "move_worker", "arrange_workers"]);
     const rows = JSON.parse(await reg.call("run1", token, "list_spaces", {})) as { id: string; seats: { seat: number; name?: string; free?: boolean }[] }[];
     const podA = rows.find((r) => r.id === "pod-a")!;
-    expect(podA.seats.map((s) => s.name ?? "free")).toEqual(["W1", "W2", "W3", "free"]);
+    expect(podA.seats.map((s) => s.name ?? "free")).toEqual(["W1", "W2", "W3", "free", "free", "free"]);
     expect(rows.some((r) => r.id === "meeting")).toBe(true);
     expect(rows.some((r) => r.id === "office")).toBe(true);
   });
@@ -69,7 +69,7 @@ describe("office bridge tools", () => {
     const { ctx } = fakeWorld(roster());
     expect(await moveWorker(ctx, "nobody", "pod-a")).toMatch(/^ERROR: unknown worker/);
     expect(await moveWorker(ctx, "W1", "roof")).toMatch(/^ERROR: unknown space roof/);
-    expect(await moveWorker(ctx, "W1", "pod-b", 9)).toMatch(/^ERROR: Pod B has seats 0-3/);
+    expect(await moveWorker(ctx, "W1", "pod-b", 9)).toMatch(/^ERROR: Pod B has seats 0-5/);
     expect(await moveWorker(ctx, "Atlas", "pod-b")).toMatch(/^ERROR: unknown worker/);
   });
 

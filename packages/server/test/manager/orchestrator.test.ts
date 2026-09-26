@@ -619,7 +619,7 @@ it("settings defaults: limitPolicy=ask, loungeBreaks=true", async () => {
 });
 
 describe("pickReviveProvider", () => {
-  it("prefers claude-session → antigravity → codex, skips the failed provider", async () => {
+  it("follows failoverOrder (default: codex → antigravity → claude-session), skips the failed provider", async () => {
     const make = (p: Provider): Runtime => ({ provider: p, check: async () => ({ provider: p, ok: true }), run: async () => ({ text: "", stopReason: "done" }) });
     const runtimes = new Map<Provider, Runtime>([
       ["claude", make("claude")],
@@ -629,9 +629,15 @@ describe("pickReviveProvider", () => {
       ["gemini", make("gemini")],
     ]);
     const ctx = await setup(async function* () {}, { runtimes });
-    expect(ctx.orch.pickReviveProvider("claude")?.provider).toBe("claude-session");
-    expect(ctx.orch.pickReviveProvider("claude-session")?.provider).toBe("antigravity");
+    // Default failoverOrder is ['codex', 'antigravity', 'claude-session'].
+    // 'claude' is not in the list → iterate from the start → picks 'codex'.
+    expect(ctx.orch.pickReviveProvider("claude")?.provider).toBe("codex");
+    // 'codex' is index 0 → next is 'antigravity'.
+    expect(ctx.orch.pickReviveProvider("codex")?.provider).toBe("antigravity");
+    // 'antigravity' is index 1 → next is 'claude-session'.
     expect(ctx.orch.pickReviveProvider("antigravity")?.provider).toBe("claude-session");
+    // 'claude-session' is last → wraps to 'codex'.
+    expect(ctx.orch.pickReviveProvider("claude-session")?.provider).toBe("codex");
   });
 
   it("skips providers with active limits", async () => {

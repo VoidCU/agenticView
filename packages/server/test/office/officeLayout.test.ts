@@ -113,7 +113,7 @@ describe("buildSpacesFromExplicit + planOfficeWithSpaces", () => {
     ];
     const spaces = buildSpacesFromExplicit(rooms);
     expect(spaces).toHaveLength(3);
-    expect(spaces.find((s) => s.id === "pod-a")!.seats).toBe(4);
+    expect(spaces.find((s) => s.id === "pod-a")!.seats).toBe(6);
     expect(spaces.find((s) => s.id === "meeting")!.seats).toBe(6);
   });
 

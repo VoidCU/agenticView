@@ -15,7 +15,7 @@ import { GameService } from "./games/gameService.js";
 // ── Explicit-room helpers (used by addRoom / removeRoom) ─────────────────────
 /** Build a Space[] from an explicit room list, assigning seats by kind. */
 function buildSpacesFromExplicit(rooms) {
-    const SEATS_BY_KIND = { pod: 4, meeting: 6, lounge: 4 };
+    const SEATS_BY_KIND = { pod: 6, meeting: 6, lounge: 4 };
     return [
         // Manager's office is always present at origin.
         { id: "office", name: "Manager's Office", kind: "office", q: 0, r: 0, x: 0, z: 0, ring: 0, seats: 0 },
