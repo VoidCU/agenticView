@@ -1,15 +1,46 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { SimpleMarkdown } from "./markdown";
 import { PROVIDER_LABELS } from "@agenticview/shared";
 import type { Provider } from "@agenticview/shared";
 import { useStore, type PendingPermission, type PendingQuestion, type PendingLimit } from "../state/store";
 import { Modal, prettyInput } from "./ui";
 import { timeAgo } from "./ui";
 
+/**
+ * Item header: who (agent, clickable) and what kind on the first line, the task it concerns on the
+ * second. Keeps long task titles from running into the body text.
+ */
+function InboxHeader({ agentId, kind, kindLabel, extra }: { agentId: string; kind: "question" | "permission" | "limit"; kindLabel: string; extra?: ReactNode }) {
+  const agent = useStore((s) => s.agents[agentId]);
+  const select = useStore((s) => s.select);
+  const agentName = agent?.name ?? agentId;
+  return (
+    <div className="inbox-item-header">
+      <div className="inbox-item-who">
+        <span className="task-dot" aria-hidden="true" style={agent ? { background: agent.appearance.color } : undefined} />
+        <button type="button" className="link inbox-agent" onClick={() => select(agentId)} aria-label={`View agent ${agentName}`}>
+          {agentName}
+        </button>
+        <span className={`inbox-kind inbox-kind-${kind}`}>{kindLabel}</span>
+        {extra}
+      </div>
+    </div>
+  );
+}
+
+function InboxTaskLine({ taskId }: { taskId: string }) {
+  const task = useStore((s) => s.tasks[taskId]);
+  if (!task) return null;
+  return (
+    <div className="inbox-item-task" title={`Task: ${task.title}`}>
+      {task.title}
+    </div>
+  );
+}
+
 function InboxQuestionItem({ question }: { question: PendingQuestion }) {
   const send = useStore((s) => s.send);
   const agent = useStore((s) => s.agents[question.agentId]);
-  const task = useStore((s) => s.tasks[question.taskId]);
-  const select = useStore((s) => s.select);
   const [answer, setAnswer] = useState("");
 
   const submit = (e: FormEvent) => {
@@ -24,28 +55,10 @@ function InboxQuestionItem({ question }: { question: PendingQuestion }) {
 
   return (
     <li className="inbox-item inbox-item-question" data-testid={`inbox-question-${question.id}`}>
-      <div className="inbox-item-header">
-        <span
-          className="task-dot"
-          aria-hidden="true"
-          style={agent ? { background: agent.appearance.color } : undefined}
-        />
-        <button
-          type="button"
-          className="link"
-          onClick={() => select(question.agentId)}
-          aria-label={`View agent ${agentName}`}
-        >
-          {agentName}
-        </button>
-        {task && (
-          <span className="inbox-item-task" title={`Task: ${task.title}`}>
-            · {task.title}
-          </span>
-        )}
-      </div>
-      <p className="inbox-question-text">{question.question}</p>
-      <form className="inbox-form" onSubmit={submit}>
+      <InboxHeader agentId={question.agentId} kind="question" kindLabel="asks" />
+      <InboxTaskLine taskId={question.taskId} />
+      <SimpleMarkdown text={question.question} className="inbox-question-text" />
+      <form className="inbox-form inbox-actions-row" onSubmit={submit}>
         <input
           value={answer}
           onChange={(e) => setAnswer(e.target.value)}
@@ -63,8 +76,6 @@ function InboxQuestionItem({ question }: { question: PendingQuestion }) {
 function InboxPermissionItem({ permission }: { permission: PendingPermission }) {
   const send = useStore((s) => s.send);
   const agent = useStore((s) => s.agents[permission.agentId]);
-  const task = useStore((s) => s.tasks[permission.taskId]);
-  const select = useStore((s) => s.select);
   const detail = prettyInput(permission.tool, permission.input);
 
   const respond = (allow: boolean) => send({ type: "permission.respond", id: permission.id, allow });
@@ -72,31 +83,10 @@ function InboxPermissionItem({ permission }: { permission: PendingPermission }) 
 
   return (
     <li className="inbox-item inbox-item-permission" data-testid={`inbox-permission-${permission.id}`}>
-      <div className="inbox-item-header">
-        <span
-          className="task-dot"
-          aria-hidden="true"
-          style={agent ? { background: agent.appearance.color } : undefined}
-        />
-        <button
-          type="button"
-          className="link"
-          onClick={() => select(permission.agentId)}
-          aria-label={`View agent ${agentName}`}
-        >
-          {agentName}
-        </button>
-        {task && (
-          <span className="inbox-item-task" title={`Task: ${task.title}`}>
-            · {task.title}
-          </span>
-        )}
-        <span>
-          wants to run <code>{permission.tool}</code>
-        </span>
-      </div>
+      <InboxHeader agentId={permission.agentId} kind="permission" kindLabel="wants to run" extra={<code className="inbox-tool">{permission.tool}</code>} />
+      <InboxTaskLine taskId={permission.taskId} />
       {detail && <pre className="inbox-detail">{detail}</pre>}
-      <div className="inbox-actions">
+      <div className="inbox-actions inbox-actions-row">
         <button
           type="button"
           className="btn btn-primary btn-xs"
@@ -121,8 +111,6 @@ function InboxPermissionItem({ permission }: { permission: PendingPermission }) 
 function InboxLimitItem({ limit }: { limit: PendingLimit }) {
   const send = useStore((s) => s.send);
   const agent = useStore((s) => s.agents[limit.agentId]);
-  const task = useStore((s) => s.tasks[limit.taskId]);
-  const select = useStore((s) => s.select);
   const agentName = agent?.name ?? limit.agentId;
 
   const [mode, setMode] = useState<"idle" | "choose">("idle");
@@ -159,31 +147,12 @@ function InboxLimitItem({ limit }: { limit: PendingLimit }) {
 
   return (
     <li className="inbox-item inbox-item-limit" data-testid={`inbox-limit-${limit.id}`}>
-      <div className="inbox-item-header">
-        <span
-          className="task-dot"
-          aria-hidden="true"
-          style={agent ? { background: agent.appearance.color } : undefined}
-        />
-        <button
-          type="button"
-          className="link"
-          onClick={() => select(limit.agentId)}
-          aria-label={`View agent ${agentName}`}
-        >
-          {agentName}
-        </button>
-        {task && (
-          <span className="inbox-item-task" title={`Task: ${task.title}`}>
-            · {task.title}
-          </span>
-        )}
-        <span className="inbox-limit-reason">{limit.reason ?? "hit a limit"}</span>
-        {resetLabel && <span className="inbox-limit-reset">{resetLabel}</span>}
-      </div>
+      <InboxHeader agentId={limit.agentId} kind="limit" kindLabel="hit a limit" extra={resetLabel ? <span className="inbox-limit-reset">{resetLabel}</span> : undefined} />
+      <InboxTaskLine taskId={limit.taskId} />
+      {limit.reason && <SimpleMarkdown text={limit.reason} className="inbox-limit-reason" />}
 
       {mode === "idle" && (
-        <div className="inbox-actions">
+        <div className="inbox-actions inbox-actions-row">
           {suggestedLabel && (
             <button
               type="button"
@@ -226,7 +195,7 @@ function InboxLimitItem({ limit }: { limit: PendingLimit }) {
       )}
 
       {mode === "choose" && (
-        <form className="inbox-form inbox-limit-form" onSubmit={choose}>
+        <form className="inbox-form inbox-limit-form inbox-actions-row" onSubmit={choose}>
           <select
             value={chosenProvider}
             onChange={(e) => setChosenProvider(e.target.value as Provider | "")}

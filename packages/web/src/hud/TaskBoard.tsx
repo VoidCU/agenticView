@@ -5,6 +5,7 @@ import { filterTasksByRoom, groupTasksByAgent, isTaskInProject } from "../state/
 import { RetryButton } from "./LimitChip";
 import { timeAgo } from "./ui";
 import { displayModelOf } from "./sessions";
+import { SimpleMarkdown } from "./markdown";
 
 const STATUS_WORD: Record<TaskStatus, string> = {
   running: "running",
@@ -86,7 +87,7 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
           {task.error && !isSolved && <div className="task-error">{task.error}</div>}
           {isWaiting && (
             <div className="task-waiting-box">
-              {questionText && <p className="task-waiting-question">{questionText}</p>}
+              {questionText && <SimpleMarkdown text={questionText} className="task-waiting-question" />}
               <button
                 type="button"
                 className="btn btn-primary btn-xs task-inbox-btn"
