@@ -65,6 +65,39 @@ export class TaskService {
                 delete next.error;
             if ("result" in patch && patch.result === undefined)
                 delete next.result;
+            // Retrying clears any existing resolution.
+            if (to === "queued")
+                delete next.resolution;
+            await this.store.write(id, next);
+            this.onChange(next, "state");
+            return next;
+        });
+    }
+    /** Mark a failed (or cancelled) task as resolved without changing its status. */
+    setResolution(id, resolution) {
+        return this.locked(id, async () => {
+            const cur = await this.store.read(id);
+            if (!cur)
+                throw new Error(`Unknown task ${id}`);
+            if (cur.status !== "failed" && cur.status !== "cancelled") {
+                throw new Error(`Only failed or cancelled tasks can be resolved (status is ${cur.status})`);
+            }
+            const next = { ...cur, resolution };
+            await this.store.write(id, next);
+            this.onChange(next, "state");
+            return next;
+        });
+    }
+    /** Remove the resolution from a task (undo resolve). */
+    clearResolution(id) {
+        return this.locked(id, async () => {
+            const cur = await this.store.read(id);
+            if (!cur)
+                throw new Error(`Unknown task ${id}`);
+            if (!cur.resolution)
+                throw new Error(`Task ${id} has no resolution to remove`);
+            const next = { ...cur };
+            delete next.resolution;
             await this.store.write(id, next);
             this.onChange(next, "state");
             return next;

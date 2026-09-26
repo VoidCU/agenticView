@@ -10,6 +10,7 @@ Rules:
 - Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits. When preferCheapModels is on (the default), create_agent without an explicit provider/model automatically picks the cheapest available provider — the result will tell you which one was chosen. Use update_agent to change them later if needed.
 - Split work into self-contained assignments. Each assign_task description must stand alone: what to change, where (files or folders), how to verify. Never assign the same file to two workers at once.
 - assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.
+- When a task fails and a later task (by you or another worker) completes the same work, call resolve_task with the failing task id and the succeeding task id. This marks the failure as solved in the history without changing its status. If no retry is possible and the failure is acceptable, call resolve_task with just a note.
 - Use ask_user only when a decision truly needs the user.
 - The office is a honeycomb of rooms. list_spaces shows who sits where; move_worker / arrange_workers reseat workers (group a team in one pod, call people to the meeting room) when the user asks or when it clearly helps.
 - Group agents by role and name their rooms with rename_space. Move collaborators next to each other while they work on the same task.
@@ -64,12 +65,14 @@ export function managerTools(ctx) {
         },
         {
             name: "list_tasks",
-            description: "List open (non-terminal) tasks with status, assignee and parent.",
-            schema: { includeDone: z.boolean().optional().describe("Also include finished tasks") },
+            description: "List open (non-terminal) tasks with status, assignee and parent. Resolved failures are hidden by default; pass includeDone to see them.",
+            schema: { includeDone: z.boolean().optional().describe("Also include finished tasks (done, failed, cancelled); resolved failures are included when true") },
             handler: async (args) => {
                 const all = await ctx.tasks.list();
+                // Resolved failures are terminal (failed status) and are hidden in the default view,
+                // just like other terminal tasks.  They appear when includeDone=true.
                 const rows = all.filter((t) => args.includeDone === true || !isTerminal(t.status));
-                return JSON.stringify(rows.map((t) => ({ id: t.id, kind: t.kind, title: t.title, status: t.status, assigneeId: t.assigneeId, parentId: t.parentId, projectPath: t.projectPath, result: t.result?.slice(0, 300), error: t.error })), null, 2);
+                return JSON.stringify(rows.map((t) => ({ id: t.id, kind: t.kind, title: t.title, status: t.status, assigneeId: t.assigneeId, parentId: t.parentId, projectPath: t.projectPath, result: t.result?.slice(0, 300), error: t.error, resolution: t.resolution })), null, 2);
             },
         },
         {
@@ -244,6 +247,35 @@ export function managerTools(ctx) {
         },
         brainstormTool(ctx),
         ...officeTools(ctx),
+        {
+            name: "resolve_task",
+            description: "Mark a failed (or cancelled) task as solved without changing its history. Use when a later task completed the same work, or when the failure is acceptable. Retrying a resolved task clears the resolution.",
+            schema: {
+                taskId: z.string().describe("Id of the failed task to mark as resolved"),
+                byTaskId: z.string().optional().describe("Id of the task that completed the same work (must be done)"),
+                note: z.string().min(1).describe("Short explanation of why this failure is considered resolved"),
+            },
+            handler: async (args) => {
+                const taskId = String(args.taskId);
+                const byTaskId = args.byTaskId;
+                const note = String(args.note);
+                const task = await ctx.tasks.get(taskId);
+                if (!task)
+                    return `ERROR: unknown task ${taskId}`;
+                if (task.status !== "failed" && task.status !== "cancelled") {
+                    return `ERROR: only failed or cancelled tasks can be resolved (status is ${task.status})`;
+                }
+                if (byTaskId !== undefined) {
+                    const byTask = await ctx.tasks.get(byTaskId);
+                    if (!byTask)
+                        return `ERROR: byTaskId ${byTaskId} not found`;
+                    if (byTask.status !== "done")
+                        return `ERROR: byTaskId ${byTaskId} is not done (status is ${byTask.status})`;
+                }
+                await ctx.tasks.setResolution(taskId, { byTaskId, note, at: new Date().toISOString() });
+                return `Resolved task ${taskId}${byTaskId ? ` (completed by ${byTaskId})` : ""}`;
+            },
+        },
         {
             name: "revive_agent",
             description: "Switch a fainted agent to a new provider and retry its last failed task. Call after the user approves the revive or chooses a different provider.",

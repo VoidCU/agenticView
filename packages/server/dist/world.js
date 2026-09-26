@@ -476,9 +476,26 @@ export async function createWorld(ref, opts) {
                 throw new Error(`Unknown task ${taskId}`);
             if (cur.status !== "failed")
                 throw new Error(`Only failed tasks can be retried (status is ${cur.status})`);
+            // transition() clears the resolution automatically when moving to queued.
             const retried = await tasks.transition(taskId, "queued", { error: undefined, result: undefined });
             orchestrator.startTask(taskId);
             return retried;
+        },
+        resolveTask: async (taskId, byTaskId, note) => {
+            const task = await tasks.get(taskId);
+            if (!task)
+                throw new Error(`Unknown task ${taskId}`);
+            if (byTaskId !== undefined) {
+                const byTask = await tasks.get(byTaskId);
+                if (!byTask)
+                    throw new Error(`byTaskId ${byTaskId} not found`);
+                if (byTask.status !== "done")
+                    throw new Error(`byTaskId ${byTaskId} is not done (status is ${byTask.status})`);
+            }
+            return tasks.setResolution(taskId, { byTaskId, note, at: new Date().toISOString() });
+        },
+        unresolveTask: async (taskId) => {
+            return tasks.clearResolution(taskId);
         },
         getLimits: async () => usageTracker.getLimitsReport(),
         getUsage: async () => usageTracker.getUsageReport(),

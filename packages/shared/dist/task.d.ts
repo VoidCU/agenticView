@@ -33,6 +33,12 @@ export declare const TaskWorkerSchema: z.ZodObject<{
     files: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export type TaskWorker = z.infer<typeof TaskWorkerSchema>;
+export declare const TaskResolutionSchema: z.ZodObject<{
+    byTaskId: z.ZodOptional<z.ZodString>;
+    note: z.ZodString;
+    at: z.ZodString;
+}, z.core.$strip>;
+export type TaskResolution = z.infer<typeof TaskResolutionSchema>;
 export declare const TaskSchema: z.ZodObject<{
     id: z.ZodString;
     kind: z.ZodEnum<{
@@ -77,6 +83,11 @@ export declare const TaskSchema: z.ZodObject<{
     images: z.ZodArray<z.ZodString>;
     result: z.ZodOptional<z.ZodString>;
     error: z.ZodOptional<z.ZodString>;
+    resolution: z.ZodOptional<z.ZodObject<{
+        byTaskId: z.ZodOptional<z.ZodString>;
+        note: z.ZodString;
+        at: z.ZodString;
+    }, z.core.$strip>>;
     log: z.ZodArray<z.ZodObject<{
         ts: z.ZodString;
         type: z.ZodString;

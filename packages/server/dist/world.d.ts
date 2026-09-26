@@ -52,6 +52,8 @@ export interface World {
         agents: Agent[];
     }>;
     retryTask: (taskId: string) => Promise<Task>;
+    resolveTask: (taskId: string, byTaskId: string | undefined, note: string) => Promise<Task>;
+    unresolveTask: (taskId: string) => Promise<Task>;
     getLimits: () => Promise<LimitsReport>;
     getUsage: () => Promise<UsageReport>;
     /**

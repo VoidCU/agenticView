@@ -3,6 +3,7 @@ import { mkdir, writeFile, stat, readFile } from "node:fs/promises";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { extname, join, normalize, resolve, sep } from "node:path";
+import { z } from "zod";
 import { newId, ClaudeLimitsBodySchema, ProviderSchema, SwitchAgentPayloadSchema, SwitchProviderPayloadSchema } from "@agenticview/shared";
 import type { World } from "../world.js";
 import { mirrorRoutes } from "../hooks/mirror.js";
@@ -192,6 +193,41 @@ export function apiRoutes(world: World): Hono {
     } catch (e) {
       const err = e as Error & { status?: number };
       return c.json({ error: err.message }, (err.status ?? 500) as 404 | 500);
+    }
+  });
+
+  app.post("/api/tasks/:id/resolve", async (c) => {
+    const id = c.req.param("id");
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return c.json({ error: "JSON body expected" }, 400);
+    }
+    const bodySchema = z.object({ byTaskId: z.string().optional(), note: z.string().min(1) });
+    const parsed = bodySchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: `Invalid body: ${parsed.error.issues.map((i) => i.message).join(", ")}` }, 400);
+    }
+    try {
+      const task = await world.resolveTask(id, parsed.data.byTaskId, parsed.data.note);
+      return c.json({ ok: true, task });
+    } catch (e) {
+      const msg = (e as Error).message;
+      const status = msg.includes("not found") || msg.includes("Unknown task") ? 404 : 400;
+      return c.json({ error: msg }, status);
+    }
+  });
+
+  app.delete("/api/tasks/:id/resolve", async (c) => {
+    const id = c.req.param("id");
+    try {
+      const task = await world.unresolveTask(id);
+      return c.json({ ok: true, task });
+    } catch (e) {
+      const msg = (e as Error).message;
+      const status = msg.includes("Unknown task") ? 404 : 400;
+      return c.json({ error: msg }, status);
     }
   });
 

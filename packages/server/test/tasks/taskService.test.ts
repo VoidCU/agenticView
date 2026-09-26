@@ -101,6 +101,58 @@ describe("TaskService", () => {
   });
 });
 
+describe("TaskService.setResolution / clearResolution", () => {
+  it("sets and clears a resolution on a failed task", async () => {
+    const s = new TaskService(join(dir, "tasks"), onChange);
+    const t = await mk(s);
+    await s.transition(t.id, "assigned");
+    await s.transition(t.id, "running");
+    await s.transition(t.id, "failed", { error: "boom" });
+
+    const resolved = await s.setResolution(t.id, { note: "fixed later", at: "2026-01-01T00:00:00Z" });
+    expect(resolved.status).toBe("failed");
+    expect(resolved.resolution?.note).toBe("fixed later");
+    expect(resolved.resolution?.at).toBe("2026-01-01T00:00:00Z");
+    expect(onChange).toHaveBeenLastCalledWith(resolved, "state");
+
+    const cleared = await s.clearResolution(t.id);
+    expect(cleared.resolution).toBeUndefined();
+    expect(cleared.status).toBe("failed");
+  });
+
+  it("setResolution rejects non-failed tasks", async () => {
+    const s = new TaskService(join(dir, "tasks"), onChange);
+    const t = await mk(s);
+    await expect(s.setResolution(t.id, { note: "x", at: "now" })).rejects.toThrow(/failed or cancelled/);
+  });
+
+  it("setResolution rejects unknown task", async () => {
+    const s = new TaskService(join(dir, "tasks"), onChange);
+    await expect(s.setResolution("t_missing", { note: "x", at: "now" })).rejects.toThrow(/Unknown task/);
+  });
+
+  it("clearResolution rejects task with no resolution", async () => {
+    const s = new TaskService(join(dir, "tasks"), onChange);
+    const t = await mk(s);
+    await s.transition(t.id, "assigned");
+    await s.transition(t.id, "running");
+    await s.transition(t.id, "failed", { error: "boom" });
+    await expect(s.clearResolution(t.id)).rejects.toThrow(/no resolution/);
+  });
+
+  it("transition to queued (retry) clears the resolution", async () => {
+    const s = new TaskService(join(dir, "tasks"), onChange);
+    const t = await mk(s);
+    await s.transition(t.id, "assigned");
+    await s.transition(t.id, "running");
+    await s.transition(t.id, "failed", { error: "boom" });
+    await s.setResolution(t.id, { note: "was resolved", at: "now" });
+    const retried = await s.transition(t.id, "queued");
+    expect(retried.resolution).toBeUndefined();
+    expect(retried.status).toBe("queued");
+  });
+});
+
 describe("TaskService.replaceLastLog", () => {
   it("replaces the last entry only and is a no-op without entries", async () => {
     const s = new TaskService(join(dir, "tasks"), onChange);

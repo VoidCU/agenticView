@@ -1,4 +1,4 @@
-import { type Task, type TaskKind, type TaskLogEntry, type TaskStatus, type TaskWorker } from "@agenticview/shared";
+import { type Task, type TaskKind, type TaskLogEntry, type TaskResolution, type TaskStatus, type TaskWorker } from "@agenticview/shared";
 import type { AgentRegistry } from "../agents/registry.js";
 export interface CreateTaskInput {
     kind: TaskKind;
@@ -26,6 +26,10 @@ export declare class TaskService {
     list(): Promise<Task[]>;
     children(id: string): Promise<Task[]>;
     transition(id: string, to: TaskStatus, patch?: TaskPatch): Promise<Task>;
+    /** Mark a failed (or cancelled) task as resolved without changing its status. */
+    setResolution(id: string, resolution: TaskResolution): Promise<Task>;
+    /** Remove the resolution from a task (undo resolve). */
+    clearResolution(id: string): Promise<Task>;
     log(id: string, type: string, text: string): Promise<void>;
     /** Merge who worked on a task (claude-session attribution) without changing its status. */
     setWorker(id: string, worker: TaskWorker): Promise<Task | undefined>;
