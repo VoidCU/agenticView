@@ -80,6 +80,7 @@ export function WalkModeController({
     locked: false,       // is pointer lock active?
     clickPending: false, // user pressed primary button while locked
     bonkPending: false,  // user pressed E: bonk the agent under the crosshair if close
+    challengePending: false, // user pressed G: challenge the agent under the crosshair to RPS
   });
 
   const keys = useRef(new Set<string>());
@@ -164,6 +165,7 @@ export function WalkModeController({
         return;
       }
       if (e.code === "KeyE" && !e.repeat) st.current.bonkPending = true;
+      if (e.code === "KeyG" && !e.repeat) st.current.challengePending = true;
       keys.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
@@ -226,16 +228,18 @@ export function WalkModeController({
     camera.quaternion.setFromEuler(euler);
 
     // Screen-centre raycast: fire when a click or E press is pending.
-    if (cur.clickPending || cur.bonkPending) {
-      const bonkOnly = !cur.clickPending;
+    if (cur.clickPending || cur.bonkPending || cur.challengePending) {
+      const intent: WalkIntent = cur.clickPending ? "click" : cur.bonkPending ? "bonk" : "challenge";
       cur.clickPending = false;
       cur.bonkPending = false;
+      cur.challengePending = false;
       raycaster.current.setFromCamera(scratch.current.centre, camera);
       const hits = raycaster.current.intersectObjects(scene.children, true);
-      const action = walkInteraction(hits, camera.position, scratch.current.world, bonkOnly);
+      const action = walkInteraction(hits, camera.position, scratch.current.world, intent);
       if (action?.kind === "bonk") bonk(action.id);
       else if (action?.kind === "select") select(action.id);
       else if (action?.kind === "board") onBoard?.(action.id);
+      else if (action?.kind === "challenge") window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: action.id } }));
     }
   });
 
@@ -274,7 +278,11 @@ export function WalkMode({ spaces, startX, startZ, solids, onBoard }: WalkModePr
   );
 }
 
-export type WalkAction = { kind: "bonk" | "select" | "board"; id: string };
+export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge"; id: string };
+/** What triggered the crosshair raycast: a click, E (bonk) or G (challenge to rock-paper-scissors). */
+export type WalkIntent = "click" | "bonk" | "challenge";
+/** Walk mode: challenge an agent to RPS from this close (anywhere: desk, corridor, lounge). */
+export const CHALLENGE_RANGE = 3;
 
 /**
  * What a screen-centre click (or E press, `bonkOnly`) does, given the raycast hits (nearest first).
@@ -286,8 +294,9 @@ export function walkInteraction(
   hits: ReadonlyArray<{ distance: number; object: THREE.Object3D }>,
   cam: { x: number; z: number },
   tmp: THREE.Vector3,
-  bonkOnly = false,
+  intent: WalkIntent = "click",
 ): WalkAction | undefined {
+  const clickOnly = intent !== "click";
   for (const hit of hits) {
     if (hit.distance > MAX_INTERACT_DIST) return undefined;
     let obj: THREE.Object3D | null = hit.object;
@@ -296,12 +305,14 @@ export function walkInteraction(
       if (ud?.robotAgentId) {
         const root = obj.parent?.parent?.parent ?? obj; // body -> tilt -> yaw -> root group
         root.getWorldPosition(tmp);
-        const near = Math.hypot(tmp.x - cam.x, tmp.z - cam.z) <= BONK_RANGE;
-        if (near) return { kind: "bonk", id: ud.robotAgentId as string };
-        return bonkOnly ? undefined : { kind: "select", id: ud.robotAgentId as string };
+        const dist = Math.hypot(tmp.x - cam.x, tmp.z - cam.z);
+        const id = ud.robotAgentId as string;
+        if (intent === "challenge") return dist <= CHALLENGE_RANGE ? { kind: "challenge", id } : undefined;
+        if (dist <= BONK_RANGE) return { kind: "bonk", id };
+        return clickOnly ? undefined : { kind: "select", id };
       }
-      if (ud?.agentId) return bonkOnly ? undefined : { kind: "select", id: ud.agentId as string };
-      if (ud?.boardSpaceId) return bonkOnly ? undefined : { kind: "board", id: ud.boardSpaceId as string };
+      if (ud?.agentId) return clickOnly ? undefined : { kind: "select", id: ud.agentId as string };
+      if (ud?.boardSpaceId) return clickOnly ? undefined : { kind: "board", id: ud.boardSpaceId as string };
       obj = obj.parent;
     }
   }

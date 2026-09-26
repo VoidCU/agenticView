@@ -254,7 +254,7 @@ export function App() {
         )}
         {walking && (
           <div className="walk-hint" role="status" aria-live="polite" data-testid="walk-hint">
-            Press Esc to exit
+            E bonk · G play rock-paper-scissors · Esc exit
           </div>
         )}
         {walking && <div className="walk-crosshair" aria-hidden="true" />}

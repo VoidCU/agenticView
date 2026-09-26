@@ -5,7 +5,7 @@ import { useStore } from "../state/store";
 import { CreateAgentModal } from "./CreateAgentModal";
 import { MoreIcon } from "./ui";
 
-/** Actions for the agent shown in the chat header: edit, copy to project, delete. */
+/** Actions for the agent shown in the chat header: edit, play RPS (anywhere, not just the lounge), copy to project, delete. */
 export function AgentMenu({ agent }: { agent: Agent }) {
   const send = useStore((s) => s.send);
   const world = useStore((s) => s.world);
@@ -43,6 +43,9 @@ export function AgentMenu({ agent }: { agent: Agent }) {
         <div className="menu menu-fixed" role="menu" ref={menuRef} style={{ top: pos.top, right: pos.right }}>
           <button type="button" role="menuitem" onClick={() => (setOpen(false), setEditing(true))}>
             Edit {agent.name}
+          </button>
+          <button type="button" role="menuitem" onClick={() => (setOpen(false), window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: agent.id } })))}>
+            Play rock-paper-scissors
           </button>
           {canCopy && (
             <button type="button" role="menuitem" onClick={() => (setOpen(false), send({ type: "agent.copyToProject", id: agent.id }))}>

@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { BONK_ANIM_MS, BONK_BUSY_LINES, BONK_COOLDOWN_MS, BONK_LINES, BONK_LOOK_MS, BONK_RANGE, bonk, bonkLooking, bonkState, bonkWobble, bonkedAt, isBusyAgent, resetBonks } from "../src/state/bonk";
 import { task, worker } from "./fixtures";
 import { useStore } from "../src/state/store";
-import { walkInteraction } from "../src/scene/WalkMode";
+import { CHALLENGE_RANGE, walkInteraction } from "../src/scene/WalkMode";
 
 describe("bonk", () => {
   beforeEach(() => { resetBonks(); useStore.setState({ bubbles: {} }); });
@@ -79,18 +79,26 @@ describe("walk-mode crosshair interaction", () => {
   it("bonks a robot within range on click or E", () => {
     const hit = [{ distance: 1.2, object: robotAt(0, 1.5, "r1") }];
     expect(walkInteraction(hit, cam, tmp)).toEqual({ kind: "bonk", id: "r1" });
-    expect(walkInteraction(hit, cam, tmp, true)).toEqual({ kind: "bonk", id: "r1" });
+    expect(walkInteraction(hit, cam, tmp, "bonk")).toEqual({ kind: "bonk", id: "r1" });
   });
   it("a farther robot is selected on click and ignored by E", () => {
     const hit = [{ distance: 3, object: robotAt(0, BONK_RANGE + 1.2, "r2") }];
     expect(walkInteraction(hit, cam, tmp)).toEqual({ kind: "select", id: "r2" });
-    expect(walkInteraction(hit, cam, tmp, true)).toBeUndefined();
+    expect(walkInteraction(hit, cam, tmp, "bonk")).toBeUndefined();
+  });
+  it("G challenges any agent within a few units to RPS, wherever it is", () => {
+    const near = [{ distance: 2.2, object: robotAt(0, CHALLENGE_RANGE - 0.2, "r3") }];
+    expect(walkInteraction(near, cam, tmp, "challenge")).toEqual({ kind: "challenge", id: "r3" });
+    const far = [{ distance: 5, object: robotAt(0, CHALLENGE_RANGE + 1, "r4") }];
+    expect(walkInteraction(far, cam, tmp, "challenge")).toBeUndefined();
+    const board = new THREE.Mesh(); board.userData = { boardSpaceId: "pod-a" };
+    expect(walkInteraction([{ distance: 1, object: board }], cam, tmp, "challenge")).toBeUndefined();
   });
   it("whiteboards and monitors keep their click actions, but not on E", () => {
     const board = new THREE.Mesh(); board.userData = { boardSpaceId: "pod-a" };
     const mon = new THREE.Mesh(); mon.userData = { agentId: "m1" };
     expect(walkInteraction([{ distance: 2, object: board }], cam, tmp)).toEqual({ kind: "board", id: "pod-a" });
     expect(walkInteraction([{ distance: 2, object: mon }], cam, tmp)).toEqual({ kind: "select", id: "m1" });
-    expect(walkInteraction([{ distance: 2, object: board }], cam, tmp, true)).toBeUndefined();
+    expect(walkInteraction([{ distance: 2, object: board }], cam, tmp, "bonk")).toBeUndefined();
   });
 });
