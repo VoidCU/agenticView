@@ -8,6 +8,7 @@ import {
   type Task,
   type TaskKind,
   type TaskLogEntry,
+  type TaskResolution,
   type TaskStatus,
   type TaskWorker,
 } from "@agenticview/shared";
@@ -99,6 +100,37 @@ export class TaskService {
       else delete next.finishedAt;
       if ("error" in patch && patch.error === undefined) delete next.error;
       if ("result" in patch && patch.result === undefined) delete next.result;
+      // Retrying clears any existing resolution.
+      if (to === "queued") delete next.resolution;
+      await this.store.write(id, next);
+      this.onChange(next, "state");
+      return next;
+    });
+  }
+
+  /** Mark a failed (or cancelled) task as resolved without changing its status. */
+  setResolution(id: string, resolution: TaskResolution): Promise<Task> {
+    return this.locked(id, async () => {
+      const cur = await this.store.read(id);
+      if (!cur) throw new Error(`Unknown task ${id}`);
+      if (cur.status !== "failed" && cur.status !== "cancelled") {
+        throw new Error(`Only failed or cancelled tasks can be resolved (status is ${cur.status})`);
+      }
+      const next: Task = { ...cur, resolution };
+      await this.store.write(id, next);
+      this.onChange(next, "state");
+      return next;
+    });
+  }
+
+  /** Remove the resolution from a task (undo resolve). */
+  clearResolution(id: string): Promise<Task> {
+    return this.locked(id, async () => {
+      const cur = await this.store.read(id);
+      if (!cur) throw new Error(`Unknown task ${id}`);
+      if (!cur.resolution) throw new Error(`Task ${id} has no resolution to remove`);
+      const next: Task = { ...cur };
+      delete next.resolution;
       await this.store.write(id, next);
       this.onChange(next, "state");
       return next;

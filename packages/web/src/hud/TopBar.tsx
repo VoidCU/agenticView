@@ -20,9 +20,11 @@ interface Props {
   onCreate: () => void;
   onSessions?: () => void;
   onInbox?: () => void;
+  onTimeline?: () => void;
+  timelineActive?: boolean;
 }
 
-export function TopBar({ onSettings, onCreate, onSessions, onInbox }: Props) {
+export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, timelineActive }: Props) {
   const sessions = useStore((s) => s.sessions);
   const online = sessions.filter((s) => s.online).length;
   const world = useStore((s) => s.world);
@@ -30,7 +32,8 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox }: Props) {
   const connected = useStore((s) => s.connected);
   const questions = useStore((s) => s.questions);
   const permissions = useStore((s) => s.permissions);
-  const pendingCount = questions.length + permissions.length;
+  const limits = useStore((s) => s.limits);
+  const pendingCount = questions.length + permissions.length + limits.length;
   const hub = world?.kind === "hub";
 
   const handleInbox = () => {
@@ -67,7 +70,7 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox }: Props) {
           type="button"
           className="btn btn-ghost btn-sm inbox-button"
           onClick={handleInbox}
-          title="Inbox"
+          title="Inbox (I)"
           aria-label={`Inbox (${pendingCount})`}
           data-testid="inbox-button"
         >
@@ -76,6 +79,19 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox }: Props) {
             {pendingCount}
           </span>
         </button>
+        {onTimeline && (
+          <button
+            type="button"
+            className={`btn btn-ghost btn-sm${timelineActive ? " btn-ghost-active" : ""}`}
+            onClick={onTimeline}
+            title="Activity timeline (L)"
+            aria-label="Timeline"
+            aria-pressed={timelineActive}
+            data-testid="timeline-button"
+          >
+            Timeline
+          </button>
+        )}
         {onSessions && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={onSessions} title="Claude Code sessions serving this office" data-testid="sessions-button">
             Sessions{sessions.length ? ` ${online}/${sessions.length}` : ""}
@@ -85,7 +101,7 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox }: Props) {
           <PlusIcon />
           New agent
         </button>
-        <button type="button" className="icon-btn" onClick={onSettings} aria-label="Settings" title="Settings">
+        <button type="button" className="icon-btn" onClick={onSettings} aria-label="Settings" title="Settings (?)">
           <GearIcon />
         </button>
         <span className={`conn ${connected ? "conn-on" : "conn-off"}`} title={connected ? "Connected" : "Reconnecting"} role="status" aria-label={connected ? "Connected" : "Reconnecting"} />

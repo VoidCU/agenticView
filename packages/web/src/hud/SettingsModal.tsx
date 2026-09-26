@@ -4,6 +4,7 @@ import { useStore } from "../state/store";
 import { LimitChip, SwitchProviderModal } from "./LimitChip";
 import { UsagePanel } from "./UsagePanel";
 import { Modal, ProviderChip, automaticLabel, providerLabel } from "./ui";
+import { getNotificationPref, requestNotificationPermission, setNotificationPref } from "./useNotifications";
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const settings = useStore((s) => s.settings);
@@ -14,6 +15,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [provider, setProvider] = useState<Provider | "">(settings?.defaultProvider ?? "");
   const [model, setModel] = useState(settings?.defaultModel ?? "");
   const [max, setMax] = useState(settings?.maxConcurrentRuns ?? 3);
+  const [limitPolicy, setLimitPolicy] = useState<"ask" | "auto">(settings?.limitPolicy ?? "ask");
+  const [loungeBreaks, setLoungeBreaks] = useState(settings?.loungeBreaks ?? true);
+  const [preferCheapModels, setPreferCheapModels] = useState(settings?.preferCheapModels ?? false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => getNotificationPref());
   const [tab, setTab] = useState<"settings" | "usage">("settings");
   const [switchProvider, setSwitchProvider] = useState<Provider | null>(null);
 
@@ -21,7 +26,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     send({
       type: "settings.update",
-      settings: { defaultProvider: provider || null, defaultModel: model.trim() || null, maxConcurrentRuns: Math.min(10, Math.max(1, Math.round(max))) },
+      settings: {
+        defaultProvider: provider || null,
+        defaultModel: model.trim() || null,
+        maxConcurrentRuns: Math.min(10, Math.max(1, Math.round(max))),
+        limitPolicy,
+        loungeBreaks,
+        preferCheapModels,
+      },
     });
     onClose();
   };
@@ -70,6 +82,52 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <label className="field">
               <span>Workers running at once</span>
               <input type="number" min={1} max={10} value={max} onChange={(e) => setMax(Number(e.target.value))} />
+            </label>
+            <label className="field">
+              <span>When an agent hits a limit</span>
+              <select
+                value={limitPolicy}
+                onChange={(e) => setLimitPolicy(e.target.value as "ask" | "auto")}
+                aria-label="Limit policy"
+              >
+                <option value="ask">Ask me</option>
+                <option value="auto">Switch automatically</option>
+              </select>
+            </label>
+            <label className="field field-toggle">
+              <span>Lounge breaks</span>
+              <input
+                type="checkbox"
+                checked={loungeBreaks}
+                onChange={(e) => setLoungeBreaks(e.target.checked)}
+                aria-label="Lounge breaks"
+              />
+            </label>
+            <label className="field field-toggle">
+              <span>Prefer cheap models</span>
+              <input
+                type="checkbox"
+                checked={preferCheapModels}
+                onChange={(e) => setPreferCheapModels(e.target.checked)}
+                aria-label="Prefer cheap models"
+              />
+            </label>
+            <label className="field field-toggle">
+              <span>Desktop notifications</span>
+              <input
+                type="checkbox"
+                checked={notificationsEnabled}
+                onChange={async (e) => {
+                  if (e.target.checked) {
+                    const granted = await requestNotificationPermission();
+                    setNotificationsEnabled(granted);
+                  } else {
+                    setNotificationPref(false);
+                    setNotificationsEnabled(false);
+                  }
+                }}
+                aria-label="Desktop notifications"
+              />
             </label>
           </div>
 

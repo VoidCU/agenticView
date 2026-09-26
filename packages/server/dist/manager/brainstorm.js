@@ -2,9 +2,29 @@ import { z } from "zod";
 import { isTerminal, planOffice } from "@agenticview/shared";
 import { resolveAssignmentTarget } from "./tools.js";
 import { moveWorker } from "./officeTools.js";
+function toParticipants(participants, tasks) {
+    return participants.map((p) => {
+        const t = tasks.get(p.task.id) ?? p.task;
+        return { agentId: p.agent.id, name: p.agent.name, answer: t.result ?? undefined, done: isTerminal(t.status) };
+    });
+}
 /** Same-topic calls in a manager turn reuse the run, including after a bounded wait. */
 export function brainstormTool(ctx) {
     const sessions = new Map();
+    function emitUpdate(topic, session, taskMap, complete) {
+        if (!ctx.emitBrainstorm)
+            return;
+        ctx.emitBrainstorm({
+            type: "brainstorm.updated",
+            managerId: ctx.managerId,
+            requestTaskId: ctx.requestTask.id,
+            topic,
+            participants: toParticipants(session.participants, taskMap),
+            skipped: session.skipped.map(s => ({ agentId: "", name: s.name, reason: s.reason })),
+            complete,
+            error: session.error,
+        });
+    }
     async function begin(topic, refs) {
         const agents = await ctx.registry.list();
         const tasks = await ctx.tasks.list();
@@ -44,14 +64,17 @@ export function brainstormTool(ctx) {
         // Pin before anyone moves so returning to an auto-assigned seat does not displace a peer.
         for (const a of await ctx.registry.pinPlacements())
             ctx.emitAgent(a);
-        session.completion = conduct(session).catch(async (e) => {
+        // Emit initial started event.
+        const initMap = new Map(session.participants.map(p => [p.task.id, p.task]));
+        emitUpdate(topic, session, initMap, false);
+        session.completion = conduct(topic, session).catch(async (e) => {
             session.error = e.message;
             for (const p of session.participants)
                 await ctx.cancelTask?.(p.task.id);
         });
         return session;
     }
-    async function conduct(session) {
+    async function conduct(topic, session) {
         const pending = [...session.participants];
         const finishedAgents = new Set();
         while (pending.length) {
@@ -102,6 +125,10 @@ export function brainstormTool(ctx) {
                 await Promise.all(batch.map(p => ctx.awaitTask(p.task.id)));
                 for (const p of batch)
                     finishedAgents.add(p.agent.id);
+                // Emit progress after each batch completes.
+                const allTasks = await ctx.tasks.list();
+                const taskMap = new Map(allTasks.map(t => [t.id, t]));
+                emitUpdate(topic, session, taskMap, pending.length === 0);
             }
             finally {
                 for (const p of moved) {

@@ -30,6 +30,8 @@ interface Props {
   onGrab?: (agentId: string, e: ThreeEvent<PointerEvent>) => void;
   /** Extra HTML that follows the robot (file chips). */
   children?: ReactNode;
+  /** When true: grey visor, zZ float, robot lies down on the floor (quota/rate-limit faint). */
+  fainted?: boolean;
 }
 
 const WALK_SPEED = 3.1;
@@ -116,8 +118,9 @@ function Eyes({
   );
 }
 
-export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive, onGrab, children }: Props) {
-  const status = useAgentStatus(agent.id);
+export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive, onGrab, children, fainted = false }: Props) {
+  const _status = useAgentStatus(agent.id);
+  const status = fainted ? "idle" : _status;
   const selected = useStore((s) => s.selectedAgentId === agent.id);
   const [switchOpen, setSwitchOpen] = useState(false);
   const select = useStore((s) => s.select);
@@ -228,8 +231,17 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
       armR.current.rotation.x = s * 0.7 * w + idleWave;
     }
     if (tilt.current) {
-      tilt.current.rotation.x = 0.13 * w;
-      tilt.current.rotation.z = Math.sin(st.phase) * 0.05 * w;
+      if (fainted) {
+        // Lying down: tilt forward ~90°, settle gently
+        const faintTilt = -Math.PI / 2 * Math.min(1, 0.5 + 0.5 * Math.sin(t * 0.4 - 0.5));
+        tilt.current.rotation.x = faintTilt;
+        tilt.current.rotation.z = 0;
+        tilt.current.position.y = 0.05 + 0.28 * Math.max(0, Math.sin(faintTilt));
+      } else {
+        tilt.current.rotation.x = 0.13 * w;
+        tilt.current.rotation.z = Math.sin(st.phase) * 0.05 * w;
+        tilt.current.position.y = 0.05;
+      }
     }
 
     // Idle animation: gentle breathing bob and occasional look-around
@@ -320,7 +332,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
                 emissiveIntensity={selected ? 0.38 : 0.07}
               />
             </mesh>
-            <Eyes kind={agent.appearance.eyes} accent={agent.appearance.accent} status={status} statusColor={statusColor} blink={eyes} />
+            <Eyes kind={fainted ? "visor" : agent.appearance.eyes} accent={fainted ? "#666880" : agent.appearance.accent} status={status} statusColor={fainted ? "#555770" : statusColor} blink={eyes} />
             <mesh position={[0, 1.66, 0]}>
               <cylinderGeometry args={[0.03, 0.03, 0.34, 8]} />
               <meshStandardMaterial color="#c9ced9" metalness={0.6} roughness={0.35} />
@@ -488,6 +500,15 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           </button>
         </div>
       </Html>
+      {fainted && (
+        <Html center position={[0, 2.2 * ROBOT_SCALE, 0]} distanceFactor={18} zIndexRange={[18, 0]} style={{ pointerEvents: "none" }}>
+          <div className="faint-zz" aria-label="Fainted – quota exceeded">
+            <span className="faint-z z1">z</span>
+            <span className="faint-z z2">Z</span>
+            <span className="faint-z z3">Z</span>
+          </div>
+        </Html>
+      )}
       {children}
     </group>
   );

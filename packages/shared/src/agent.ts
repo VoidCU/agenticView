@@ -43,6 +43,15 @@ export const PlacementSchema = z.object({
 });
 export type Placement = z.infer<typeof PlacementSchema>;
 
+export const AgentReviveSchema = z.object({
+  phase: z.enum(["fainted", "reviving", "done"]),
+  managerId: z.string().optional(),
+  suggested: z.object({ provider: ProviderSchema, model: z.string().optional() }).optional(),
+  failedTaskId: z.string().optional(),
+  resetAt: z.string().optional(),
+});
+export type AgentRevive = z.infer<typeof AgentReviveSchema>;
+
 export const AgentSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(40),
@@ -65,6 +74,8 @@ export const AgentSchema = z.object({
   session: AgentSessionSchema.nullable().optional(),
   /** Rate limit, quota or auth failure state for this agent. */
   limit: LimitInfoSchema.optional(),
+  /** Revive state machine: set when the agent's provider hit a limit and a revival is in progress. */
+  revive: AgentReviveSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

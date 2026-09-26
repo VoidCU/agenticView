@@ -52,6 +52,27 @@ export declare const PlacementSchema: z.ZodObject<{
     seat: z.ZodNumber;
 }, z.core.$strip>;
 export type Placement = z.infer<typeof PlacementSchema>;
+export declare const AgentReviveSchema: z.ZodObject<{
+    phase: z.ZodEnum<{
+        fainted: "fainted";
+        reviving: "reviving";
+        done: "done";
+    }>;
+    managerId: z.ZodOptional<z.ZodString>;
+    suggested: z.ZodOptional<z.ZodObject<{
+        provider: z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            antigravity: "antigravity";
+            gemini: "gemini";
+        }>;
+        model: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    failedTaskId: z.ZodOptional<z.ZodString>;
+    resetAt: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+export type AgentRevive = z.infer<typeof AgentReviveSchema>;
 export declare const AgentSchema: z.ZodObject<{
     id: z.ZodString;
     name: z.ZodString;
@@ -127,6 +148,26 @@ export declare const AgentSchema: z.ZodObject<{
             crash: "crash";
         }>>;
         reason: z.ZodOptional<z.ZodString>;
+        resetAt: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    revive: z.ZodOptional<z.ZodObject<{
+        phase: z.ZodEnum<{
+            fainted: "fainted";
+            reviving: "reviving";
+            done: "done";
+        }>;
+        managerId: z.ZodOptional<z.ZodString>;
+        suggested: z.ZodOptional<z.ZodObject<{
+            provider: z.ZodEnum<{
+                claude: "claude";
+                "claude-session": "claude-session";
+                codex: "codex";
+                antigravity: "antigravity";
+                gemini: "gemini";
+            }>;
+            model: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        failedTaskId: z.ZodOptional<z.ZodString>;
         resetAt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
     createdAt: z.ZodString;

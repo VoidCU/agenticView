@@ -14,9 +14,32 @@ export const WindowLimitSchema = z.discriminatedUnion("status", [
     usedPercent: z.number().min(0).max(100),
     resetAt: z.string().optional(),
     windowMinutes: z.number().optional(),
+    /** True when usedPercent >= 80 (approaching the limit). */
+    warning: z.boolean().optional(),
   }),
 ]);
 export type WindowLimit = z.infer<typeof WindowLimitSchema>;
+
+/** One rate-limit window posted by a Claude Code session worker. */
+const ClaudeRateLimitWindowSchema = z.object({
+  used_percentage: z.number().min(0).max(100),
+  resets_at: z.number().optional(),
+});
+
+/** Body for POST /api/claude-limits (posted by the agenticview skill running in Claude Code). */
+export const ClaudeLimitsBodySchema = z.object({
+  session_id: z.string().min(1).max(64),
+  model: z.union([
+    z.string(),
+    z.object({ id: z.string().optional(), display_name: z.string().optional() }),
+  ]).optional(),
+  cwd: z.string().max(1000).optional(),
+  rate_limits: z.object({
+    five_hour: ClaudeRateLimitWindowSchema.optional(),
+    seven_day: ClaudeRateLimitWindowSchema.optional(),
+  }).optional(),
+});
+export type ClaudeLimitsBody = z.infer<typeof ClaudeLimitsBodySchema>;
 
 export const ProviderModelLimitsSchema = z.object({
   provider: ProviderSchema,

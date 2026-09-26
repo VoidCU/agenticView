@@ -61,6 +61,6 @@ export function snapshot(agents: Agent[], tasks: Task[] = []): ServerMessage {
       { provider: "gemini", ok: true },
     ],
     autoProvider: "claude",
-    settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3 },
+    settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3, limitPolicy: "ask" as const, loungeBreaks: true, preferCheapModels: true },
   };
 }

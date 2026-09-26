@@ -17,16 +17,22 @@ const STATUS_WORD: Record<TaskStatus, string> = {
 
 function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }) {
   const agent = useStore((s) => s.agents[task.assigneeId]);
+  const tasks = useStore((s) => s.tasks);
   const questions = useStore((s) => s.questions);
   const send = useStore((s) => s.send);
   const select = useStore((s) => s.select);
   const selected = useStore((s) => s.selectedAgentId === task.assigneeId);
   const when = task.finishedAt ?? task.startedAt ?? task.createdAt;
   const cancellable = ["queued", "assigned", "running", "waiting"].includes(task.status);
-  const retryable = task.status === "failed";
+  const isSolved = task.status === "failed" && !!task.resolution;
+  const retryable = task.status === "failed" && !isSolved;
   const isWaiting = task.status === "waiting";
   const question = isWaiting ? questions.find((q) => q.taskId === task.id) : undefined;
   const questionText = question?.question || (task.description && task.description !== task.title ? task.description : undefined);
+
+  const resolutionTask = isSolved && task.resolution?.byTaskId
+    ? (tasks[task.resolution.byTaskId] ?? null)
+    : null;
 
   const handleOpenInbox = () => {
     onOpenInbox?.();
@@ -34,7 +40,7 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
   };
 
   return (
-    <li className={`task task-${task.status} ${selected ? "task-selected" : ""}`} data-kind={task.kind}>
+    <li className={`task task-${task.status}${isSolved ? " task-solved" : ""} ${selected ? "task-selected" : ""}`} data-kind={task.kind}>
       <div className="task-row">
         <span className="task-dot" aria-hidden="true" style={agent ? { background: agent.appearance.color } : undefined} />
         <div className="task-main">
@@ -48,10 +54,31 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
             {task.title}
           </button>
           <div className="task-meta">
-            <span className="task-status">{STATUS_WORD[task.status]}</span>
+            <span className="task-status">
+              {isSolved ? "Solved" : STATUS_WORD[task.status]}
+            </span>
             <time dateTime={when}>{timeAgo(when)}</time>
           </div>
-          {task.error && <div className="task-error">{task.error}</div>}
+          {isSolved && (
+            <div
+              className="task-resolution"
+              title={task.resolution!.note}
+            >
+              {resolutionTask ? (
+                <button
+                  type="button"
+                  className="task-resolution-link"
+                  onClick={() => select(resolutionTask.assigneeId)}
+                  aria-label={`Solved by task: ${resolutionTask.title}`}
+                >
+                  Solved by {resolutionTask.title}
+                </button>
+              ) : (
+                <span className="task-resolution-note">Solved</span>
+              )}
+            </div>
+          )}
+          {task.error && !isSolved && <div className="task-error">{task.error}</div>}
           {isWaiting && (
             <div className="task-waiting-box">
               {questionText && <p className="task-waiting-question">{questionText}</p>}
@@ -82,14 +109,27 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
   );
 }
 
-export function TaskBoard({ onOpenInbox }: { onOpenInbox?: () => void } = {}) {
+export function TaskBoard({
+  onOpenInbox,
+  externalCollapsed,
+  onCollapseChange,
+}: {
+  onOpenInbox?: () => void;
+  externalCollapsed?: boolean;
+  onCollapseChange?: (v: boolean) => void;
+} = {}) {
   const tasks = useStore((s) => s.tasks);
   const agents = useStore((s) => s.agents);
   const world = useStore((s) => s.world);
   const spaceNames = useStore((s) => s.spaceNames);
 
   const [selectedRoom, setSelectedRoom] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const collapsed = externalCollapsed !== undefined ? externalCollapsed : internalCollapsed;
+  const setCollapsed = (v: boolean) => {
+    setInternalCollapsed(v);
+    onCollapseChange?.(v);
+  };
   const bodyId = useId();
   const roomSelectId = useId();
 

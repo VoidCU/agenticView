@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EffortSchema, isTerminal, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, type Agent, type Task } from "@agenticview/shared";
+import { EffortSchema, isTerminal, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, type Agent, type BrainstormParticipant, type Provider, type ServerMessage, type Task } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
@@ -11,9 +11,10 @@ export const MANAGER_SYSTEM_PROMPT = `You are the Manager of an AgenticView offi
 Rules:
 - The "Roster" and "Open tasks" preamble at the top of each message is authoritative and freshly generated. Trust it over memory. Call list_agents or list_tasks if you need to re-check.
 - Understand the request first. Read the project (you have read-only file tools) when a decision depends on the code.
-- Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits. Leave model and effort at their defaults unless the user asks; use update_agent to change them.
+- Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits. When preferCheapModels is on (the default), create_agent without an explicit provider/model automatically picks the cheapest available provider — the result will tell you which one was chosen. Use update_agent to change them later if needed.
 - Split work into self-contained assignments. Each assign_task description must stand alone: what to change, where (files or folders), how to verify. Never assign the same file to two workers at once.
 - assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.
+- When a task fails and a later task (by you or another worker) completes the same work, call resolve_task with the failing task id and the succeeding task id. This marks the failure as solved in the history without changing its status. If no retry is possible and the failure is acceptable, call resolve_task with just a note.
 - Use ask_user only when a decision truly needs the user.
 - The office is a honeycomb of rooms. list_spaces shows who sits where; move_worker / arrange_workers reseat workers (group a team in one pod, call people to the meeting room) when the user asks or when it clearly helps.
 - Group agents by role and name their rooms with rename_space. Move collaborators next to each other while they work on the same task.
@@ -59,6 +60,14 @@ export interface ManagerToolContext {
   sessionConflict?: (agent: Agent) => Promise<string | undefined>;
   /** Surface a status line in the Manager's feed. */
   notify?: (text: string) => void;
+  /** Switch agent to a new provider and retry its last failed task. */
+  reviveAgent?: (agentId: string, provider?: Provider, model?: string) => Promise<void>;
+  /** When preferCheapModels is on, returns the cheapest available {provider, model}. */
+  cheapProvider?: () => Promise<{ provider: Provider; model: string } | undefined>;
+  /** Add a new room to the office layout. */
+  addRoom?: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{ ok: true; spaceId: string } | { ok: false; message: string }>;
+  /** Emit a brainstorm.updated event. */
+  emitBrainstorm?: (ev: Extract<ServerMessage, { type: "brainstorm.updated" }>) => void;
 }
 
 function agentLine(a: Agent, tasks: Task[]): Record<string, unknown> {
@@ -96,12 +105,14 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
     },
     {
       name: "list_tasks",
-      description: "List open (non-terminal) tasks with status, assignee and parent.",
-      schema: { includeDone: z.boolean().optional().describe("Also include finished tasks") },
+      description: "List open (non-terminal) tasks with status, assignee and parent. Resolved failures are hidden by default; pass includeDone to see them.",
+      schema: { includeDone: z.boolean().optional().describe("Also include finished tasks (done, failed, cancelled); resolved failures are included when true") },
       handler: async (args) => {
         const all = await ctx.tasks.list();
+        // Resolved failures are terminal (failed status) and are hidden in the default view,
+        // just like other terminal tasks.  They appear when includeDone=true.
         const rows = all.filter((t) => args.includeDone === true || !isTerminal(t.status));
-        return JSON.stringify(rows.map((t) => ({ id: t.id, kind: t.kind, title: t.title, status: t.status, assigneeId: t.assigneeId, parentId: t.parentId, projectPath: t.projectPath, result: t.result?.slice(0, 300), error: t.error })), null, 2);
+        return JSON.stringify(rows.map((t) => ({ id: t.id, kind: t.kind, title: t.title, status: t.status, assigneeId: t.assigneeId, parentId: t.parentId, projectPath: t.projectPath, result: t.result?.slice(0, 300), error: t.error, resolution: t.resolution })), null, 2);
       },
     },
     {
@@ -119,7 +130,21 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         permissionMode: PermissionModeSchema.optional(),
       },
       handler: async (args) => {
-        const draft = { name: String(args.name), specialty: String(args.specialty ?? ""), description: args.description as string | undefined, provider: (args.provider as Agent["provider"]) ?? null, model: (args.model as string | undefined) ?? null, effort: (args.effort as Agent["effort"]) ?? null, systemPrompt: args.systemPrompt as string | undefined, tools: args.tools as Agent["tools"] | undefined, permissionMode: args.permissionMode as Agent["permissionMode"] | undefined };
+        const explicitProvider = args.provider as Agent["provider"] | undefined;
+        const explicitModel = args.model as string | undefined;
+        let chosenProvider: Agent["provider"] = explicitProvider ?? null;
+        let chosenModel: string | null = explicitModel ?? null;
+        let cheapNote = "";
+        // When no explicit provider/model supplied, pick the cheapest available if the setting is on.
+        if (explicitProvider == null && explicitModel == null && ctx.cheapProvider) {
+          const cheap = await ctx.cheapProvider();
+          if (cheap) {
+            chosenProvider = cheap.provider;
+            chosenModel = cheap.model;
+            cheapNote = ` [preferCheapModels: assigned ${cheap.provider}/${cheap.model}]`;
+          }
+        }
+        const draft = { name: String(args.name), specialty: String(args.specialty ?? ""), description: args.description as string | undefined, provider: chosenProvider, model: chosenModel, effort: (args.effort as Agent["effort"]) ?? null, systemPrompt: args.systemPrompt as string | undefined, tools: args.tools as Agent["tools"] | undefined, permissionMode: args.permissionMode as Agent["permissionMode"] | undefined };
         const agent = await ctx.registry.create(draft);
         const problem = await ctx.checkProvider(agent);
         if (problem) {
@@ -127,7 +152,7 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
           return `ERROR: ${problem}`;
         }
         ctx.emitAgent(agent);
-        return `Created agent ${agent.id} "${agent.name}" (${agent.scope}, ${agent.specialty || "generalist"})`;
+        return `Created agent ${agent.id} "${agent.name}" (${agent.scope}, ${agent.specialty || "generalist"})${cheapNote}`;
       },
     },
     {
@@ -255,5 +280,63 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
     },
     brainstormTool(ctx),
     ...officeTools(ctx),
+    {
+      name: "resolve_task",
+      description:
+        "Mark a failed (or cancelled) task as solved without changing its history. Use when a later task completed the same work, or when the failure is acceptable. Retrying a resolved task clears the resolution.",
+      schema: {
+        taskId: z.string().describe("Id of the failed task to mark as resolved"),
+        byTaskId: z.string().optional().describe("Id of the task that completed the same work (must be done)"),
+        note: z.string().min(1).describe("Short explanation of why this failure is considered resolved"),
+      },
+      handler: async (args) => {
+        const taskId = String(args.taskId);
+        const byTaskId = args.byTaskId as string | undefined;
+        const note = String(args.note);
+        const task = await ctx.tasks.get(taskId);
+        if (!task) return `ERROR: unknown task ${taskId}`;
+        if (task.status !== "failed" && task.status !== "cancelled") {
+          return `ERROR: only failed or cancelled tasks can be resolved (status is ${task.status})`;
+        }
+        if (byTaskId !== undefined) {
+          const byTask = await ctx.tasks.get(byTaskId);
+          if (!byTask) return `ERROR: byTaskId ${byTaskId} not found`;
+          if (byTask.status !== "done") return `ERROR: byTaskId ${byTaskId} is not done (status is ${byTask.status})`;
+        }
+        await ctx.tasks.setResolution(taskId, { byTaskId, note, at: new Date().toISOString() });
+        return `Resolved task ${taskId}${byTaskId ? ` (completed by ${byTaskId})` : ""}`;
+      },
+    },
+    {
+      name: "revive_agent",
+      description: "Switch a fainted agent to a new provider and retry its last failed task. Call after the user approves the revive or chooses a different provider.",
+      schema: {
+        agentId: z.string().describe("The id of the fainted agent"),
+        provider: ProviderSchema.optional().describe("Provider to switch to; omit to use the suggested provider"),
+        model: z.string().optional().describe("Model override; omit for the provider default"),
+      },
+      handler: async (args) => {
+        if (!ctx.reviveAgent) return "ERROR: reviveAgent not available";
+        const agentId = String(args.agentId);
+        const agent = await ctx.registry.get(agentId);
+        if (!agent) return `ERROR: unknown agent ${agentId}`;
+        await ctx.reviveAgent(agentId, args.provider as Provider | undefined, args.model as string | undefined);
+        return `Reviving ${agent.name} — switched provider and retried task`;
+      },
+    },
+    {
+      name: "add_room",
+      description: "Add a new pod, meeting room, or lounge to the office layout. Returns the new space id.",
+      schema: {
+        kind: z.enum(["pod", "meeting", "lounge"]),
+        name: z.string().max(40).optional().describe("Display name; omit for a default like 'Pod B'"),
+      },
+      handler: async (args) => {
+        if (!ctx.addRoom) return "ERROR: addRoom not available";
+        const result = await ctx.addRoom(args.kind as "pod" | "meeting" | "lounge", (args.name as string | undefined) ?? "");
+        if (!result.ok) return `ERROR: ${result.message}`;
+        return `Added ${args.kind} room (id: ${result.spaceId})`;
+      },
+    },
   ];
 }

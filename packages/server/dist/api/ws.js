@@ -107,6 +107,9 @@ async function handle(msg, world, opts, send) {
             send({ type: "opened", url: await opts.openProject(msg.path) });
             return;
         }
+        case "limit.respond":
+            orchestrator.respondLimit(msg.id, msg.answer, msg.provider, msg.model);
+            return;
     }
 }
 /** Attach the /ws endpoint: token-guarded upgrade, snapshot on connect, bus fan-out, command dispatch. */

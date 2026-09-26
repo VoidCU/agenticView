@@ -6,6 +6,8 @@ export type BoardColumn = typeof BOARD_COLUMNS[number];
 export const BOARD_LABELS: Record<BoardColumn, string> = { queued: "Queued", running: "In progress", waiting: "Waiting on you", done: "Done (recent)", failed: "Failed" };
 export const BOARD_COLORS: Record<BoardColumn, string> = { queued: "#ffe49a", running: "#a9d6ff", waiting: "#e4c4ff", done: "#b5e5cb", failed: "#ffb9b1" };
 export function boardColumn(task: Task): BoardColumn | undefined {
+  // Resolved failures count as done for display purposes
+  if (task.status === "failed" && task.resolution) return "done";
   return task.status === "assigned" ? "queued" : task.status === "cancelled" ? undefined : task.status;
 }
 export function podBoard(spaceId: string, agents: Agent[], tasks: Task[]) {
@@ -44,4 +46,26 @@ export function managerBoard(managerId: string | undefined, tasks: Task[], feed:
 export function relativeTime(date: string, now: number): string {
   const minutes = Math.max(0, Math.floor((now - Date.parse(date)) / 60000));
   return minutes < 1 ? "just now" : minutes < 60 ? `${minutes}m ago` : minutes < 1440 ? `${Math.floor(minutes / 60)}h ago` : `${Math.floor(minutes / 1440)}d ago`;
+}
+/** Unique file paths touched by a task, in encounter order, from file_changed feed events. */
+export function filesChangedForTask(taskId: string, feed: FeedItem[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of feed) {
+    if (item.taskId !== taskId || !("event" in item) || item.event.type !== "file_changed") continue;
+    const path = item.event.path;
+    if (!seen.has(path)) { seen.add(path); result.push(path); }
+  }
+  return result;
+}
+/** Recursively count total and done tasks in a branch tree. Resolved failures count as done. */
+export function countBranches(branches: TaskBranch[]): { total: number; done: number } {
+  let total = 0; let done = 0;
+  for (const { task, children } of branches) {
+    total++;
+    if (task.status === "done" || (task.status === "failed" && task.resolution)) done++;
+    const sub = countBranches(children);
+    total += sub.total; done += sub.done;
+  }
+  return { total, done };
 }

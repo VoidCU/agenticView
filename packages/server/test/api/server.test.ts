@@ -170,6 +170,75 @@ describe("server", () => {
   });
 });
 
+describe("POST /api/claude-limits", () => {
+  it("rejects unauthenticated requests and accepts valid bodies with 204", async () => {
+    const { s } = await boot();
+    // No token -> 401
+    const unauth = await fetch(`${s.url}/api/claude-limits`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session_id: "s1", rate_limits: { five_hour: { used_percentage: 50, resets_at: 1758873600 } } }),
+    });
+    expect(unauth.status).toBe(401);
+
+    // Valid body with rate_limits -> 204
+    const ok = await fetch(`${s.url}/api/claude-limits`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-agenticview-token": "tok" },
+      body: JSON.stringify({
+        session_id: "s1",
+        model: "claude-sonnet-4-6",
+        rate_limits: { five_hour: { used_percentage: 50, resets_at: 1758873600 }, seven_day: { used_percentage: 10 } },
+      }),
+    });
+    expect(ok.status).toBe(204);
+
+    // Body without rate_limits -> 204 (ignored)
+    const noLimits = await fetch(`${s.url}/api/claude-limits`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-agenticview-token": "tok" },
+      body: JSON.stringify({ session_id: "s1", model: "claude-sonnet-4-6" }),
+    });
+    expect(noLimits.status).toBe(204);
+
+    // Invalid body (missing session_id) -> 400
+    const bad = await fetch(`${s.url}/api/claude-limits`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-agenticview-token": "tok" },
+      body: JSON.stringify({ rate_limits: { five_hour: { used_percentage: 50 } } }),
+    });
+    expect(bad.status).toBe(400);
+
+    // Verify limits are reflected in GET /api/limits
+    const limitsRes = await fetch(`${s.url}/api/limits`, { headers: { "x-agenticview-token": "tok" } });
+    expect(limitsRes.status).toBe(200);
+    const limits = await limitsRes.json();
+    expect(limits.providers["claude-session"]).toBeDefined();
+    expect(limits.providers["claude-session"].models["claude-sonnet-4-6"]).toBeDefined();
+    expect(limits.providers["claude-session"].models["claude-sonnet-4-6"].fiveHour.status).toBe("reported");
+    expect(limits.providers["claude-session"].models["claude-sonnet-4-6"].fiveHour.usedPercent).toBe(50);
+  });
+
+  it("model as object {id, display_name} is normalised to string", async () => {
+    const { s } = await boot();
+    const ok = await fetch(`${s.url}/api/claude-limits`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-agenticview-token": "tok" },
+      body: JSON.stringify({
+        session_id: "s2",
+        model: { id: "claude-opus-5", display_name: "Claude Opus 5" },
+        rate_limits: { five_hour: { used_percentage: 82 } },
+      }),
+    });
+    expect(ok.status).toBe(204);
+    const limitsRes = await fetch(`${s.url}/api/limits`, { headers: { "x-agenticview-token": "tok" } });
+    const limits = await limitsRes.json();
+    const modelEntry = limits.providers["claude-session"].models["claude-opus-5"];
+    expect(modelEntry).toBeDefined();
+    expect(modelEntry.fiveHour.warning).toBe(true);
+  });
+});
+
 describe("worker bridge tools", () => {
   it("gives screenshot-enabled workers a take_screenshot tool by default", async () => {
     let seen: string[] = [];

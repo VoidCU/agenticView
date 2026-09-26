@@ -5,6 +5,12 @@ export const ProjectSettingsSchema = z.object({
   defaultProvider: ProviderSchema.nullable().default(null),
   defaultModel: z.string().nullable().default(null),
   maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
+  /** How to handle an agent whose provider hits a quota/rate-limit: prompt the user ('ask') or revive automatically ('auto'). */
+  limitPolicy: z.enum(["ask", "auto"]).default("ask"),
+  /** Allow the manager to suggest lounge breaks when the project is quiet. */
+  loungeBreaks: z.boolean().default(true),
+  /** When true (default), create_agent without an explicit provider/model picks the cheapest available choice. */
+  preferCheapModels: z.boolean().default(true),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 

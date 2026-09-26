@@ -1,5 +1,6 @@
 import type { Agent, Task } from "@agenticview/shared";
 import type { FeedItem } from "../state/store";
+export { agentRevivePhase, type LoungeBreak } from "./breaks";
 
 /**
  * Returns a short string describing what the agent is currently doing,

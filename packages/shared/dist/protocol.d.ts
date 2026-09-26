@@ -95,8 +95,28 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type CreateAgentPayload = z.infer<typeof CreateAgentPayloadSchema>;
 export declare const AgentPatchSchema: z.ZodObject<{
-    name: z.ZodOptional<z.ZodString>;
     model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        antigravity: "antigravity";
+        gemini: "gemini";
+    }>>>;
+    session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        id: z.ZodString;
+        name: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>>;
+    effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        minimal: "minimal";
+        low: "low";
+        medium: "medium";
+        high: "high";
+        xhigh: "xhigh";
+        max: "max";
+        ultra: "ultra";
+    }>>>>;
+    name: z.ZodOptional<z.ZodString>;
     tools: z.ZodOptional<z.ZodObject<{
         edit: z.ZodBoolean;
         shell: z.ZodBoolean;
@@ -118,30 +138,30 @@ export declare const AgentPatchSchema: z.ZodObject<{
         }>;
     }, z.core.$strip>>;
     specialty: z.ZodOptional<z.ZodString>;
-    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-        claude: "claude";
-        "claude-session": "claude-session";
-        codex: "codex";
-        antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
-    effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-        minimal: "minimal";
-        low: "low";
-        medium: "medium";
-        high: "high";
-        xhigh: "xhigh";
-        max: "max";
-        ultra: "ultra";
-    }>>>>;
     placement: z.ZodOptional<z.ZodOptional<z.ZodObject<{
         space: z.ZodString;
         seat: z.ZodNumber;
     }, z.core.$strip>>>;
-    session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-        id: z.ZodString;
-        name: z.ZodOptional<z.ZodString>;
-    }, z.core.$strip>>>>;
+    revive: z.ZodOptional<z.ZodOptional<z.ZodObject<{
+        phase: z.ZodEnum<{
+            fainted: "fainted";
+            reviving: "reviving";
+            done: "done";
+        }>;
+        managerId: z.ZodOptional<z.ZodString>;
+        suggested: z.ZodOptional<z.ZodObject<{
+            provider: z.ZodEnum<{
+                claude: "claude";
+                "claude-session": "claude-session";
+                codex: "codex";
+                antigravity: "antigravity";
+                gemini: "gemini";
+            }>;
+            model: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        failedTaskId: z.ZodOptional<z.ZodString>;
+        resetAt: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>;
     description: z.ZodOptional<z.ZodString>;
     systemPrompt: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
@@ -211,8 +231,28 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"agent.update">;
     id: z.ZodString;
     patch: z.ZodObject<{
-        name: z.ZodOptional<z.ZodString>;
         model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            antigravity: "antigravity";
+            gemini: "gemini";
+        }>>>;
+        session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
+            id: z.ZodString;
+            name: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>>;
+        effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+            minimal: "minimal";
+            low: "low";
+            medium: "medium";
+            high: "high";
+            xhigh: "xhigh";
+            max: "max";
+            ultra: "ultra";
+        }>>>>;
+        name: z.ZodOptional<z.ZodString>;
         tools: z.ZodOptional<z.ZodObject<{
             edit: z.ZodBoolean;
             shell: z.ZodBoolean;
@@ -234,30 +274,30 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             }>;
         }, z.core.$strip>>;
         specialty: z.ZodOptional<z.ZodString>;
-        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-            claude: "claude";
-            "claude-session": "claude-session";
-            codex: "codex";
-            antigravity: "antigravity";
-            gemini: "gemini";
-        }>>>;
-        effort: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodEnum<{
-            minimal: "minimal";
-            low: "low";
-            medium: "medium";
-            high: "high";
-            xhigh: "xhigh";
-            max: "max";
-            ultra: "ultra";
-        }>>>>;
         placement: z.ZodOptional<z.ZodOptional<z.ZodObject<{
             space: z.ZodString;
             seat: z.ZodNumber;
         }, z.core.$strip>>>;
-        session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
-            id: z.ZodString;
-            name: z.ZodOptional<z.ZodString>;
-        }, z.core.$strip>>>>;
+        revive: z.ZodOptional<z.ZodOptional<z.ZodObject<{
+            phase: z.ZodEnum<{
+                fainted: "fainted";
+                reviving: "reviving";
+                done: "done";
+            }>;
+            managerId: z.ZodOptional<z.ZodString>;
+            suggested: z.ZodOptional<z.ZodObject<{
+                provider: z.ZodEnum<{
+                    claude: "claude";
+                    "claude-session": "claude-session";
+                    codex: "codex";
+                    antigravity: "antigravity";
+                    gemini: "gemini";
+                }>;
+                model: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            failedTaskId: z.ZodOptional<z.ZodString>;
+            resetAt: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>;
         description: z.ZodOptional<z.ZodString>;
         systemPrompt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -330,6 +370,12 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }>>>>;
         defaultModel: z.ZodOptional<z.ZodDefault<z.ZodNullable<z.ZodString>>>;
         maxConcurrentRuns: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
+        limitPolicy: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
+            auto: "auto";
+            ask: "ask";
+        }>>>;
+        loungeBreaks: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
+        preferCheapModels: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"project.open">;
@@ -345,8 +391,41 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"session.capacity">;
     id: z.ZodString;
     capacity: z.ZodNumber;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"limit.respond">;
+    id: z.ZodString;
+    answer: z.ZodEnum<{
+        accept: "accept";
+        choose: "choose";
+        dismiss: "dismiss";
+    }>;
+    provider: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        antigravity: "antigravity";
+        gemini: "gemini";
+    }>>;
+    model: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>], "type">;
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
+export interface PendingLimitInfo {
+    id: string;
+    agentId: string;
+    taskId: string;
+    suggested?: {
+        provider: Provider;
+        model?: string;
+    };
+    resetAt?: string;
+    reason?: string;
+}
+export interface BrainstormParticipant {
+    agentId: string;
+    name: string;
+    answer?: string;
+    done: boolean;
+}
 export interface PendingPermissionInfo {
     id: string;
     agentId: string;
@@ -373,8 +452,14 @@ export interface Snapshot {
     settings: ProjectSettings;
     permissions: PendingPermissionInfo[];
     questions: PendingQuestionInfo[];
+    limits?: PendingLimitInfo[];
     /** Claude Code sessions known to this office (claude-session workers). */
     sessions?: WorkerSessionInfo[];
+    /**
+     * Highest ring index currently in the office layout (0 = only the Manager's Office,
+     * 1 = ring-1 rooms present, up to MAX_RINGS = 3).  Used by the camera to auto-fit the scene.
+     */
+    ringCount?: number;
 }
 export type MirrorEvent = {
     kind: string;
@@ -436,4 +521,31 @@ export type ServerMessage = ({
 } | {
     type: "sessions.updated";
     sessions: WorkerSessionInfo[];
+} | {
+    type: "limit.request";
+    id: string;
+    agentId: string;
+    taskId: string;
+    suggested?: {
+        provider: Provider;
+        model?: string;
+    };
+    resetAt?: string;
+    reason?: string;
+} | {
+    type: "limit.resolved";
+    id: string;
+} | {
+    type: "brainstorm.updated";
+    managerId: string;
+    requestTaskId: string;
+    topic: string;
+    participants: BrainstormParticipant[];
+    skipped: {
+        agentId: string;
+        name: string;
+        reason: string;
+    }[];
+    complete: boolean;
+    error?: string;
 };

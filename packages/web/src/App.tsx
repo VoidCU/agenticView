@@ -12,11 +12,40 @@ import { QuestionToast } from "./hud/QuestionToast";
 import { CreateAgentModal } from "./hud/CreateAgentModal";
 import { SettingsModal } from "./hud/SettingsModal";
 import { SessionsModal } from "./hud/sessions";
+import { Timeline } from "./hud/Timeline";
 import { ProjectsPanel } from "./hub/HubView";
 import { CloseIcon } from "./hud/ui";
+import { useDesktopNotifications } from "./hud/useNotifications";
 
 type Modal = "create" | "settings" | "sessions" | "inbox" | undefined;
 type Tab = "office" | "tasks" | "chat";
+
+/** Keyboard shortcuts hint overlay */
+function ShortcutsHint({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape" || e.key === "?") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+  return (
+    <div className="shortcuts-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" onClick={onClose}>
+      <div className="shortcuts-card" onClick={(e) => e.stopPropagation()}>
+        <div className="shortcuts-head">
+          <h3>Keyboard shortcuts</h3>
+          <button type="button" className="icon-btn icon-btn-xs" onClick={onClose} aria-label="Close"><CloseIcon /></button>
+        </div>
+        <dl className="shortcuts-list">
+          <dt><kbd>I</kbd></dt><dd>Open Inbox</dd>
+          <dt><kbd>T</kbd></dt><dd>Toggle Tasks panel</dd>
+          <dt><kbd>L</kbd></dt><dd>Toggle Timeline</dd>
+          <dt><kbd>?</kbd></dt><dd>Show this help</dd>
+          <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Focus room (scene)</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Deselect / close</dd>
+        </dl>
+      </div>
+    </div>
+  );
+}
 
 function ErrorToasts() {
   const errors = useStore((s) => s.errors);
@@ -59,10 +88,16 @@ function NoToken() {
 export function App() {
   const [modal, setModal] = useState<Modal>();
   const [tab, setTab] = useState<Tab>("office");
+  const [showTimeline, setShowTimeline] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [tasksCollapsed, setTasksCollapsed] = useState(false);
   const hasToken = Boolean(getToken());
   const world = useStore((s) => s.world);
   const connected = useStore((s) => s.connected);
   const selected = useStore((s) => s.selectedAgentId);
+
+  // Desktop notifications
+  useDesktopNotifications();
 
   useEffect(() => {
     if (!hasToken) return;
@@ -85,6 +120,44 @@ export function App() {
     return () => window.removeEventListener("agenticview:open-inbox", handleOpenInbox);
   }, []);
 
+  // Keyboard shortcuts: I=Inbox, T=Tasks, L=Timeline, ?=help
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Skip when typing in inputs/textareas/selects or contenteditable
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable
+      ) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case "i":
+        case "I":
+          e.preventDefault();
+          setModal((m) => (m === "inbox" ? undefined : "inbox"));
+          break;
+        case "t":
+        case "T":
+          e.preventDefault();
+          setTasksCollapsed((c) => !c);
+          break;
+        case "l":
+        case "L":
+          e.preventDefault();
+          setShowTimeline((v) => !v);
+          break;
+        case "?":
+          e.preventDefault();
+          setShowShortcuts((v) => !v);
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (!hasToken) return <NoToken />;
 
   const hub = world?.kind === "hub";
@@ -97,14 +170,21 @@ export function App() {
           onCreate={() => setModal("create")}
           onSessions={() => setModal("sessions")}
           onInbox={() => setModal("inbox")}
+          onTimeline={() => setShowTimeline((v) => !v)}
+          timelineActive={showTimeline}
         />
         <div className="hud-left">
           {hub && <ProjectsPanel />}
-          <TaskBoard onOpenInbox={() => setModal("inbox")} />
+          <TaskBoard onOpenInbox={() => setModal("inbox")} externalCollapsed={tasksCollapsed} onCollapseChange={setTasksCollapsed} />
         </div>
         <div className="hud-right">
           <ChatPanel />
         </div>
+        {showTimeline && (
+          <div className="hud-timeline">
+            <Timeline onClose={() => setShowTimeline(false)} />
+          </div>
+        )}
         <div className="hud-bottom">
           <CommandBar />
           <nav className="tabs" aria-label="Panels">
@@ -133,6 +213,7 @@ export function App() {
       {modal === "settings" && <SettingsModal onClose={() => setModal(undefined)} />}
       {modal === "sessions" && <SessionsModal onClose={() => setModal(undefined)} />}
       {modal === "inbox" && <Inbox onClose={() => setModal(undefined)} />}
+      {showShortcuts && <ShortcutsHint onClose={() => setShowShortcuts(false)} />}
     </div>
   );
 }

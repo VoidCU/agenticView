@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { assignableSpaces, findSpace, planOffice } from "@agenticview/shared";
+import { assignableSpaces, findSpace, planOffice, planOfficeWithSpaces } from "@agenticview/shared";
 function findWorker(agents, ref) {
     const k = ref.trim().toLowerCase();
     return agents.find((a) => a.role === "worker" && (a.id === ref || a.name.toLowerCase() === k));
@@ -7,7 +7,7 @@ function findWorker(agents, ref) {
 /** Seat map of the office: every space with its free desks and who sits where. */
 export async function describeSpaces(ctx) {
     const agents = await ctx.registry.list();
-    const plan = planOffice(agents);
+    const plan = ctx.spaces ? planOfficeWithSpaces(ctx.spaces(), agents) : planOffice(agents);
     const who = new Map();
     for (const a of agents) {
         const p = plan.placements[a.id];
@@ -35,12 +35,12 @@ export async function moveWorker(ctx, agentRef, spaceRef, seat) {
     const worker = findWorker(agents, agentRef);
     if (!worker)
         return `ERROR: unknown worker ${agentRef} (use list_agents)`;
-    const spaces = assignableSpaces(agents);
+    const spaces = ctx.spaces ? ctx.spaces().filter((s) => s.seats > 0) : assignableSpaces(agents);
     const room = spaces.find(s => s.id === spaceRef) ?? spaces.find(s => ctx.spaceNames?.()[s.id]?.toLowerCase() === spaceRef.trim().toLowerCase()) ?? findSpace(spaces, spaceRef);
     const space = room && { ...room, name: ctx.spaceNames?.()[room.id] ?? room.name };
     if (!space)
         return `ERROR: unknown space ${spaceRef}; pick one of: ${spaces.map((s) => s.id).join(", ")}`;
-    const plan = planOffice(agents);
+    const plan = ctx.spaces ? planOfficeWithSpaces(ctx.spaces(), agents) : planOffice(agents);
     const occupant = (n) => agents.find((a) => a.id !== worker.id && plan.placements[a.id]?.space === space.id && plan.placements[a.id]?.seat === n);
     let target;
     if (seat === undefined) {

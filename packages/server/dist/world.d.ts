@@ -52,8 +52,30 @@ export interface World {
         agents: Agent[];
     }>;
     retryTask: (taskId: string) => Promise<Task>;
+    resolveTask: (taskId: string, byTaskId: string | undefined, note: string) => Promise<Task>;
+    unresolveTask: (taskId: string) => Promise<Task>;
     getLimits: () => Promise<LimitsReport>;
     getUsage: () => Promise<UsageReport>;
+    /**
+     * Add a new room to the office layout.
+     * Returns {ok:true, spaceId} on success or {ok:false, message} when the office is full.
+     */
+    addRoom: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{
+        ok: true;
+        spaceId: string;
+    } | {
+        ok: false;
+        message: string;
+    }>;
+    /**
+     * Remove an empty room from the office layout. Refuses if any agents are seated there.
+     */
+    removeRoom: (spaceId: string) => Promise<{
+        ok: true;
+    } | {
+        ok: false;
+        message: string;
+    }>;
 }
 export declare function globalConfigPath(): string;
 export declare function readGlobalConfig(): Promise<GlobalConfig>;

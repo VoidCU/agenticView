@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { assignableSpaces, findSpace, planOffice, type Agent, type Placement } from "@agenticview/shared";
+import { assignableSpaces, findSpace, planOffice, planOfficeWithSpaces, type Agent, type Placement, type Space } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry } from "../agents/registry.js";
 
@@ -8,6 +8,11 @@ export interface OfficeToolContext {
   emitAgent: (agent: Agent) => void;
   spaceNames?: () => Record<string, string>;
   renameSpace?: (id: string, name: string) => Promise<void>;
+  /**
+   * When the world has an explicit room layout (from addRoom), returns those spaces.
+   * When absent the office tools fall back to planOffice (auto-grow from worker count).
+   */
+  spaces?: () => Space[];
 }
 
 function findWorker(agents: Agent[], ref: string): Agent | undefined {
@@ -18,7 +23,7 @@ function findWorker(agents: Agent[], ref: string): Agent | undefined {
 /** Seat map of the office: every space with its free desks and who sits where. */
 export async function describeSpaces(ctx: OfficeToolContext): Promise<string> {
   const agents = await ctx.registry.list();
-  const plan = planOffice(agents);
+  const plan = ctx.spaces ? planOfficeWithSpaces(ctx.spaces(), agents) : planOffice(agents);
   const who = new Map<string, Agent>();
   for (const a of agents) {
     const p = plan.placements[a.id];
@@ -45,11 +50,11 @@ export async function moveWorker(ctx: OfficeToolContext, agentRef: string, space
   const agents = await ctx.registry.list();
   const worker = findWorker(agents, agentRef);
   if (!worker) return `ERROR: unknown worker ${agentRef} (use list_agents)`;
-  const spaces = assignableSpaces(agents);
+  const spaces = ctx.spaces ? ctx.spaces().filter((s) => s.seats > 0) : assignableSpaces(agents);
   const room = spaces.find(s => s.id === spaceRef) ?? spaces.find(s => ctx.spaceNames?.()[s.id]?.toLowerCase() === spaceRef.trim().toLowerCase()) ?? findSpace(spaces, spaceRef);
   const space = room && { ...room, name: ctx.spaceNames?.()[room.id] ?? room.name };
   if (!space) return `ERROR: unknown space ${spaceRef}; pick one of: ${spaces.map((s) => s.id).join(", ")}`;
-  const plan = planOffice(agents);
+  const plan = ctx.spaces ? planOfficeWithSpaces(ctx.spaces(), agents) : planOffice(agents);
   const occupant = (n: number) => agents.find((a) => a.id !== worker.id && plan.placements[a.id]?.space === space.id && plan.placements[a.id]?.seat === n);
   let target: number;
   if (seat === undefined) {

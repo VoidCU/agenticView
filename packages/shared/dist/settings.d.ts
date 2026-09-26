@@ -9,6 +9,12 @@ export declare const ProjectSettingsSchema: z.ZodObject<{
     }>>>;
     defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     maxConcurrentRuns: z.ZodDefault<z.ZodNumber>;
+    limitPolicy: z.ZodDefault<z.ZodEnum<{
+        auto: "auto";
+        ask: "ask";
+    }>>;
+    loungeBreaks: z.ZodDefault<z.ZodBoolean>;
+    preferCheapModels: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strip>;
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 export declare const KnownProjectSchema: z.ZodObject<{

@@ -27,6 +27,14 @@ export const TaskWorkerSchema = z.object({
     /** Files the run reported as changed. */
     files: z.array(z.string()).optional(),
 });
+export const TaskResolutionSchema = z.object({
+    /** Id of the task that completed the same work. */
+    byTaskId: z.string().optional(),
+    /** Human-readable note explaining why this failure is considered resolved. */
+    note: z.string(),
+    /** ISO timestamp when the resolution was recorded. */
+    at: z.string(),
+});
 export const TaskSchema = z.object({
     id: z.string(),
     kind: TaskKindSchema,
@@ -45,6 +53,8 @@ export const TaskSchema = z.object({
     images: z.array(z.string()),
     result: z.string().optional(),
     error: z.string().optional(),
+    /** Set when a failed task has been marked as resolved (fixed by another task or noted as acceptable). */
+    resolution: TaskResolutionSchema.optional(),
     log: z.array(TaskLogEntrySchema),
     createdAt: z.string(),
     startedAt: z.string().optional(),

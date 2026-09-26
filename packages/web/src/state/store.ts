@@ -1,15 +1,26 @@
 import { create } from "zustand";
-import type { Agent, ClientMessage, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
+import type { Agent, BrainstormParticipant, ClientMessage, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
 export type Bubble = { text: string; until: number };
 export type Beam = { id: string; from: string; to: string; until: number };
 export type PendingPermission = { id: string; agentId: string; taskId: string; tool: string; input: unknown };
 export type PendingQuestion = { id: string; agentId: string; taskId: string; question: string };
+export type PendingLimit = PendingLimitInfo;
 export type MirrorItem = { kind: string; text: string; ts: string };
 export type Celebration = { agentId: string; until: number };
 export type UiError = { id: number; message: string; ref?: string; ts: number };
 export type AgentStatus = "idle" | "thinking" | "editing" | "waiting" | "error";
+
+/** Active brainstorm session broadcast by the manager (Nova adds this to the WS feed). */
+export interface BrainstormState {
+  topic: string;
+  /** Display names of participants in join order. */
+  participants: string[];
+  /** Answers received so far (non-null answer fields from participants). */
+  answers: string[];
+  complete: boolean;
+}
 
 export const FEED_CAP = 200;
 export const MIRROR_CAP = 50;
@@ -35,6 +46,7 @@ export interface Store {
   beams: Beam[];
   permissions: PendingPermission[];
   questions: PendingQuestion[];
+  limits: PendingLimit[];
   mirror: MirrorItem[];
   spaceNames: Record<string, string>;
   selectedAgentId?: string;
@@ -42,6 +54,8 @@ export interface Store {
   errors: UiError[];
   /** Last url returned by `project.open` (hub). */
   opened?: string;
+  /** Active brainstorm session (Nova pushes brainstorm.updated when one starts/ends). */
+  brainstorm?: BrainstormState;
 
   apply(msg: ServerMessage): void;
   select(id?: string): void;
@@ -101,12 +115,14 @@ const initial = () => ({
   beams: [] as Beam[],
   permissions: [] as PendingPermission[],
   questions: [] as PendingQuestion[],
+  limits: [] as PendingLimit[],
   mirror: [] as MirrorItem[],
   spaceNames: {} as Record<string, string>,
   selectedAgentId: undefined as string | undefined,
   celebrations: [] as Celebration[],
   errors: [] as UiError[],
   opened: undefined as string | undefined,
+  brainstorm: undefined as BrainstormState | undefined,
 });
 
 export const useStore = create<Store>()((set, get) => ({
@@ -133,6 +149,7 @@ export const useStore = create<Store>()((set, get) => ({
           // The server is the source of truth for prompts still waiting on the user (reload / reconnect).
           permissions: (msg.permissions ?? []).map((p) => ({ id: p.id, agentId: p.agentId, taskId: p.taskId, tool: p.tool, input: p.input })),
           questions: (msg.questions ?? []).map((q) => ({ id: q.id, agentId: q.agentId, taskId: q.taskId, question: q.question })),
+          limits: (msg.limits ?? []).map((l) => ({ id: l.id, agentId: l.agentId, taskId: l.taskId, suggested: l.suggested, resetAt: l.resetAt, reason: l.reason })),
         });
         return;
       }
@@ -194,6 +211,17 @@ export const useStore = create<Store>()((set, get) => ({
       case "question.resolved":
         set((s) => ({ questions: s.questions.filter((q) => q.id !== msg.id) }));
         return;
+      case "limit.request":
+        set((s) => ({
+          limits: [
+            ...s.limits.filter((l) => l.id !== msg.id),
+            { id: msg.id, agentId: msg.agentId, taskId: msg.taskId, suggested: msg.suggested, resetAt: msg.resetAt, reason: msg.reason },
+          ],
+        }));
+        return;
+      case "limit.resolved":
+        set((s) => ({ limits: s.limits.filter((l) => l.id !== msg.id) }));
+        return;
       case "mirror.event":
         set((s) => ({ mirror: [msg.event, ...s.mirror].slice(0, MIRROR_CAP) }));
         return;
@@ -202,6 +230,20 @@ export const useStore = create<Store>()((set, get) => ({
         return;
       case "opened":
         set({ opened: msg.url });
+        return;
+      case "brainstorm.updated": {
+        const m = msg;
+        set({
+          brainstorm: {
+            topic: m.topic,
+            participants: m.participants.map((p: BrainstormParticipant) => p.name),
+            answers: m.participants.filter((p: BrainstormParticipant) => p.answer != null).map((p: BrainstormParticipant) => p.answer!),
+            complete: m.complete,
+          },
+        });
+        return;
+      }
+      default:
         return;
     }
   },
