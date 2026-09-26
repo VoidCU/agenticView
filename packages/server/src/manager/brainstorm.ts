@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isTerminal, planOffice, type Agent, type Placement, type Task } from "@agenticview/shared";
+import { isTerminal, planOffice, type Agent, type BrainstormParticipant, type Placement, type Task } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import { resolveAssignmentTarget, type ManagerToolContext } from "./tools.js";
 import { moveWorker } from "./officeTools.js";
@@ -12,9 +12,31 @@ interface Session {
   error?: string;
 }
 
+function toParticipants(participants: Participant[], tasks: Map<string, Task>): BrainstormParticipant[] {
+  return participants.map((p) => {
+    const t = tasks.get(p.task.id) ?? p.task;
+    return { agentId: p.agent.id, name: p.agent.name, answer: t.result ?? undefined, done: isTerminal(t.status) };
+  });
+}
+
 /** Same-topic calls in a manager turn reuse the run, including after a bounded wait. */
 export function brainstormTool(ctx: ManagerToolContext): BridgeTool {
   const sessions = new Map<string, Promise<Session>>();
+
+  function emitUpdate(topic: string, session: Session, taskMap: Map<string, Task>, complete: boolean): void {
+    if (!ctx.emitBrainstorm) return;
+    ctx.emitBrainstorm({
+      type: "brainstorm.updated",
+      managerId: ctx.managerId,
+      requestTaskId: ctx.requestTask.id,
+      topic,
+      participants: toParticipants(session.participants, taskMap),
+      skipped: session.skipped.map(s => ({ agentId: "", name: s.name, reason: s.reason })),
+      complete,
+      error: session.error,
+    });
+  }
+
   async function begin(topic: string, refs: string[]): Promise<Session> {
     const agents = await ctx.registry.list();
     const tasks = await ctx.tasks.list();
@@ -53,14 +75,17 @@ export function brainstormTool(ctx: ManagerToolContext): BridgeTool {
     }
     // Pin before anyone moves so returning to an auto-assigned seat does not displace a peer.
     for (const a of await ctx.registry.pinPlacements()) ctx.emitAgent(a);
-    session.completion = conduct(session).catch(async e => {
+    // Emit initial started event.
+    const initMap = new Map(session.participants.map(p => [p.task.id, p.task]));
+    emitUpdate(topic, session, initMap, false);
+    session.completion = conduct(topic, session).catch(async e => {
       session.error = (e as Error).message;
       for (const p of session.participants) await ctx.cancelTask?.(p.task.id);
     });
     return session;
   }
 
-  async function conduct(session: Session): Promise<void> {
+  async function conduct(topic: string, session: Session): Promise<void> {
     const pending = [...session.participants];
     const finishedAgents = new Set<string>();
     while (pending.length) {
@@ -107,6 +132,10 @@ export function brainstormTool(ctx: ManagerToolContext): BridgeTool {
         }
         await Promise.all(batch.map(p => ctx.awaitTask(p.task.id)));
         for (const p of batch) finishedAgents.add(p.agent.id);
+        // Emit progress after each batch completes.
+        const allTasks = await ctx.tasks.list();
+        const taskMap = new Map(allTasks.map(t => [t.id, t]));
+        emitUpdate(topic, session, taskMap, pending.length === 0);
       } finally {
         for (const p of moved) {
           if (await ctx.registry.get(p.agent.id)) await moveWorker(ctx, p.agent.id, p.previous.space, p.previous.seat);

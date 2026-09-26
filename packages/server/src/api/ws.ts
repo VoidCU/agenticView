@@ -106,6 +106,9 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
       send({ type: "opened", url: await opts.openProject(msg.path) });
       return;
     }
+    case "limit.respond":
+      orchestrator.respondLimit(msg.id, msg.answer, msg.provider, msg.model);
+      return;
   }
 }
 

@@ -14,6 +14,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [provider, setProvider] = useState<Provider | "">(settings?.defaultProvider ?? "");
   const [model, setModel] = useState(settings?.defaultModel ?? "");
   const [max, setMax] = useState(settings?.maxConcurrentRuns ?? 3);
+  const [limitPolicy, setLimitPolicy] = useState<"ask" | "auto">(settings?.limitPolicy ?? "ask");
+  const [loungeBreaks, setLoungeBreaks] = useState(settings?.loungeBreaks ?? true);
   const [tab, setTab] = useState<"settings" | "usage">("settings");
   const [switchProvider, setSwitchProvider] = useState<Provider | null>(null);
 
@@ -21,7 +23,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     send({
       type: "settings.update",
-      settings: { defaultProvider: provider || null, defaultModel: model.trim() || null, maxConcurrentRuns: Math.min(10, Math.max(1, Math.round(max))) },
+      settings: {
+        defaultProvider: provider || null,
+        defaultModel: model.trim() || null,
+        maxConcurrentRuns: Math.min(10, Math.max(1, Math.round(max))),
+        limitPolicy,
+        loungeBreaks,
+      },
     });
     onClose();
   };
@@ -70,6 +78,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <label className="field">
               <span>Workers running at once</span>
               <input type="number" min={1} max={10} value={max} onChange={(e) => setMax(Number(e.target.value))} />
+            </label>
+            <label className="field">
+              <span>When an agent hits a limit</span>
+              <select
+                value={limitPolicy}
+                onChange={(e) => setLimitPolicy(e.target.value as "ask" | "auto")}
+                aria-label="Limit policy"
+              >
+                <option value="ask">Ask me</option>
+                <option value="auto">Switch automatically</option>
+              </select>
+            </label>
+            <label className="field field-toggle">
+              <span>Lounge breaks</span>
+              <input
+                type="checkbox"
+                checked={loungeBreaks}
+                onChange={(e) => setLoungeBreaks(e.target.checked)}
+                aria-label="Lounge breaks"
+              />
             </label>
           </div>
 

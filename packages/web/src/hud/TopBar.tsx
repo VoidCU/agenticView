@@ -30,7 +30,8 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox }: Props) {
   const connected = useStore((s) => s.connected);
   const questions = useStore((s) => s.questions);
   const permissions = useStore((s) => s.permissions);
-  const pendingCount = questions.length + permissions.length;
+  const limits = useStore((s) => s.limits);
+  const pendingCount = questions.length + permissions.length + limits.length;
   const hub = world?.kind === "hub";
 
   const handleInbox = () => {

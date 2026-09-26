@@ -82,8 +82,31 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("session.rename"), id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) }),
   z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),
   z.object({ type: z.literal("session.capacity"), id: z.string().min(1).max(64), capacity: z.number().int().min(1).max(MAX_SESSION_CAPACITY) }),
+  z.object({
+    type: z.literal("limit.respond"),
+    id: z.string(),
+    answer: z.enum(["accept", "choose", "dismiss"]),
+    provider: ProviderSchema.optional(),
+    model: z.string().optional(),
+  }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
+
+export interface PendingLimitInfo {
+  id: string;
+  agentId: string;
+  taskId: string;
+  suggested?: { provider: Provider; model?: string };
+  resetAt?: string;
+  reason?: string;
+}
+
+export interface BrainstormParticipant {
+  agentId: string;
+  name: string;
+  answer?: string;
+  done: boolean;
+}
 
 export interface PendingPermissionInfo {
   id: string;
@@ -114,8 +137,14 @@ export interface Snapshot {
   settings: ProjectSettings;
   permissions: PendingPermissionInfo[];
   questions: PendingQuestionInfo[];
+  limits?: PendingLimitInfo[];
   /** Claude Code sessions known to this office (claude-session workers). */
   sessions?: WorkerSessionInfo[];
+  /**
+   * Highest ring index currently in the office layout (0 = only the Manager's Office,
+   * 1 = ring-1 rooms present, up to MAX_RINGS = 3).  Used by the camera to auto-fit the scene.
+   */
+  ringCount?: number;
 }
 
 export type MirrorEvent = { kind: string; text: string; ts: string };
@@ -135,4 +164,7 @@ export type ServerMessage =
   | { type: "error"; message: string; ref?: string }
   | { type: "opened"; url: string }
   | { type: "providers.updated"; providers: ProviderStatus[]; autoProvider: Provider | null }
-  | { type: "sessions.updated"; sessions: WorkerSessionInfo[] };
+  | { type: "sessions.updated"; sessions: WorkerSessionInfo[] }
+  | { type: "limit.request"; id: string; agentId: string; taskId: string; suggested?: { provider: Provider; model?: string }; resetAt?: string; reason?: string }
+  | { type: "limit.resolved"; id: string }
+  | { type: "brainstorm.updated"; managerId: string; requestTaskId: string; topic: string; participants: BrainstormParticipant[]; skipped: { agentId: string; name: string; reason: string }[]; complete: boolean; error?: string };

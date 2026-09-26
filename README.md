@@ -260,6 +260,24 @@ If `plugin-root` is missing, restart Claude Code and retry `/agenticview`. If th
 
 Project agents work only in their own project; global agents appear in every office and can work in known projects or be copied into a project. Open `/agenticview-hub` to manage global agents and known projects. Project data lives under `<project>/.agenticview/`, while global agents and defaults live under `~/.agenticview/`; see [Scopes and where data lives](#scopes-and-where-data-lives) for storage and Git tracking details.
 
+## Office layout
+
+The office is a honeycomb of flat-top hexagonal rooms arranged in concentric rings around the Manager's Office (ring 0).
+
+**Growth rules (ring-by-ring):**
+- Ring 1 has six hex slots: four pod positions, one meeting room, and one lounge. These are the first positions filled by `addRoom`.
+- Rings 2 and 3 each add a full shell of additional hex slots (12 and 18 respectively), available only as pod positions by default.
+- A new ring begins only after every hex slot in the current ring is occupied. `addRoom` enforces this: it always fills the lowest available hex in the current ring before advancing.
+- The office is capped at **3 rings** (constant `MAX_RINGS`). `addRoom` returns `{ok: false, message: 'The office is full (3 rings). Remove an empty room first.'}` once the cap is reached.
+
+**`world.addRoom(kind, name)`** — adds a room to the next free hex (ring-by-ring order). Returns `{ok: true, spaceId}` or `{ok: false, message}`.
+
+**`world.removeRoom(spaceId)`** — removes an empty room. Fails when agents are seated there or when the target is the Manager's Office. Returns `{ok: true}` or `{ok: false, message}`.
+
+**Ring count** — `snapshot.ringCount` holds the current highest ring index in use (0–3). The 3D scene camera uses this to auto-fit the view.
+
+**Persistence** — explicit rooms are stored in `<project-root>/agenticview/rooms.json`. On the first `addRoom` call, existing auto-grown rooms (derived from the current worker count) are written as the initial state so no seats are lost.
+
 ## Development
 
 ```
