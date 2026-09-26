@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { BONK_ANIM_MS, BONK_COOLDOWN_MS, BONK_LINES, BONK_RANGE, bonk, bonkWobble, bonkedAt, resetBonks } from "../src/state/bonk";
+import { BONK_ANIM_MS, BONK_BUSY_LINES, BONK_COOLDOWN_MS, BONK_LINES, BONK_LOOK_MS, BONK_RANGE, bonk, bonkLooking, bonkState, bonkWobble, bonkedAt, isBusyAgent, resetBonks } from "../src/state/bonk";
+import { task, worker } from "./fixtures";
 import { useStore } from "../src/state/store";
 import { walkInteraction } from "../src/scene/WalkMode";
 
@@ -24,6 +25,31 @@ describe("bonk", () => {
     expect(bonkedAt("a1")).toBe(10_000);
     expect(bonk("a2", 11_999, () => 0)).toBe("Hey!"); // other agents are independent
     expect(bonk("a1", 12_000, () => 0.3)).toBe(BONK_LINES[1]);
+  });
+
+  it("busy agents use the busy lines and only glance; idle agents look at you for a moment", () => {
+    expect(bonk("b1", 50_000, () => 0, true)).toBe(BONK_BUSY_LINES[0]);
+    expect(BONK_BUSY_LINES).toEqual(["Busy!", "Can't talk — shipping.", "Later, boss."]);
+    const busy = bonkState("b1");
+    expect(bonkLooking(busy, 50_000 + BONK_ANIM_MS / 2)).toBe(true);
+    expect(bonkLooking(busy, 50_000 + BONK_ANIM_MS + 1)).toBe(false); // turned back to the desk
+    bonk("i1", 50_000, () => 0, false);
+    const idle = bonkState("i1");
+    expect(bonkLooking(idle, 50_000 + BONK_ANIM_MS + 1)).toBe(true);
+    expect(bonkLooking(idle, 50_000 + BONK_LOOK_MS)).toBe(false);
+    expect(bonkState("i1")).toBe(idle); // state object reused, no per-bonk allocation after the first
+    bonk("i1", 60_000, () => 0, true);
+    expect(bonkState("i1")).toBe(idle);
+    expect(idle!.busy).toBe(true);
+  });
+
+  it("a worker running a task counts as busy", () => {
+    useStore.setState({ agents: { [worker.id]: worker }, tasks: {}, permissions: [], questions: [], feed: {} } as never);
+    expect(isBusyAgent(worker.id)).toBe(false);
+    const t = task({ id: "t-run", status: "running", assigneeId: worker.id });
+    useStore.setState({ tasks: { [t.id]: t } } as never);
+    expect(isBusyAgent(worker.id)).toBe(true);
+    expect(BONK_BUSY_LINES as readonly string[]).toContain(bonk(worker.id, 90_000));
   });
 
   it("wobble is a damped squash-and-stretch that ends", () => {

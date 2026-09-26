@@ -11,7 +11,7 @@ import { dragPoint, livePositions, useDrag } from "./motion";
 import { agentActivityText } from "./selectors";
 import { useWalk } from "../state/walk";
 import { useHudPrefs } from "../state/hudPrefs";
-import { bonk, bonkedAt, bonkWobble } from "../state/bonk";
+import { bonk, bonkedAt, bonkLooking, bonkState, bonkWobble } from "../state/bonk";
 
 export interface RobotTarget extends Point {
   yaw: number;
@@ -254,10 +254,11 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
       }
       const isWalking = st.path.length > 0;
       st.walk += ((isWalking ? 1 : 0) - st.walk) * Math.min(1, dt * 8);
-      // Smoothly rotate to face direction of travel; snap to target.yaw at rest.
+      // Smoothly rotate to face direction of travel; snap to target.yaw at rest. A bonked idle robot
+      // looks at you for a moment; a busy one only glances during the wobble, then turns back to work.
       const desired = isWalking && heading !== undefined
         ? heading
-        : faceViewer
+        : faceViewer || bonkLooking(bonkState(agent.id), Date.now())
           ? Math.atan2(camera.position.x - st.x, camera.position.z - st.z)
           : target.yaw;
       st.yaw += angleDiff(desired, st.yaw) * Math.min(1, dt * TURN_RATE);
