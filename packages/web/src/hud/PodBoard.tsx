@@ -13,6 +13,81 @@ import { RetryButton } from "./LimitChip";
 /** Stable empty array used as a fallback in selectors to avoid new-reference churn. */
 const NO_FEED: import("../state/store").FeedItem[] = [];
 
+function formatDateTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" });
+  } catch {
+    return iso;
+  }
+}
+
+function taskDuration(startedAt: string, finishedAt: string): string {
+  const ms = Date.parse(finishedAt) - Date.parse(startedAt);
+  if (isNaN(ms) || ms < 0) return "";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+// ── Small safe markdown renderer ──────────────────────────────────────────────
+
+function inlineMarkdown(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = [];
+  const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  let last = 0;
+  let key = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const s = m[0];
+    if (s.startsWith("**")) parts.push(<strong key={key++}>{s.slice(2, -2)}</strong>);
+    else if (s.startsWith("*")) parts.push(<em key={key++}>{s.slice(1, -1)}</em>);
+    else parts.push(<code key={key++}>{s.slice(1, -1)}</code>);
+    last = m.index + s.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length === 1 ? parts[0] : parts;
+}
+
+function SimpleMarkdown({ text }: { text: string }) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      const items: string[] = [];
+      while (i < lines.length && ((lines[i] ?? "").startsWith("- ") || (lines[i] ?? "").startsWith("* "))) {
+        items.push((lines[i] ?? "").slice(2));
+        i++;
+      }
+      elements.push(
+        <ul key={`list-${i}`} className="smd-list">
+          {items.map((item, j) => <li key={j}>{inlineMarkdown(item)}</li>)}
+        </ul>,
+      );
+    } else if (line.trim() === "") {
+      i++;
+    } else {
+      const paras: string[] = [];
+      while (
+        i < lines.length &&
+        (lines[i] ?? "").trim() !== "" &&
+        !(lines[i] ?? "").startsWith("- ") &&
+        !(lines[i] ?? "").startsWith("* ")
+      ) {
+        paras.push(lines[i] ?? "");
+        i++;
+      }
+      elements.push(<p key={`p-${i}`} className="smd-p">{inlineMarkdown(paras.join(" "))}</p>);
+    }
+  }
+  return <div className="simple-md">{elements}</div>;
+}
+
 // ── Changes view ──────────────────────────────────────────────────────────────
 
 interface ChangesData {
@@ -65,7 +140,6 @@ function ChangesView({ taskId, onClose }: { taskId: string; onClose: () => void 
     });
   };
 
-  // Split diff into per-file sections
   const fileSections = (() => {
     if (!data?.diff) return [];
     const sections: { header: string; lines: string[] }[] = [];
@@ -150,7 +224,7 @@ function basename(path: string): string {
   return path.split(/[\\/]/).pop() || path;
 }
 
-// ── Detail drawer ─────────────────────────────────────────────────────────────
+// ── Mark solved form ───────────────────────────────────────────────────────────
 
 function MarkSolvedForm({ taskId, onDone }: { taskId: string; onDone: () => void }) {
   const tasks = useStore((s) => s.tasks);
@@ -221,22 +295,27 @@ function MarkSolvedForm({ taskId, onDone }: { taskId: string; onDone: () => void
   );
 }
 
+// ── Task detail sheet (slides over board from right, board stays full width) ──
+
 function TaskDrawer({
   task,
   agent,
   filesChanged,
   onClose,
+  onCloseBoard,
   onOpenInbox,
 }: {
   task: Task;
   agent: Agent | undefined;
   filesChanged: string[];
   onClose: () => void;
+  onCloseBoard?: () => void;
   onOpenInbox?: () => void;
 }) {
   const sessions = useStore((s) => s.sessions);
   const tasks = useStore((s) => s.tasks);
-  const drawerRef = useRef<HTMLDivElement>(null);
+  const select = useStore((s) => s.select);
+  const sheetRef = useRef<HTMLDivElement>(null);
   const [showChanges, setShowChanges] = useState(false);
   const [showMarkSolved, setShowMarkSolved] = useState(false);
 
@@ -245,15 +324,19 @@ function TaskDrawer({
     ? (tasks[task.resolution.byTaskId] ?? null)
     : null;
 
+  const session = agent ? sessions.find((s) => s.agentIds.includes(agent.id)) : undefined;
+  // The run within the session that serves this agent (shows subagent identity)
+  const servingRun = session?.runs.find((r) => r.agentId === task.assigneeId) ?? null;
+
   // Focus first interactive element on mount
   useEffect(() => {
-    const el = drawerRef.current;
+    const el = sheetRef.current;
     if (!el) return;
     const first = el.querySelector<HTMLElement>("button, [href], [tabindex]:not([tabindex='-1'])");
     (first ?? el).focus();
   }, [task.id]);
 
-  // Close on Escape (handled by parent Modal's key listener, but also intercept here)
+  // Esc key: close sub-panels first, then close sheet
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -267,72 +350,128 @@ function TaskDrawer({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onClose, showChanges, showMarkSolved]);
 
-  const session = agent ? sessions.find((s) => s.agentIds.includes(agent.id)) : undefined;
-
   const handleUndoSolved = async () => {
     try {
       await fetch(`/api/tasks/${encodeURIComponent(task.id)}/resolve`, { method: "DELETE" });
     } catch { /* WS update will arrive */ }
   };
 
+  const col = boardColumn(task) ?? "queued";
+  const statusLabel = isSolved ? "Solved" : BOARD_LABELS[col];
+
   return (
-    <div className="kanban-drawer" ref={drawerRef} role="complementary" aria-label="Task detail" data-testid="task-drawer">
-      <div className="kanban-drawer-head">
-        <h3 id="drawer-title">{task.title}</h3>
+    <div
+      className="task-sheet"
+      ref={sheetRef}
+      role="complementary"
+      aria-label="Task detail"
+      data-testid="task-drawer"
+      tabIndex={-1}
+    >
+      {/* Header */}
+      <div className="task-sheet-head">
+        <h3 className="task-sheet-title">{task.title}</h3>
         <button type="button" className="icon-btn" onClick={onClose} aria-label="Close drawer">
           <CloseIcon />
         </button>
       </div>
-      <div className="kanban-drawer-body">
+
+      {/* Body */}
+      <div className="task-sheet-body">
         {/* Status badge */}
-        <span className={`kanban-status-badge board-${boardColumn(task) ?? "queued"}${isSolved ? " kanban-status-solved" : ""}`}>
-          {isSolved ? "Solved" : BOARD_LABELS[boardColumn(task) ?? "queued"]}
+        <span className={`kanban-status-badge board-${col}${isSolved ? " kanban-status-solved" : ""}`}>
+          {statusLabel}
         </span>
 
-        {/* Agent info */}
+        {/* Agent + model */}
         {agent && (
-          <div className="kanban-drawer-agent">
-            <span className="kanban-avatar" style={{ background: agent.appearance.color }} aria-hidden="true">
-              {agentInitial(agent.name)}
-            </span>
-            <div className="kanban-drawer-agent-info">
-              <strong>{agent.name}</strong>
-              {(agent.provider ?? session?.model) && (
-                <span className="kanban-drawer-meta">
-                  {agent.provider ?? "claude"}{session?.model ? ` · ${session.model}` : ""}
+          <div className="task-sheet-section" style={{ marginTop: 10 }}>
+            <h4>Agent</h4>
+            <div className="task-sheet-agent">
+              <span className="kanban-avatar" style={{ background: agent.appearance.color }} aria-hidden="true">
+                {agentInitial(agent.name)}
+              </span>
+              <div className="task-sheet-agent-info">
+                <strong>{agent.name}</strong>
+                {(agent.provider ?? session?.model) && (
+                  <span className="task-sheet-agent-meta">
+                    {agent.provider ?? "claude"}{session?.model ? ` · ${session.model}` : ""}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Timing */}
+        <div className="task-sheet-section">
+          <h4>Timing</h4>
+          <dl className="task-sheet-timing">
+            <dt>Created</dt>
+            <dd>{formatDateTime(task.createdAt)}</dd>
+            {task.startedAt && (
+              <>
+                <dt>Started</dt>
+                <dd>{formatDateTime(task.startedAt)}</dd>
+              </>
+            )}
+            {task.finishedAt && (
+              <>
+                <dt>Finished</dt>
+                <dd>{formatDateTime(task.finishedAt)}</dd>
+              </>
+            )}
+            {task.startedAt && task.finishedAt && (
+              <>
+                <dt>Duration</dt>
+                <dd>{taskDuration(task.startedAt, task.finishedAt)}</dd>
+              </>
+            )}
+          </dl>
+        </div>
+
+        {/* Served by */}
+        {(session || servingRun) && (
+          <div className="task-sheet-section">
+            <h4>Served by</h4>
+            <p className="task-sheet-served-by">
+              {session ? (session.name || session.id) : null}
+              {servingRun?.subagent && (
+                <span className="task-sheet-subagent" title={servingRun.subagentId ?? undefined}>
+                  {" "}· {servingRun.subagent}
                 </span>
               )}
-            </div>
+            </p>
           </div>
         )}
 
         {/* Description */}
         {task.description && task.description !== task.title && (
-          <div className="kanban-drawer-section">
+          <div className="task-sheet-section">
             <h4>Description</h4>
-            <p>{task.description}</p>
+            <SimpleMarkdown text={task.description} />
           </div>
         )}
 
         {/* Result */}
         {task.result && (
-          <div className="kanban-drawer-section">
+          <div className="task-sheet-section">
             <h4>Result</h4>
-            <p>{task.result}</p>
+            <SimpleMarkdown text={task.result} />
           </div>
         )}
 
         {/* Error */}
         {task.error && (
-          <div className="kanban-drawer-section kanban-drawer-error">
+          <div className="task-sheet-section">
             <h4>Error</h4>
-            <p>{task.error}</p>
+            <p className="task-sheet-error">{task.error}</p>
           </div>
         )}
 
         {/* Resolution */}
         {isSolved && task.resolution && (
-          <div className="kanban-drawer-section kanban-drawer-resolution" data-testid="resolution-section">
+          <div className="task-sheet-section kanban-drawer-resolution" data-testid="resolution-section">
             <h4>Resolution</h4>
             {resolutionTask && (
               <p className="kanban-resolution-bytask">
@@ -345,7 +484,7 @@ function TaskDrawer({
 
         {/* Files changed */}
         {filesChanged.length > 0 && (
-          <div className="kanban-drawer-section">
+          <div className="task-sheet-section">
             <div className="kanban-drawer-files-head">
               <h4>Files changed ({filesChanged.length})</h4>
               <button
@@ -358,7 +497,7 @@ function TaskDrawer({
                 Changes
               </button>
             </div>
-            <ul className="kanban-drawer-files" aria-label="Files changed">
+            <ul className="task-sheet-files" aria-label="Files changed">
               {filesChanged.map((f) => (
                 <li key={f} title={f}>{basename(f)}</li>
               ))}
@@ -367,7 +506,7 @@ function TaskDrawer({
         )}
 
         {/* Actions */}
-        <div className="kanban-drawer-actions">
+        <div className="task-sheet-actions">
           {filesChanged.length === 0 && (
             <button
               type="button"
@@ -377,6 +516,21 @@ function TaskDrawer({
               data-testid="changes-button"
             >
               Changes
+            </button>
+          )}
+          {agent && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={() => {
+                select(agent.id);
+                onCloseBoard?.();
+                onClose();
+              }}
+              aria-label={`Open chat with ${agent.name}`}
+              data-testid="open-chat-btn"
+            >
+              Open agent chat
             </button>
           )}
           {task.status === "failed" && !isSolved && (
@@ -529,9 +683,11 @@ function AgentFilterChips({
 function PodKanban({
   space,
   onOpenInbox,
+  onCloseBoard,
 }: {
   space: Space;
   onOpenInbox?: () => void;
+  onCloseBoard?: () => void;
 }) {
   const agents = useStore((s) => s.agents);
   const tasks = useStore((s) => s.tasks);
@@ -595,7 +751,8 @@ function PodKanban({
             onToggle={toggleFilter}
             onAll={() => setFilterAgents(new Set())}
           />
-          <div className={`kanban-layout${selectedTask ? " kanban-layout-split" : ""}`}>
+          {/* kanban-layout fills remaining whiteboard height; sheet overlays it */}
+          <div className="kanban-layout">
             <div className="kanban-columns" data-testid="kanban-columns">
               {BOARD_COLUMNS.map((col) => (
                 <section
@@ -627,14 +784,23 @@ function PodKanban({
                 </section>
               ))}
             </div>
+            {/* Dim backdrop + sheet overlay — board stays full width */}
             {selectedTask && (
-              <TaskDrawer
-                task={selectedTask}
-                agent={selectedAgent}
-                filesChanged={selectedFiles}
-                onClose={closeDrawer}
-                onOpenInbox={onOpenInbox}
-              />
+              <>
+                <div
+                  className="task-sheet-dim"
+                  onClick={closeDrawer}
+                  aria-hidden="true"
+                />
+                <TaskDrawer
+                  task={selectedTask}
+                  agent={selectedAgent}
+                  filesChanged={selectedFiles}
+                  onClose={closeDrawer}
+                  onCloseBoard={onCloseBoard}
+                  onOpenInbox={onOpenInbox}
+                />
+              </>
             )}
           </div>
           <p className="board-caption">Showing the 20 most recently completed tasks. Click a card to see details.</p>
@@ -754,7 +920,7 @@ export function PodBoard({
     <Modal title={pod ? `Pod board · ${displayName}` : "Manager board"} onClose={onClose} wide>
       <div className="whiteboard-panel">
         {pod ? (
-          <PodKanban space={space} onOpenInbox={onOpenInbox} />
+          <PodKanban space={space} onOpenInbox={onOpenInbox} onCloseBoard={onClose} />
         ) : (
           <>
             <p className="board-caption">Your conversation with {manager?.name ?? "Atlas"} · newest requests first</p>
