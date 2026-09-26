@@ -1,18 +1,19 @@
 /**
  * DeskMonitor — canvas texture overlay on each agent's desk monitor.
  *
- * Shows the last few log lines of the agent's current task, refreshed at most
- * every 2 s and only when the monitor is within MAX_DIST world units of the camera.
- * Idle agents show a cheap procedural screensaver animation.
+ * Shows agent name, current task title, the last few log lines of the agent's
+ * current task, and a status badge (colour + word). Refreshed at most every 2 s
+ * and only when the monitor is within MAX_DIST world units of the camera.
+ * Idle agents show a screensaver with their name.
  *
  * Clicking a monitor opens that agent's chat (same action as clicking the tag).
  */
-import { useMemo, useRef, useCallback, useEffect } from "react";
+import { useMemo, useRef, useCallback } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { POD_SEATS, seatLocal } from "@agenticview/shared";
-import { useStore } from "../state/store";
-import type { FeedItem } from "../state/store";
+import { useStore, agentStatus, STATUS_COLORS } from "../state/store";
+import type { AgentStatus, FeedItem } from "../state/store";
 
 /** Only update monitors closer than this distance to the camera. */
 const MAX_DIST = 24;
@@ -36,7 +37,15 @@ const CANVAS_H = 294;
 // Legacy alias for the far font (used in tests and paintLog below).
 const FONT = FONT_FAR;
 
-function getFeedLines(feed: FeedItem[] | undefined, limit = 6): string[] {
+const STATUS_LABELS: Record<AgentStatus, string> = {
+  idle: "IDLE",
+  thinking: "THINKING",
+  editing: "EDITING",
+  waiting: "WAITING",
+  error: "ERROR",
+};
+
+export function getFeedLines(feed: FeedItem[] | undefined, limit = 6): string[] {
   if (!feed || feed.length === 0) return [];
   return feed
     .slice(-limit)
@@ -57,7 +66,11 @@ function getFeedLines(feed: FeedItem[] | undefined, limit = 6): string[] {
     .filter(Boolean);
 }
 
-function paintIdle(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, t: number) {
+function paintIdle(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  t: number,
+  agentName: string,
+) {
   ctx.fillStyle = "#0a0c14";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
   // Simple matrix-rain screensaver: a few falling green chars
@@ -76,30 +89,94 @@ function paintIdle(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingConte
     ctx.fillText(char, c * cw + 2, row * (CANVAS_H / 16));
   }
   ctx.globalAlpha = 1;
+  // Agent name centered over screensaver
+  if (agentName) {
+    ctx.font = "bold 22px sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    const nameW = Math.min(ctx.measureText(agentName).width + 20, CANVAS_W - 20);
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect((CANVAS_W - nameW) / 2, CANVAS_H / 2 - 18, nameW, 36);
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "#39ff14";
+    ctx.fillText(agentName, CANVAS_W / 2, CANVAS_H / 2);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+  }
+  // Status badge
+  ctx.fillStyle = "#1a2433";
+  ctx.fillRect(0, CANVAS_H - 14, CANVAS_W, 14);
+  ctx.font = "10px sans-serif";
+  ctx.globalAlpha = 0.7;
+  ctx.fillStyle = STATUS_COLORS.idle;
+  ctx.fillText(`● ${STATUS_LABELS.idle}`, 6, CANVAS_H - 12);
+  ctx.globalAlpha = 1;
 }
 
-function paintLog(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, lines: string[]) {
+function paintLog(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  lines: string[],
+  agentName: string,
+  taskTitle: string,
+  status: AgentStatus,
+) {
+  const statusColor = STATUS_COLORS[status];
   ctx.fillStyle = "#080b12";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  // Header: agent name + status badge
+  ctx.fillStyle = "#0f1724";
+  ctx.fillRect(0, 0, CANVAS_W, 32);
+  ctx.font = "bold 13px sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#e2e8f0";
+  ctx.fillText(agentName.slice(0, 28), 8, 16);
+  // Status badge (right side)
+  const label = STATUS_LABELS[status];
+  ctx.font = "bold 11px sans-serif";
+  const badgeW = ctx.measureText(label).width + 10;
+  ctx.fillStyle = statusColor;
+  ctx.fillRect(CANVAS_W - badgeW - 6, 8, badgeW, 16);
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "center";
+  ctx.fillText(label, CANVAS_W - badgeW / 2 - 6, 16);
+  ctx.textAlign = "left";
+
+  // Task title (truncated)
+  if (taskTitle) {
+    ctx.font = "11px sans-serif";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#94a3b8";
+    const truncTitle = taskTitle.length > 52 ? taskTitle.slice(0, 51) + "…" : taskTitle;
+    ctx.fillText(truncTitle, 8, 36);
+  }
+
+  // Log lines
   ctx.font = FONT;
   ctx.textBaseline = "top";
-  const lineH = 44;
-  const startY = CANVAS_H - lines.length * lineH - 6;
-  lines.forEach((line, i) => {
+  const lineH = 38;
+  const logStartY = taskTitle ? 54 : 38;
+  const availH = CANVAS_H - 14 - logStartY;
+  const maxLines = Math.floor(availH / lineH);
+  const visLines = lines.slice(-maxLines);
+  const startY = logStartY + Math.max(0, availH - visLines.length * lineH);
+  visLines.forEach((line, i) => {
     const y = startY + i * lineH;
-    const fade = 0.45 + (i / Math.max(1, lines.length - 1)) * 0.55;
+    const fade = 0.45 + (i / Math.max(1, visLines.length - 1)) * 0.55;
     ctx.globalAlpha = fade;
     ctx.fillStyle = "#7ec8e3";
     ctx.fillText(line, 8, y + 4);
   });
   ctx.globalAlpha = 1;
+
   // Tiny status bar
   ctx.fillStyle = "#1a2433";
   ctx.fillRect(0, CANVAS_H - 14, CANVAS_W, 14);
   ctx.font = "10px sans-serif";
   ctx.globalAlpha = 0.7;
-  ctx.fillStyle = "#4caf50";
-  ctx.fillText("●  live", 6, CANVAS_H - 12);
+  ctx.fillStyle = statusColor;
+  ctx.fillText(`●  ${label.toLowerCase()}`, 6, CANVAS_H - 12);
   ctx.globalAlpha = 1;
 }
 
@@ -107,50 +184,69 @@ function paintLog(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContex
  * High-detail paint for monitors visible at walking distance.
  * Uses a larger font and shows fewer but more readable lines.
  */
-function paintLogNear(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, lines: string[]) {
+function paintLogNear(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  lines: string[],
+  agentName: string,
+  taskTitle: string,
+  status: AgentStatus,
+) {
+  const statusColor = STATUS_COLORS[status];
   ctx.fillStyle = "#080b12";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  ctx.font = FONT_NEAR;
-  ctx.textBaseline = "top";
+
+  // Header: agent name + status badge
+  ctx.fillStyle = "#0f1724";
+  ctx.fillRect(0, 0, CANVAS_W, 40);
+  ctx.font = "bold 17px sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#e2e8f0";
+  ctx.fillText(agentName.slice(0, 22), 10, 20);
+  // Status badge
+  const label = STATUS_LABELS[status];
+  ctx.font = "bold 13px sans-serif";
+  const badgeW = ctx.measureText(label).width + 12;
+  ctx.fillStyle = statusColor;
+  ctx.fillRect(CANVAS_W - badgeW - 8, 10, badgeW, 20);
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "center";
+  ctx.fillText(label, CANVAS_W - badgeW / 2 - 8, 20);
+  ctx.textAlign = "left";
+
+  // Task title
+  if (taskTitle) {
+    ctx.font = "13px sans-serif";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#94a3b8";
+    const truncTitle = taskTitle.length > 40 ? taskTitle.slice(0, 39) + "…" : taskTitle;
+    ctx.fillText(truncTitle, 10, 46);
+  }
+
   // Larger font → fewer lines (max 4).
   const nearLines = lines.slice(-4);
-  const lineH = 62;
-  const startY = CANVAS_H - nearLines.length * lineH - 10;
+  ctx.font = FONT_NEAR;
+  ctx.textBaseline = "top";
+  const lineH = 54;
+  const logStartY = taskTitle ? 68 : 48;
+  const startY = CANVAS_H - 18 - nearLines.length * lineH;
   nearLines.forEach((line, i) => {
-    const y = startY + i * lineH;
+    const y = Math.max(logStartY, startY) + i * lineH;
     const fade = 0.5 + (i / Math.max(1, nearLines.length - 1)) * 0.5;
     ctx.globalAlpha = fade;
     ctx.fillStyle = "#a8e6f0";
-    // Truncate line to fit wider font in canvas width.
-    const truncated = line.length > 40 ? line.slice(0, 39) + "…" : line;
+    const truncated = line.length > 38 ? line.slice(0, 37) + "…" : line;
     ctx.fillText(truncated, 10, y + 4);
   });
   ctx.globalAlpha = 1;
+
   // Status bar
   ctx.fillStyle = "#1a2433";
   ctx.fillRect(0, CANVAS_H - 18, CANVAS_W, 18);
   ctx.font = "13px sans-serif";
   ctx.globalAlpha = 0.85;
-  ctx.fillStyle = "#4caf50";
-  ctx.fillText("●  live", 8, CANVAS_H - 15);
+  ctx.fillStyle = statusColor;
+  ctx.fillText(`●  ${label.toLowerCase()}`, 8, CANVAS_H - 15);
   ctx.globalAlpha = 1;
-}
-
-// ---- shared canvas for painting (one at a time) ----
-
-let sharedCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
-
-function getCanvas(): HTMLCanvasElement | OffscreenCanvas | null {
-  if (sharedCanvas) return sharedCanvas;
-  if (typeof OffscreenCanvas !== "undefined") {
-    sharedCanvas = new OffscreenCanvas(CANVAS_W, CANVAS_H);
-  } else if (typeof document !== "undefined") {
-    const c = document.createElement("canvas");
-    c.width = CANVAS_W;
-    c.height = CANVAS_H;
-    sharedCanvas = c;
-  }
-  return sharedCanvas;
 }
 
 // ---- Per-monitor texture pool ----
@@ -193,17 +289,34 @@ interface DeskMonitorProps {
 export function DeskMonitor({ agentId, position, yaw }: DeskMonitorProps) {
   const select = useStore((s) => s.select);
   const feed = useStore((s) => s.feed[agentId]);
-  const tasks = useStore((s) => s.tasks);
+  const agentName = useStore((s) => s.agents[agentId]?.name ?? agentId);
+  const currentStatus = useStore((s) => {
+    const agent = s.agents[agentId];
+    if (!agent) return "idle" as AgentStatus;
+    return agentStatus(agent, Object.values(s.tasks), s.permissions, s.questions, s.feed[agentId] ?? []);
+  });
+  const currentTaskTitle = useStore((s) => {
+    const tasks = Object.values(s.tasks);
+    const active = tasks.find(
+      (t) => t.assigneeId === agentId && (t.status === "running" || t.status === "waiting"),
+    );
+    return active?.title ?? "";
+  });
+
   const tex = useMemo(() => getTexture(agentId), [agentId]);
   const lastUpdate = useRef(0);
-  const isIdle = useMemo(() => {
-    const agentTasks = Object.values(tasks).filter((t) => t.assigneeId === agentId);
-    return !agentTasks.some((t) => t.status === "running" || t.status === "waiting");
-  }, [tasks, agentId]);
+
+  const isIdle = currentStatus === "idle";
   const isIdleRef = useRef(isIdle);
   isIdleRef.current = isIdle;
   const feedRef = useRef(feed);
   feedRef.current = feed;
+  const agentNameRef = useRef(agentName);
+  agentNameRef.current = agentName;
+  const statusRef = useRef(currentStatus);
+  statusRef.current = currentStatus;
+  const taskTitleRef = useRef(currentTaskTitle);
+  taskTitleRef.current = currentTaskTitle;
 
   const { camera } = useThree();
   const posVec = useMemo(() => new THREE.Vector3(...position), [position]);
@@ -223,13 +336,13 @@ export function DeskMonitor({ agentId, position, yaw }: DeskMonitorProps) {
     const ctx = (canvas as HTMLCanvasElement | OffscreenCanvas).getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
     if (!ctx) return;
     if (isIdleRef.current) {
-      paintIdle(ctx, clock.getElapsedTime());
+      paintIdle(ctx, clock.getElapsedTime(), agentNameRef.current);
     } else {
       const lines = getFeedLines(feedRef.current, isNear ? 8 : 6);
       if (isNear) {
-        paintLogNear(ctx, lines);
+        paintLogNear(ctx, lines, agentNameRef.current, taskTitleRef.current, statusRef.current);
       } else {
-        paintLog(ctx, lines);
+        paintLog(ctx, lines, agentNameRef.current, taskTitleRef.current, statusRef.current);
       }
     }
     tex.needsUpdate = true;
@@ -305,4 +418,4 @@ export function AllDeskMonitors({ desks }: AllDeskMonitorsProps) {
 }
 
 // Re-export for throttle testing
-export { getFeedLines, MAX_DIST, REFRESH_MS, MAX_UPDATES_PER_FRAME, NEAR_DIST };
+export { MAX_DIST, REFRESH_MS, MAX_UPDATES_PER_FRAME, NEAR_DIST, STATUS_LABELS };

@@ -147,6 +147,94 @@ test.describe("office overview screenshots", () => {
   });
 });
 
+test.describe("desk monitor walk-mode screenshots", () => {
+  // Pod-a (first pod) is at world ~(10.5, 6.06).
+  // Seat 0 monitor faces -Z at ~(9.3, 5.68).
+  // Walk camera at (9.3, 3.5) with yaw=π shows the monitor up close.
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  /** Create one worker and wait for their tag to appear in the scene. */
+  async function seedPodWorker(page: import("@playwright/test").Page, name: string) {
+    await page.getByRole("button", { name: /new agent/i }).first().click();
+    await page.getByPlaceholder("Nova").fill(name);
+    await page.getByRole("button", { name: "Create agent" }).click();
+    await expect(page.locator(".tag-name", { hasText: name })).toBeVisible({ timeout: 20_000 });
+  }
+
+  /** Enable walk mode, teleport to seat-0 of pod-a, and wait for the monitor to refresh. */
+  async function goToMonitor(page: import("@playwright/test").Page) {
+    await page.evaluate(() => {
+      const setWalking = (window as unknown as { __setWalking?: (v: boolean) => void }).__setWalking;
+      if (setWalking) setWalking(true);
+    });
+    await page.waitForTimeout(300);
+    // Teleport to just south of the first pod desk monitor; look toward +Z (yaw=π sees screen).
+    await page.evaluate(() => {
+      const tp = (window as unknown as { __teleportWalk?: (x: number, z: number, yaw: number) => void }).__teleportWalk;
+      if (tp) tp(9.3, 3.5, Math.PI);
+    });
+    // Wait for monitor texture refresh (REFRESH_MS = 2 s).
+    await page.waitForTimeout(2_500);
+  }
+
+  test("idle screensaver light - walk mode near pod-a desk", async ({ page }) => {
+    test.setTimeout(60_000);
+    ensureScreenshotsDir();
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    // Seed a worker so pod-a has a monitor; idle = no running task → screensaver.
+    await seedPodWorker(page, "MonitorW1");
+    await goToMonitor(page);
+    await page.screenshot({ path: "e2e/screenshots/monitor-idle-light-1280x800.png", fullPage: false });
+  });
+
+  test("idle screensaver dark - walk mode near pod-a desk", async ({ page }) => {
+    test.setTimeout(60_000);
+    ensureScreenshotsDir();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await seedPodWorker(page, "MonitorW2");
+    await goToMonitor(page);
+    await page.screenshot({ path: "e2e/screenshots/monitor-idle-dark-1280x800.png", fullPage: false });
+  });
+
+  test("live monitor light - walk mode near pod-a desk with running task", async ({ page }) => {
+    test.setTimeout(90_000);
+    ensureScreenshotsDir();
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await seedPodWorker(page, "MonitorW3");
+    // Ask Atlas to delegate a task so the worker gets a running task.
+    const bar = page.getByLabel(/Tell Atlas what to build/);
+    await bar.fill("write a readme");
+    await bar.press("Enter");
+    // Don't wait for done — enter walk mode while the task is still running.
+    await page.waitForTimeout(2_000);
+    await goToMonitor(page);
+    await page.screenshot({ path: "e2e/screenshots/monitor-live-light-1280x800.png", fullPage: false });
+  });
+
+  test("live monitor dark - walk mode near pod-a desk with running task", async ({ page }) => {
+    test.setTimeout(90_000);
+    ensureScreenshotsDir();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await seedPodWorker(page, "MonitorW4");
+    const bar = page.getByLabel(/Tell Atlas what to build/);
+    await bar.fill("write a readme");
+    await bar.press("Enter");
+    await page.waitForTimeout(2_000);
+    await goToMonitor(page);
+    await page.screenshot({ path: "e2e/screenshots/monitor-live-dark-1280x800.png", fullPage: false });
+  });
+});
+
 test.describe("1280x800 overview screenshots", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
