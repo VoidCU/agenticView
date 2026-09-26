@@ -41,6 +41,11 @@ export type SolidObstacle = SolidBox | SolidCircle;
 const DEG = Math.PI / 180;
 const DOOR_W = 1.8;
 const WALL_THICKNESS = 0.1;
+/** Chair collider = the seat footprint only (kit chair seat box 0.5 x 0.48), not the swivel base. */
+export const CHAIR_W = 0.5;
+export const CHAIR_D = 0.48;
+/** Plant collider = the pot (kit plant pot diameter 0.42 * size), not the foliage above it. */
+export const potRadius = (size: number) => 0.21 * size;
 
 /** Pose of corner furniture in a hexagonal space. */
 function cornerPose(s: Space, angleDeg: number, at = 4.55): { x: number; z: number; rot: number } {
@@ -105,7 +110,7 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
           const dz = l.z < 0 ? -0.36 : 0.36;
           const deskRot = l.z < 0 ? Math.PI : 0;
           solids.push({ kind: "desk", x: s.x + l.x, z: s.z + dz, w: 1.18, d: 0.66, rot: deskRot });
-          solids.push({ kind: "chair", x: s.x + l.x, z: s.z + l.z + (l.z < 0 ? -0.1 : 0.1), w: 0.5, d: 0.5, rot: l.yaw });
+          solids.push({ kind: "chair", x: s.x + l.x, z: s.z + l.z + (l.z < 0 ? -0.1 : 0.1), w: CHAIR_W, d: CHAIR_D, rot: l.yaw });
         }
         // Felt privacy screen partition
         solids.push({ kind: "partition", x: s.x, z: s.z, w: 3.8, d: 0.06, rot: 0 });
@@ -118,9 +123,9 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
         const c300 = cornerPose(s, 300);
         solids.push({ kind: "credenza", x: c300.x, z: c300.z, w: 1.6, d: 0.46, rot: c300.rot });
         const p0 = cornerPose(s, 0, 4.7);
-        solids.push({ kind: "plant", x: p0.x, z: p0.z, r: 0.55 });
+        solids.push({ kind: "plant", x: p0.x, z: p0.z, r: potRadius(1.1) });
         const p120 = cornerPose(s, 120, 4.7);
-        solids.push({ kind: "plant", x: p120.x, z: p120.z, r: 0.45 });
+        solids.push({ kind: "plant", x: p120.x, z: p120.z, r: potRadius(0.9) });
         const c60 = cornerPose(s, 60, 4.7);
         solids.push({ kind: "credenza", x: c60.x, z: c60.z, w: 1.6, d: 0.46, rot: c60.rot });
         break;
@@ -136,7 +141,7 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
         const front = { x: deskAt.x + toCam.x * 1.05, z: deskAt.z + toCam.z * 1.05 };
         for (const side of [-0.62, 0.62]) {
           const p = { x: front.x + side * toCam.z, z: front.z - side * toCam.x };
-          solids.push({ kind: "chair", x: s.x + p.x, z: s.z + p.z, w: 0.5, d: 0.5, rot: yawToward(p, home) });
+          solids.push({ kind: "chair", x: s.x + p.x, z: s.z + p.z, w: CHAIR_W, d: CHAIR_D, rot: yawToward(p, home) });
         }
 
         const b180 = cornerPose(s, 180, 4.5);
@@ -148,9 +153,9 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
         const a0 = cornerPose(s, 0, 4.4);
         solids.push({ kind: "sofa", x: a0.x, z: a0.z, w: 0.95, d: 0.86, rot: a0.rot });
         const p60 = cornerPose(s, 60, 4.8);
-        solids.push({ kind: "plant", x: p60.x, z: p60.z, r: 0.6 });
+        solids.push({ kind: "plant", x: p60.x, z: p60.z, r: potRadius(1.25) });
         const p120 = cornerPose(s, 120, 4.7);
-        solids.push({ kind: "plant", x: p120.x, z: p120.z, r: 0.5 });
+        solids.push({ kind: "plant", x: p120.x, z: p120.z, r: potRadius(1.0) });
         break;
       }
 
@@ -161,7 +166,7 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
           const l = seatLocal("meeting", seat);
           const back = Math.hypot(l.x, l.z) + 0.12;
           const a = Math.atan2(l.z, l.x);
-          solids.push({ kind: "chair", x: s.x + back * Math.cos(a), z: s.z + back * Math.sin(a), w: 0.5, d: 0.5, rot: l.yaw });
+          solids.push({ kind: "chair", x: s.x + back * Math.cos(a), z: s.z + back * Math.sin(a), w: CHAIR_W, d: CHAIR_D, rot: l.yaw });
         }
 
         const t240 = cornerPose(s, 240, 4.5);
@@ -171,11 +176,11 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
         const c300 = cornerPose(s, 300);
         solids.push({ kind: "credenza", x: c300.x, z: c300.z, w: 1.6, d: 0.46, rot: c300.rot });
         const p0 = cornerPose(s, 0, 4.7);
-        solids.push({ kind: "plant", x: p0.x, z: p0.z, r: 0.55 });
+        solids.push({ kind: "plant", x: p0.x, z: p0.z, r: potRadius(1.1) });
         const p60 = cornerPose(s, 60, 4.8);
-        solids.push({ kind: "plant", x: p60.x, z: p60.z, r: 0.45 });
+        solids.push({ kind: "plant", x: p60.x, z: p60.z, r: potRadius(0.8) });
         const p120 = cornerPose(s, 120, 4.7);
-        solids.push({ kind: "plant", x: p120.x, z: p120.z, r: 0.6 });
+        solids.push({ kind: "plant", x: p120.x, z: p120.z, r: potRadius(1.2) });
         break;
       }
 
@@ -196,15 +201,17 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
           } else if (fp.kind === "counter") {
             solids.push({ kind: "credenza", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
           } else if (fp.kind === "beanbag") {
-            solids.push({ kind: "chair", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
+            solids.push({ kind: "beanbag", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
           }
         }
 
-        // Corner decor plants
+        // Corner decor, as kit loungeRoom draws it: floor lamp (base 0.34) at 120, plants 1.2 at 0 and 0.8 at 60.
         const l120 = cornerPose(s, 120, 4.6);
-        solids.push({ kind: "plant", x: l120.x, z: l120.z, r: 0.25 });
+        solids.push({ kind: "lamp", x: l120.x, z: l120.z, r: 0.17 });
         const p0 = cornerPose(s, 0, 4.7);
-        solids.push({ kind: "plant", x: p0.x, z: p0.z, r: 0.6 });
+        solids.push({ kind: "plant", x: p0.x, z: p0.z, r: potRadius(1.2) });
+        const p60 = cornerPose(s, 60, 4.8);
+        solids.push({ kind: "plant", x: p60.x, z: p60.z, r: potRadius(0.8) });
         break;
       }
     }

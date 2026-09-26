@@ -27,17 +27,39 @@ export interface Circle {
   r: number;
 }
 
+/**
+ * Oriented box: half extents `hw` along the local x axis (cos rot, -sin rot) and `hd` along local z
+ * (sin rot, cos rot), the kit's frame convention. Furniture uses these so a rotated corner credenza
+ * blocks its own footprint, not the (much larger) axis-aligned box around it.
+ */
+export interface OBox {
+  cx: number;
+  cz: number;
+  hw: number;
+  hd: number;
+  cos: number;
+  sin: number;
+}
+
 export type Solid =
   | { kind: "box"; box: AABB }
-  | { kind: "circle"; circle: Circle };
+  | { kind: "circle"; circle: Circle }
+  | { kind: "obox"; obox: OBox };
 
 import { solidsForLayout } from "./solids";
 import type { OfficeLayout } from "./layout";
 
 // ---- Constants ----
 
-/** Player capsule radius (world units). */
-export const PLAYER_RADIUS = 0.28;
+/**
+ * The walker's visible body radius. In walk mode you are the camera; your 'You' robot is not drawn,
+ * so this is a slim person-sized footprint, never larger than what fits visibly through a gap.
+ */
+export const PLAYER_BODY_RADIUS = 0.25;
+/** Small collision skin so the camera never clips into furniture faces. */
+export const PLAYER_SKIN = 0.03;
+/** Player capsule radius (world units): body + skin. */
+export const PLAYER_RADIUS = PLAYER_BODY_RADIUS + PLAYER_SKIN;
 
 /**
  * Default number of sub-steps.
@@ -152,6 +174,47 @@ export function resolveCircle(
   return { x: cx + dx * push, z: cz + dz * push };
 }
 
+const LOCAL_BOX: AABB = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+
+/** Direction-aware push-out of a point from an oriented box expanded by `r` (same rules as boxes, in the box frame). */
+function resolveOBoxDir(prevX: number, prevZ: number, cx: number, cz: number, o: OBox, r: number): { x: number; z: number } {
+  const dx = cx - o.cx;
+  const dz = cz - o.cz;
+  const lx = dx * o.cos - dz * o.sin;
+  const lz = dx * o.sin + dz * o.cos;
+  // Cheap reject before any more work.
+  if (Math.abs(lx) >= o.hw + r || Math.abs(lz) >= o.hd + r) return { x: cx, z: cz };
+  const pdx = prevX - o.cx;
+  const pdz = prevZ - o.cz;
+  LOCAL_BOX.minX = -o.hw;
+  LOCAL_BOX.maxX = o.hw;
+  LOCAL_BOX.minZ = -o.hd;
+  LOCAL_BOX.maxZ = o.hd;
+  const p = resolveBoxDir(pdx * o.cos - pdz * o.sin, pdx * o.sin + pdz * o.cos, lx, lz, LOCAL_BOX, r);
+  // Back to world: inverse rotation.
+  return { x: o.cx + p.x * o.cos + p.z * o.sin, z: o.cz - p.x * o.sin + p.z * o.cos };
+}
+
+/** Push a point out of any one solid (expanded by r). */
+export function resolveSolid(s: Solid, prevX: number, prevZ: number, x: number, z: number, r = PLAYER_RADIUS): { x: number; z: number } {
+  if (s.kind === "box") return resolveBoxDir(prevX, prevZ, x, z, s.box, r);
+  if (s.kind === "circle") return resolveCircle(x, z, s.circle, r);
+  return resolveOBoxDir(prevX, prevZ, x, z, s.obox, r);
+}
+
+/** True when a circle of radius r at (x, z) overlaps any of the solids. */
+export function overlapsAny(solids: readonly Solid[], x: number, z: number, r: number): boolean {
+  for (const s of solids) {
+    if (s.kind === "circle") {
+      if (Math.hypot(x - s.circle.cx, z - s.circle.cz) < s.circle.r + r) return true;
+      continue;
+    }
+    const p = resolveSolid(s, x, z, x, z, r);
+    if (Math.abs(p.x - x) > 1e-6 || Math.abs(p.z - z) > 1e-6) return true;
+  }
+  return false;
+}
+
 // ---- Sub-stepped move ----
 
 /**
@@ -189,20 +252,35 @@ export function resolveMove(
     const nz = cz + sz;
     let rx = nx;
     let rz = nz;
-    for (const s of solids) {
-      if (s.kind === "box") {
-        const r = resolveBoxDir(prevX, prevZ, rx, rz, s.box, PLAYER_RADIUS);
-        rx = r.x;
-        rz = r.z;
-      } else {
-        const r = resolveCircle(rx, rz, s.circle, PLAYER_RADIUS);
+    // Two passes: in a narrow gap the push out of one obstacle can land in its neighbour.
+    for (let pass = 0; pass < 2; pass++) {
+      let any = false;
+      for (const s of solids) {
+        const r = resolveSolid(s, prevX, prevZ, rx, rz);
+        if (r.x !== rx || r.z !== rz) any = true;
         rx = r.x;
         rz = r.z;
       }
+      if (!any) break;
     }
-    // Cancel sub-step in any corrected axis to slide along the obstacle.
-    if (Math.abs(rx - nx) > 1e-6) sx = 0;
-    if (Math.abs(rz - nz) > 1e-6) sz = 0;
+    // Slide: drop only the part of the step that goes INTO the obstacle (along the correction normal)
+    // and keep the tangential part. For box faces that is the old "cancel this axis"; for round
+    // obstacles (plants, tables) and rotated furniture it slides around instead of stopping dead,
+    // which is what wedged the walker between a chair and a plant pot.
+    const nX = rx - nx;
+    const nZ = rz - nz;
+    const nLen = Math.hypot(nX, nZ);
+    if (nLen > 1e-6) {
+      const ux = nX / nLen;
+      const uz = nZ / nLen;
+      const into = sx * ux + sz * uz;
+      if (into < 0) {
+        sx -= into * ux;
+        sz -= into * uz;
+      }
+      if (Math.abs(sx) < 1e-9) sx = 0;
+      if (Math.abs(sz) < 1e-9) sz = 0;
+    }
     cx = rx;
     cz = rz;
   }
@@ -218,14 +296,22 @@ export function resolveMove(
  *
  * Call this once per layout change and pass the result to resolveMove().
  */
-export function buildColliders(layout?: OfficeLayout): Solid[] {
+/** Obstacle kinds kept as axis-aligned boxes exactly as before (walls and glass partitions). */
+const AABB_KINDS: ReadonlySet<string> = new Set(["wall", "partition"]);
+
+export function buildColliders(layout?: OfficeLayout, opts: { excludeKinds?: readonly string[] } = {}): Solid[] {
   if (!layout) return [];
-  const obstacles = solidsForLayout(layout);
+  const exclude = new Set(opts.excludeKinds ?? []);
+  const obstacles = solidsForLayout(layout).filter((s) => !exclude.has(s.kind));
   return obstacles.map((s): Solid => {
     if ("r" in s) {
       return { kind: "circle", circle: { cx: s.x, cz: s.z, r: s.r } };
     }
     const { x, z, w, d, rot } = s;
+    if (!AABB_KINDS.has(s.kind)) {
+      // Furniture: the real (rotated) footprint.
+      return { kind: "obox", obox: { cx: x, cz: z, hw: w / 2, hd: d / 2, cos: Math.cos(rot), sin: Math.sin(rot) } };
+    }
     const c = Math.cos(rot);
     const sn = Math.sin(rot);
     const hx = Math.abs((w / 2) * c) + Math.abs((d / 2) * sn);
