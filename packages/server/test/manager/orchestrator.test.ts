@@ -81,7 +81,7 @@ describe("Orchestrator", () => {
     const child = (await ctx.tasks.list()).find((x) => x.kind === "work")!;
     expect(child).toMatchObject({ status: "done", result: "vars added", parentId: t.id, createdBy: m.id, projectPath: proj });
     expect(ctx.msgs.filter((x) => x.type === "run.event").length).toBeGreaterThan(0);
-    expect(ctx.msgs.some((x) => x.type === "task.updated" && x.task.id === t.id && x.task.status === "waiting")).toBe(true);
+    expect(ctx.msgs.some((x) => x.type === "task.updated" && x.task.id === t.id && x.task.status === "waiting")).toBe(false); // waiting on workers is not waiting on the user
     expect(ctx.msgs.some((x) => x.type === "agent.updated" && x.agent.name === "Nova")).toBe(true);
     const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
     expect(nova.stats).toMatchObject({ xp: 10, tasksDone: 1 });

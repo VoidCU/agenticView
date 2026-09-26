@@ -61,7 +61,9 @@ describe("Orchestrator cancel cascade and pending prompts", () => {
     await ctx.reg.create({ name: "Nova", specialty: "" });
     const m = await ctx.reg.ensureManager();
     const t = await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" });
-    await waitFor(async () => (await ctx.tasks.list()).filter((x) => x.kind === "work").length === 2 && (await ctx.tasks.get(t.id))!.status === "waiting");
+    await waitFor(async () => (await ctx.tasks.list()).filter((x) => x.kind === "work").length === 2 && (await ctx.tasks.get(t.id))!.status === "running");
+    // Waiting on its own workers is not "waiting on you": the request stays running (only questions and permissions wait).
+    expect((await ctx.tasks.get(t.id))!.status).toBe("running");
     await ctx.orch.cancel(t.id);
     const all = await ctx.tasks.list();
     expect(all.find((x) => x.id === t.id)!.status).toBe("cancelled");

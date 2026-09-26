@@ -246,8 +246,9 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         }
         const line = (t: Task) => ({ id: t.id, title: t.title, status: t.status, result: t.result, error: t.error });
         const maxMs = typeof args.maxWaitSeconds === "number" ? args.maxWaitSeconds * 1000 : undefined;
-        await ctx.setWaiting(ctx.requestTask.id, true);
-        try {
+        // A Manager waiting on its own workers is still working: the request stays "running". Only a
+        // question or permission for the user moves it to "waiting" (shown as "Waiting on you").
+        {
           const all = Promise.all(ids.map((id) => ctx.awaitTask(id)));
           if (maxMs === undefined) return JSON.stringify((await all).map(line), null, 2);
           let timer: ReturnType<typeof setTimeout> | undefined;
@@ -267,8 +268,6 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
             null,
             2,
           );
-        } finally {
-          await ctx.setWaiting(ctx.requestTask.id, false);
         }
       },
     },
