@@ -10,7 +10,7 @@
     {
       "name": "agenticview",
       "description": "Gamified 3D office for your coding agents (Claude, Codex, Antigravity, Gemini) with a delegating Manager.",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "source": "./",
       "tags": ["agents", "3d", "visualization"]
     }
