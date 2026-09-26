@@ -356,11 +356,16 @@ export function DeskMonitor({ agentId, position, yaw }: DeskMonitorProps) {
     [agentId, select],
   );
 
+  // Same rotation composition as the instanced furniture (Batches uses Euler "YXZ": yaw, then tilt
+  // about the yawed X axis), nudged 4 mm along the screen normal so it covers the static screen.
+  const euler = useMemo(() => new THREE.Euler(-0.08, yaw, 0, "YXZ"), [yaw]);
+  const meshPos = useMemo(() => new THREE.Vector3(...position).addScaledVector(new THREE.Vector3(0, 0, 1).applyEuler(euler), 0.004), [position, euler]);
+
   return (
     <mesh
       geometry={monitorGeo}
-      position={position}
-      rotation={[-0.08, yaw, 0]}
+      position={meshPos}
+      rotation={euler}
       onClick={handleClick}
       onPointerOver={() => (document.body.style.cursor = "pointer")}
       onPointerOut={() => (document.body.style.cursor = "")}
@@ -381,13 +386,13 @@ export function monitorPoseForSeat(
 ): { position: [number, number, number]; yaw: number } | null {
   if (seat >= POD_SEATS || seat < 0) return null;
   const l = seatLocal("pod", seat);
-  // The desk is offset from the seat along the seat's forward axis
-  const fwdZ = Math.cos(l.yaw); // 1 for yaw=0, -1 for yaw=π
-  const monX = spaceX + l.x;
-  const monZ = spaceZ + l.z + fwdZ * 1.02;
-  // Monitor faces toward agent = yaw + π
-  const monYaw = l.yaw + Math.PI;
-  return { position: [monX, 1.06, monZ], yaw: monYaw };
+  // Mirror kit.ts exactly: podRoom places each desk frame at (l.x, ±0.36) with yaw π for the front
+  // row, and desk() puts the static screen at local (0, 1.06, -0.163) inside that frame. The live
+  // plane must land on that same face or it floats in front of the monitor.
+  const frameYaw = l.z < 0 ? Math.PI : 0;
+  const frameZ = l.z < 0 ? -0.36 : 0.36;
+  const monZ = spaceZ + frameZ - 0.163 * Math.cos(frameYaw);
+  return { position: [spaceX + l.x, 1.06, monZ], yaw: frameYaw };
 }
 
 // ---- Throttled batch of monitors ----

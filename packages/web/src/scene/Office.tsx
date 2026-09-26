@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Html, OrbitControls, useCursor } from "@react-three/drei";
+import { Html, OrbitControls, PerformanceMonitor, useCursor } from "@react-three/drei";
 import * as THREE from "three";
 import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, loungeSpots, assignLoungeSpots, rpsFacing, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
@@ -289,7 +289,7 @@ function Lights({ palette, spaces }: { palette: Palette; spaces: Space[] }) {
         position={[16, 30, 10]}
         intensity={palette.sunIntensity}
         color={palette.sun}
-        shadow-mapSize={[2048, 2048]}
+        shadow-mapSize={[1024, 1024]}
         shadow-bias={-0.0004}
         shadow-normalBias={0.04}
       />
@@ -908,6 +908,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
 
 export function Office({ onCreate }: { onCreate: () => void }) {
   const [boardSpace, setBoardSpace] = useState<Space>();
+  const [dpr, setDpr] = useState(1.5);
   const closeBoard = useCallback(() => setBoardSpace(undefined), []);
   const select = useStore((s) => s.select);
   const focus = useFocus((s) => s.focus);
@@ -953,7 +954,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="office" data-scene-theme={theme}>
       <Canvas
-        dpr={[1, 1.75]}
+        dpr={dpr}
         camera={{ position: [30, 36, 30], fov: 38, near: 0.5, far: 220 }}
         shadows
         gl={{ antialias: true, powerPreference: "high-performance" }}
@@ -962,6 +963,14 @@ export function Office({ onCreate }: { onCreate: () => void }) {
           useFocus.getState().setHover(undefined);
         }}
       >
+        {/* Adaptive resolution: render at 1.5x normally, step down toward 1x when the GPU can't keep
+            up and back up to 1.75x when it's coasting. Cheaper than any per-object tuning. */}
+        <PerformanceMonitor
+          onIncline={() => setDpr((d) => Math.min(1.75, d + 0.25))}
+          onDecline={() => setDpr((d) => Math.max(1, d - 0.25))}
+          flipflops={4}
+          onFallback={() => setDpr(1)}
+        />
         <Suspense fallback={null}>
           <Scene onCreate={onCreate} palette={palette} onBoard={setBoardSpace} />
         </Suspense>

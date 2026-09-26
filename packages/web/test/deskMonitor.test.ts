@@ -138,6 +138,17 @@ describe("throttle / distance constants", () => {
 // ---- monitorPoseForSeat ----
 
 describe("monitorPoseForSeat", () => {
+
+  it("sits exactly on the kit desk screen face (frame ±0.36, screen local z -0.163)", () => {
+    // Front row (seat 0): desk frame at z -0.36 with yaw π -> face at -0.36 + 0.163.
+    const front = monitorPoseForSeat(0, 0, 0)!;
+    expect(front.position[2]).toBeCloseTo(-0.197, 3);
+    expect(front.yaw).toBeCloseTo(Math.PI, 6);
+    // Back row (seat 3): frame at z +0.36 with yaw 0 -> face at 0.36 - 0.163.
+    const back = monitorPoseForSeat(0, 0, 3)!;
+    expect(back.position[2]).toBeCloseTo(0.197, 3);
+    expect(back.yaw).toBeCloseTo(0, 6);
+  });
   it("returns null for out-of-range seat", () => {
     expect(monitorPoseForSeat(0, 0, -1)).toBeNull();
     expect(monitorPoseForSeat(0, 0, 6)).toBeNull();
