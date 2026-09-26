@@ -151,12 +151,14 @@ h3 {
   pointer-events: none;
 }
 
-.hud-left > * { pointer-events: auto; }
+.hud-left > *, .hud-right > * { pointer-events: auto; }
 
 .hud-right {
   grid-area: right;
   min-height: 0;
   display: flex;
+  /* Like .hud-left: the empty column (e.g. around the collapsed Chat tab) must not swallow canvas drags. */
+  pointer-events: none;
 }
 
 .hud-bottom {

@@ -59,3 +59,30 @@ test("canvas drag suppresses text selection and restores body selection", async 
   await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0 })));
   await expect.poll(() => page.evaluate(() => document.body.style.userSelect)).toBe("");
 });
+
+test("drag starting beside the collapsed Chat tab rotates the canvas instead of selecting text", async ({ page }) => {
+  await page.goto(`/#token=${launchToken()}`);
+  await expect(page.locator(".office canvas")).toBeVisible();
+  await page.getByRole("button", { name: "Collapse chat" }).first().click();
+  const tab = page.getByRole("button", { name: "Expand chat" });
+  await expect(tab).toBeVisible();
+  const box = (await tab.boundingBox())!;
+  // A point in the (now empty) right HUD column, above the tab but not on it.
+  const x = box.x - 60;
+  const y = box.y - 120;
+  const hit = await page.evaluate(([px, py]) => {
+    const el = document.elementFromPoint(px!, py!);
+    return el ? (el.closest(".office canvas") ? "canvas" : el.className || el.tagName) : "none";
+  }, [x, y]);
+  expect(hit).toBe("canvas");
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await expect.poll(() => page.evaluate(() => document.body.style.userSelect)).toBe("none");
+  await page.mouse.move(40, 200, { steps: 8 });
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => document.body.style.userSelect)).toBe("");
+  expect(await page.evaluate(() => window.getSelection()?.toString() ?? "")).toBe("");
+  await tab.click();
+  await expect(page.getByRole("button", { name: "Collapse chat" }).first()).toBeVisible();
+});
