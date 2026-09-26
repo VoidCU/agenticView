@@ -23,6 +23,7 @@ import { MAX_DEPEN_PER_FRAME, PLAYER_RADIUS, type Solid } from "./colliders";
 import { chairField } from "./pushChairs";
 import { usePositions } from "../state/positions";
 import { bonk, BONK_RANGE } from "../state/bonk";
+import { openOverlayFromWalk } from "../state/pointerLock";
 
 // ---- Constants ----
 
@@ -65,6 +66,16 @@ export function WalkModeController({
   onBoard,
 }: WalkControllerProps) {
   const { camera, gl, scene } = useThree();
+  const setEvents = useThree((s) => s.setEvents);
+
+  // While walking, the crosshair raycast below is the only way to interact with the scene. R3F's own
+  // pointer events would fire at the (frozen, off-centre) mouse position: a click that only meant to
+  // capture the mouse used to open a whiteboard's board BEHIND a pointer lock that then kept the
+  // cursor hidden and spun the camera behind the board.
+  useEffect(() => {
+    setEvents({ enabled: false });
+    return () => setEvents({ enabled: true });
+  }, [setEvents]);
   const setWalking = useWalk((s) => s.setWalking);
   const select = useStore((s) => s.select);
 
@@ -98,10 +109,11 @@ export function WalkModeController({
 
   // ---- Test hook: teleport walk position ----
   useEffect(() => {
-    const teleport = (x: number, z: number, yaw = 0) => {
+    const teleport = (x: number, z: number, yaw = 0, pitch = 0) => {
       st.current.x = x;
       st.current.z = z;
       st.current.yaw = yaw;
+      st.current.pitch = clampPitch(pitch);
       st.current.vx = 0;
       st.current.vz = 0;
     };
@@ -127,6 +139,15 @@ export function WalkModeController({
     // Lock acquired.
     const onLockChange = () => {
       st.current.locked = isLocked(canvas);
+      useWalk.getState().setLocked(st.current.locked);
+      // Re-locked by a click on the view (after a chat or board freed the mouse): walking resumes.
+      if (st.current.locked && document.querySelector('[role="dialog"]')) {
+        // The lock landed while an overlay is open (a late grant): hand the mouse straight back.
+        useWalk.getState().setPaused(true);
+        document.exitPointerLock();
+        return;
+      }
+      if (st.current.locked && useWalk.getState().paused) useWalk.getState().setPaused(false);
       if (!st.current.locked && !useWalk.getState().paused) {
         // Pointer lock released (user pressed Esc, or browser forced unlock).
         setWalking(false);
@@ -191,6 +212,8 @@ export function WalkModeController({
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.08);
     const cur = st.current;
+    // An overlay freed the mouse: drop held keys so the walker does not keep drifting behind it.
+    if (keys.current.size > 0 && useWalk.getState().paused) keys.current.clear();
 
     // Movement direction from keys.
     const { dx, dz } = walkDelta(keys.current, cur.yaw);
@@ -261,7 +284,11 @@ export function WalkModeController({
       const hits = raycaster.current.intersectObjects(scene.children, true);
       const action = walkInteraction(hits, camera.position, scratch.current.world, intent);
       if (action?.kind === "bonk") bonk(action.id);
-      else if (action?.kind === "select") select(action.id);
+      else if (action?.kind === "select") {
+        // The agent's chat opens beside the view: free the mouse so it can be used (click the view to walk on).
+        openOverlayFromWalk();
+        select(action.id);
+      }
       else if (action?.kind === "board") onBoard?.(action.id);
       else if (action?.kind === "challenge") window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: action.id } }));
     }

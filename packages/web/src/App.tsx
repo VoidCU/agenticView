@@ -17,6 +17,7 @@ import { ProjectsPanel } from "./hub/HubView";
 import { CloseIcon } from "./hud/ui";
 import { useDesktopNotifications } from "./hud/useNotifications";
 import { useWalk } from "./state/walk";
+import { useWalkOverlay } from "./state/pointerLock";
 import { useMapOpen } from "./state/map";
 import { ScoreboardModal } from "./hud/ScoreboardModal";
 import { PlayRpsModal } from "./hud/PlayRpsModal";
@@ -27,6 +28,7 @@ type Tab = "office" | "tasks" | "chat";
 
 /** Keyboard shortcuts hint overlay */
 function ShortcutsHint({ onClose }: { onClose: () => void }) {
+  useWalkOverlay();
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape" || e.key === "?") onClose(); };
     window.addEventListener("keydown", h);
@@ -107,7 +109,7 @@ export function App() {
   const world = useStore((s) => s.world);
   const connected = useStore((s) => s.connected);
   const selected = useStore((s) => s.selectedAgentId);
-  const { walking, setWalking } = useWalk();
+  const { walking, setWalking, locked: walkLocked } = useWalk();
   const { toggle: toggleMap } = useMapOpen();
 
   // Desktop notifications
@@ -254,7 +256,7 @@ export function App() {
         )}
         {walking && (
           <div className="walk-hint" role="status" aria-live="polite" data-testid="walk-hint">
-            E bonk · G play rock-paper-scissors · Esc exit
+            {!walkLocked && <strong className="walk-hint-relock">Click the view to look around · </strong>}E slap · H say hi · G play RPS · Esc exit
           </div>
         )}
         {walking && <div className="walk-crosshair" aria-hidden="true" />}

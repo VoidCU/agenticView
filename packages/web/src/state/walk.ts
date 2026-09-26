@@ -11,6 +11,9 @@ export interface WalkState {
   exitAt?: { x: number; z: number; at: number };
   /** A modal (e.g. RPS) took the mouse: pointer lock was released on purpose, so stay in walk mode. */
   paused: boolean;
+  /** The walk camera currently holds pointer lock (mouse-look on). False before the first click and after an overlay freed the mouse. */
+  locked: boolean;
+  setLocked(b: boolean): void;
   setPaused(b: boolean): void;
   setWalking(b: boolean): void;
   setExitAt(p: { x: number; z: number }): void;
@@ -20,7 +23,9 @@ export const useWalk = create<WalkState>((set) => ({
   walking: false,
   exitAt: undefined,
   paused: false,
+  locked: false,
+  setLocked: (locked) => set({ locked }),
   setPaused: (paused) => set({ paused }),
-  setWalking: (walking) => set(walking ? { walking } : { walking, paused: false }),
+  setWalking: (walking) => set(walking ? { walking } : { walking, paused: false, locked: false }),
   setExitAt: (p) => set({ exitAt: { ...p, at: Date.now() } }),
 }));
