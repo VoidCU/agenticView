@@ -562,6 +562,11 @@ h3 {
 .task-waiting .task-status { color: var(--waiting); }
 .task-failed .task-status { color: var(--error); }
 .task-done .task-status { color: var(--editing); }
+.task-solved .task-status { color: var(--editing); }
+.task-resolution { margin-top: 3px; font-size: 12px; }
+.task-resolution-link { background: none; border: none; padding: 0; color: var(--editing); cursor: pointer; font-size: 12px; text-decoration: underline; }
+.task-resolution-link:hover { opacity: .8; }
+.task-resolution-note { color: var(--editing); }
 
 .task-group {
   margin-bottom: 12px;
@@ -2285,6 +2290,23 @@ h3 {
 .kanban-progress-bar { position: relative; height: 6px; background: #0001; border-radius: 3px; overflow: hidden; display: flex; align-items: center; }
 .kanban-progress-fill { height: 100%; background: #5b9fd8; border-radius: 3px; transition: width .3s; }
 .kanban-progress-label { position: absolute; right: 4px; font-size: 9px; opacity: .7; line-height: 1; }
+
+/* Solved failure badge on kanban cards */
+.kanban-solved-badge { display: inline-block; font-size: 9px; font-weight: 700; background: #3ddc97; color: #1a4731; border-radius: 3px; padding: 1px 5px; margin-left: 4px; vertical-align: middle; flex-shrink: 0; text-transform: uppercase; letter-spacing: .04em; }
+.kanban-status-solved { background: #b5e5cb !important; color: #1a4731 !important; }
+.kanban-drawer-resolution { border-left: 3px solid #3ddc97; padding-left: 8px; }
+.kanban-resolution-bytask { font-size: 12px; margin: 0 0 4px; color: var(--muted); }
+.kanban-resolution-note { font-size: 13px; margin: 0; white-space: pre-wrap; }
+
+/* Mark solved inline form */
+.kanban-mark-solved-form { border-top: 1px solid #8882; margin-top: 14px; padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.kanban-mark-solved-form h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; opacity: .6; margin: 0; }
+.kanban-form-label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.kanban-form-select { background: var(--input); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; font-size: 12px; color: inherit; }
+.kanban-form-textarea { background: var(--input); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; font-size: 12px; color: inherit; resize: vertical; font-family: inherit; }
+.kanban-form-textarea:focus, .kanban-form-select:focus { outline: 2px solid var(--blue); border-color: var(--blue); }
+.kanban-form-error { font-size: 11px; color: var(--error); margin: 0; }
+.kanban-form-actions { display: flex; gap: 8px; }
 
 /* Mini delegated task cards */
 .kanban-mini-cards { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }

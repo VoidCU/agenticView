@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { Agent, Space, Task } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import {
@@ -152,6 +152,75 @@ function basename(path: string): string {
 
 // ── Detail drawer ─────────────────────────────────────────────────────────────
 
+function MarkSolvedForm({ taskId, onDone }: { taskId: string; onDone: () => void }) {
+  const tasks = useStore((s) => s.tasks);
+  const doneTasks = Object.values(tasks).filter((t) => t.id !== taskId && t.status === "done");
+  const [byTaskId, setByTaskId] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!note.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ byTaskId: byTaskId || undefined, note: note.trim() }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      onDone();
+    } catch (err: unknown) {
+      setError(String(err));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="kanban-mark-solved-form" onSubmit={handleSubmit} data-testid="mark-solved-form">
+      <h4>Mark as solved</h4>
+      {doneTasks.length > 0 && (
+        <label className="kanban-form-label">
+          Fixed by task (optional)
+          <select
+            value={byTaskId}
+            onChange={(e) => setByTaskId(e.target.value)}
+            className="kanban-form-select"
+            aria-label="Fixed by task"
+          >
+            <option value="">None</option>
+            {doneTasks.map((t) => (
+              <option key={t.id} value={t.id}>{t.title}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      <label className="kanban-form-label">
+        Note
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="kanban-form-textarea"
+          placeholder="Why is this failure resolved?"
+          rows={3}
+          required
+          aria-label="Resolution note"
+        />
+      </label>
+      {error && <p className="kanban-form-error">{error}</p>}
+      <div className="kanban-form-actions">
+        <button type="submit" className="btn btn-primary btn-xs" disabled={saving || !note.trim()}>
+          {saving ? "Saving…" : "Mark solved"}
+        </button>
+        <button type="button" className="btn btn-ghost btn-xs" onClick={onDone}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
 function TaskDrawer({
   task,
   agent,
@@ -166,8 +235,15 @@ function TaskDrawer({
   onOpenInbox?: () => void;
 }) {
   const sessions = useStore((s) => s.sessions);
+  const tasks = useStore((s) => s.tasks);
   const drawerRef = useRef<HTMLDivElement>(null);
   const [showChanges, setShowChanges] = useState(false);
+  const [showMarkSolved, setShowMarkSolved] = useState(false);
+
+  const isSolved = task.status === "failed" && !!task.resolution;
+  const resolutionTask = isSolved && task.resolution?.byTaskId
+    ? (tasks[task.resolution.byTaskId] ?? null)
+    : null;
 
   // Focus first interactive element on mount
   useEffect(() => {
@@ -182,14 +258,22 @@ function TaskDrawer({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        if (showChanges) setShowChanges(false); else onClose();
+        if (showChanges) setShowChanges(false);
+        else if (showMarkSolved) setShowMarkSolved(false);
+        else onClose();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose, showChanges]);
+  }, [onClose, showChanges, showMarkSolved]);
 
   const session = agent ? sessions.find((s) => s.agentIds.includes(agent.id)) : undefined;
+
+  const handleUndoSolved = async () => {
+    try {
+      await fetch(`/api/tasks/${encodeURIComponent(task.id)}/resolve`, { method: "DELETE" });
+    } catch { /* WS update will arrive */ }
+  };
 
   return (
     <div className="kanban-drawer" ref={drawerRef} role="complementary" aria-label="Task detail" data-testid="task-drawer">
@@ -201,8 +285,8 @@ function TaskDrawer({
       </div>
       <div className="kanban-drawer-body">
         {/* Status badge */}
-        <span className={`kanban-status-badge board-${boardColumn(task) ?? "queued"}`}>
-          {BOARD_LABELS[boardColumn(task) ?? "queued"]}
+        <span className={`kanban-status-badge board-${boardColumn(task) ?? "queued"}${isSolved ? " kanban-status-solved" : ""}`}>
+          {isSolved ? "Solved" : BOARD_LABELS[boardColumn(task) ?? "queued"]}
         </span>
 
         {/* Agent info */}
@@ -246,6 +330,19 @@ function TaskDrawer({
           </div>
         )}
 
+        {/* Resolution */}
+        {isSolved && task.resolution && (
+          <div className="kanban-drawer-section kanban-drawer-resolution" data-testid="resolution-section">
+            <h4>Resolution</h4>
+            {resolutionTask && (
+              <p className="kanban-resolution-bytask">
+                Fixed by: <strong>{resolutionTask.title}</strong>
+              </p>
+            )}
+            <p className="kanban-resolution-note">{task.resolution.note}</p>
+          </div>
+        )}
+
         {/* Files changed */}
         {filesChanged.length > 0 && (
           <div className="kanban-drawer-section">
@@ -282,7 +379,29 @@ function TaskDrawer({
               Changes
             </button>
           )}
-          {task.status === "failed" && <RetryButton taskId={task.id} taskTitle={task.title} />}
+          {task.status === "failed" && !isSolved && (
+            <RetryButton taskId={task.id} taskTitle={task.title} />
+          )}
+          {task.status === "failed" && !isSolved && !showMarkSolved && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={() => setShowMarkSolved(true)}
+              data-testid="mark-solved-btn"
+            >
+              Mark solved…
+            </button>
+          )}
+          {isSolved && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={handleUndoSolved}
+              data-testid="undo-solved-btn"
+            >
+              Undo solved
+            </button>
+          )}
           {task.status === "waiting" && onOpenInbox && (
             <button
               type="button"
@@ -296,6 +415,11 @@ function TaskDrawer({
             </button>
           )}
         </div>
+
+        {/* Mark solved form */}
+        {showMarkSolved && (
+          <MarkSolvedForm taskId={task.id} onDone={() => setShowMarkSolved(false)} />
+        )}
 
         {/* Changes panel */}
         {showChanges && (
@@ -323,18 +447,22 @@ function KanbanCard({
 }) {
   const feed = useStore((s) => s.feed[task.assigneeId] ?? NO_FEED);
   const progress = latestProgress(task.id, feed);
+  const isSolved = task.status === "failed" && !!task.resolution;
+  const col = boardColumn(task) ?? "queued";
+  const label = isSolved ? "Solved" : BOARD_LABELS[col];
 
   return (
     <button
       type="button"
-      className={`kanban-card board-${boardColumn(task) ?? "queued"}${selected ? " kanban-card-selected" : ""}`}
+      className={`kanban-card board-${col}${selected ? " kanban-card-selected" : ""}${isSolved ? " kanban-card-solved" : ""}`}
       onClick={onClick}
-      aria-label={`${task.title}, ${BOARD_LABELS[boardColumn(task) ?? "queued"]}`}
+      aria-label={`${task.title}, ${label}`}
       aria-pressed={selected}
       data-testid="kanban-card"
     >
       <div className="kanban-card-top">
         <span className="kanban-card-title">{task.title}</span>
+        {isSolved && <span className="kanban-solved-badge" aria-label="Solved">solved</span>}
         {agent && (
           <span className="kanban-avatar kanban-avatar-sm" style={{ background: agent.appearance.color }} aria-hidden="true" title={agent.name}>
             {agentInitial(agent.name)}
