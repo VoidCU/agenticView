@@ -89,7 +89,7 @@ describe("move distribution", () => {
     expect(counts.scissors).toBeGreaterThan(min);
 
     svc.stop();
-  }), 60000);
+  }, 60000);
 });
 
 // ─── Scoring / persistence ──────────────────────────────────────────────────
@@ -406,5 +406,5 @@ describe("game.result broadcast", () => {
       expect(res).toBeGreaterThan(idx);
     }
     svc.stop();
-  }), 60000);
+  }, 60000);
 });

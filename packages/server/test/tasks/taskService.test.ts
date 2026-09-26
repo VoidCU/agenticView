@@ -47,7 +47,7 @@ describe("TaskService", () => {
     expect(got.log).toHaveLength(500);
     expect(got.log[0]!.text).toBe("line 10");
     expect(got.log[499]!.text).toBe("line 509");
-  }), 60000);
+  }, 60000);
 
   it("ignores log for an unknown task", async () => {
     const s = new TaskService(join(dir, "tasks"), onChange);
