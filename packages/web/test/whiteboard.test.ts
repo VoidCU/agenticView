@@ -40,7 +40,7 @@ describe("whiteboard overlay pose mirrors kit.ts", () => {
     furnishSpace(kit, space, { seats: new Map() });
     const boards = kit.items.filter((it) => it.mat === "whiteboard");
     expect(boards).toHaveLength(1);
-    const b = boards[0];
+    const b = boards[0]!;
     const pose = whiteboardPose(space);
     expect(pose.yaw).toBeCloseTo(b.yaw, 9);
     expect(b.rx).toBe(0);
