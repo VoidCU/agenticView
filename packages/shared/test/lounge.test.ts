@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { HEX_R, HEX_APOTHEM } from "../src/office.js";
-import { loungeSpots, assignLoungeSpots, rpsFacing } from "../src/lounge.js";
+import {
+  loungeSpots,
+  assignLoungeSpots,
+  rpsFacing,
+  nearbyRpsPairs,
+  loungeAssignmentFor,
+  RPS_PAIR_MAX_DIST,
+  type LoungeFurniturePiece,
+} from "../src/lounge.js";
 
 // ── loungeSpots ───────────────────────────────────────────────────────────────
 
@@ -84,6 +92,139 @@ describe("loungeSpots", () => {
     expect(kinds.has("armchair")).toBe(true);
     expect(kinds.has("counter")).toBe(true);
     expect(kinds.has("beanbag")).toBe(true);
+  });
+});
+
+// ── Geometry: footprints, overlaps, walls, walkway, game spots ────────────────
+
+type P = { x: number; z: number };
+function corners(f: LoungeFurniturePiece): P[] {
+  const c = Math.cos(f.yaw);
+  const s = Math.sin(f.yaw);
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz]) => {
+    const lx = (sx! * f.w) / 2;
+    const lz = (sz! * f.d) / 2;
+    return { x: f.x + lx * c + lz * s, z: f.z - lx * s + lz * c };
+  });
+}
+function inside(f: LoungeFurniturePiece, p: P): boolean {
+  const dx = p.x - f.x;
+  const dz = p.z - f.z;
+  const lx = dx * Math.cos(f.yaw) - dz * Math.sin(f.yaw);
+  const lz = dx * Math.sin(f.yaw) + dz * Math.cos(f.yaw);
+  return Math.abs(lx) <= f.w / 2 && Math.abs(lz) <= f.d / 2;
+}
+function overlaps(a: LoungeFurniturePiece, b: LoungeFurniturePiece): boolean {
+  const ca = corners(a);
+  const cb = corners(b);
+  const axes = [a.yaw, a.yaw + Math.PI / 2, b.yaw, b.yaw + Math.PI / 2].map((t) => ({ x: Math.cos(t), z: -Math.sin(t) }));
+  for (const ax of axes) {
+    const pa = ca.map((p) => p.x * ax.x + p.z * ax.z);
+    const pb = cb.map((p) => p.x * ax.x + p.z * ax.z);
+    if (Math.max(...pa) < Math.min(...pb) || Math.max(...pb) < Math.min(...pa)) return false;
+  }
+  return true;
+}
+function segDist(p: P, a: P, b: P): number {
+  const vx = b.x - a.x, vz = b.z - a.z;
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.z - a.z) * vz) / (vx * vx + vz * vz)));
+  return Math.hypot(p.x - a.x - t * vx, p.z - a.z - t * vz);
+}
+
+describe.each([HEX_R, 14])("lounge geometry (hexR=%s)", (R) => {
+  const layout = loungeSpots(0, R);
+  const apothem = (R * Math.sqrt(3)) / 2;
+
+  it("every furniture piece has a footprint and lies inside the hex walls", () => {
+    for (const f of layout.furniture) {
+      expect(f.w).toBeGreaterThan(0);
+      expect(f.d).toBeGreaterThan(0);
+      for (const p of corners(f)) {
+        for (let k = 0; k < 6; k++) {
+          const t = ((30 + 60 * k) * Math.PI) / 180;
+          expect(p.x * Math.cos(t) + p.z * Math.sin(t)).toBeLessThan(apothem);
+        }
+      }
+    }
+  });
+
+  it("no two furniture pieces overlap, nor the coffee table", () => {
+    const fs = layout.furniture;
+    for (let i = 0; i < fs.length; i++) {
+      for (let j = i + 1; j < fs.length; j++) expect(overlaps(fs[i]!, fs[j]!), `${fs[i]!.id} vs ${fs[j]!.id}`).toBe(false);
+      for (const p of corners(fs[i]!)) expect(Math.hypot(p.x, p.z)).toBeGreaterThan(layout.tableR);
+    }
+  });
+
+  it.each([0, 1, 2, 3, 4, 5])("walkway from doorway %s to the centre is clear (0.9 half-width)", (k) => {
+    const t = layout.doorAngle + (k * Math.PI) / 3;
+    const door = { x: apothem * Math.cos(t), z: apothem * Math.sin(t) };
+    const centre = { x: 0, z: 0 };
+    for (const f of layout.furniture) {
+      for (const p of corners(f)) expect(segDist(p, door, centre)).toBeGreaterThan(0.9);
+      expect(segDist(f, door, centre)).toBeGreaterThan(0.9);
+    }
+  });
+
+  it("every seat spot sits inside its piece's footprint, faces the table", () => {
+    const seats = layout.spots.filter((s) => s.kind === "sofa" || s.kind === "armchair" || s.kind === "beanbag");
+    for (const s of seats) {
+      const host = layout.furniture.filter((f) => f.kind === s.kind && inside(f, s));
+      expect(host.length, s.id).toBe(1);
+      expect(s.seatHeight).toBeGreaterThan(0);
+      // Facing points toward the table: dot(facing, -pos) > 0.
+      expect(s.facing.x * -s.x + s.facing.z * -s.z).toBeGreaterThan(0);
+    }
+  });
+
+  it("standing/counter spots are not inside any furniture", () => {
+    for (const s of layout.spots.filter((sp) => sp.pose === "stand")) {
+      for (const f of layout.furniture) expect(inside(f, s), `${s.id} in ${f.id}`).toBe(false);
+    }
+  });
+
+  it("game spots are facing pairs across the table, clear of furniture", () => {
+    expect(layout.gameSpots.length).toBeGreaterThan(0);
+    for (const [a, b] of layout.gameSpots) {
+      for (const g of [a, b]) {
+        expect(Math.hypot(g.x, g.z)).toBeGreaterThan(layout.tableR);
+        for (const f of layout.furniture) expect(inside(f, g)).toBe(false);
+      }
+      expect(Math.sin(a.yaw) * (b.x - a.x) + Math.cos(a.yaw) * (b.z - a.z)).toBeGreaterThan(0);
+      expect(Math.sin(b.yaw) * (a.x - b.x) + Math.cos(b.yaw) * (a.z - b.z)).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("nearbyRpsPairs", () => {
+  const { spots } = loungeSpots(0);
+  const byId = new Map(spots.map((s) => [s.id, s]));
+
+  it("pairs only agents within 1.5 units, never far ones", () => {
+    const ids = Array.from({ length: 16 }, (_, i) => `w${String(i).padStart(2, "0")}`);
+    const assignment = assignLoungeSpots(ids, spots);
+    const pairs = nearbyRpsPairs(assignment, spots);
+    expect(pairs.length).toBeGreaterThan(0);
+    const paired = new Set(pairs.map((p) => `${p.a}|${p.b}`));
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = byId.get(assignment[ids[i]!]!)!;
+        const b = byId.get(assignment[ids[j]!]!)!;
+        const d = Math.hypot(a.x - b.x, a.z - b.z);
+        expect(paired.has(`${ids[i]}|${ids[j]}`)).toBe(d <= RPS_PAIR_MAX_DIST);
+      }
+    }
+  });
+
+  it("returns no pairs for two far-apart agents", () => {
+    expect(nearbyRpsPairs({ a: "sofa-0", b: "counter-2" }, spots)).toEqual([]);
+    expect(nearbyRpsPairs({ a: "sofa-0", b: "sofa-1" }, spots)).toHaveLength(1);
+  });
+
+  it("loungeAssignmentFor matches the scene's call", () => {
+    const { layout, assignment } = loungeAssignmentFor(["x", "y"]);
+    expect(layout.spots.length).toBe(loungeSpots(16).spots.length);
+    expect(assignment).toEqual({ x: "sofa-0", y: "sofa-1" });
   });
 });
 

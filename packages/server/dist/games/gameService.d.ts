@@ -13,7 +13,11 @@ export interface GameServiceDeps {
     randomInt?: (max: number) => number;
     /** Override for tests: returns auto-match delay ms (default 45000-120000). */
     randomDelay?: () => number;
+    /** Walk-and-play time between game.started and game.result (default MATCH_PLAY_MS). */
+    matchPlayMs?: number;
 }
+/** Time the scene gets to walk both players to the game spots and play. */
+export declare const MATCH_PLAY_MS = 6000;
 export declare class GameService {
     private readonly deps;
     private readonly gamesFile;
@@ -24,6 +28,8 @@ export declare class GameService {
     /** In-progress user best-of-3 matches, keyed by matchId. */
     private readonly userMatches;
     private autoMatchTimer;
+    /** Last lounge spot assignment, so spots stay stable like in the scene. */
+    private loungePrior;
     private stopped;
     constructor(deps: GameServiceDeps);
     private getNow;

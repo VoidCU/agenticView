@@ -6,6 +6,7 @@ import { GameService, rpsResult } from "../../src/games/gameService.js";
 import { EventBus } from "../../src/events/bus.js";
 import { AgentRegistry } from "../../src/agents/registry.js";
 import type { Move, ServerMessage } from "@agenticview/shared";
+import { loungeAssignmentFor, RPS_PAIR_MAX_DIST } from "@agenticview/shared";
 
 let home: string;
 let proj: string;
@@ -31,6 +32,7 @@ function makeService(overrides: { randomInt?: (max: number) => number; randomDel
     root: proj,
     bus,
     registry,
+    matchPlayMs: 0,
     ...overrides,
   });
   return { svc, bus, msgs, registry };
@@ -370,6 +372,38 @@ describe("game.result broadcast", () => {
     if (result?.type === "game.result") {
       expect(result.match.kind).toBe("agents");
       expect(result.match.players).toHaveLength(2);
+    }
+    svc.stop();
+  });
+
+  it("emits game.started with game spots and seats before game.result, and only pairs neighbours", async () => {
+    const { svc, msgs, registry } = makeService({ randomDelay: () => 999_999_999 });
+    svc.start();
+    const ids: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const ag = await registry.create({ name: `P${i}`, specialty: "x", role: "worker", scope: "project" });
+      await registry.update(ag.id, { lounging: true });
+      ids.push(ag.id);
+    }
+    const { layout, assignment } = loungeAssignmentFor(ids);
+    const byId = new Map(layout.spots.map((sp) => [sp.id, sp]));
+    for (let n = 0; n < 40; n++) await svc.runAutoMatch();
+
+    const started = msgs.filter((m) => m.type === "game.started");
+    const results = msgs.filter((m) => m.type === "game.result");
+    expect(started.length).toBe(40);
+    expect(results.length).toBe(40);
+    const gameIds = new Set(layout.gameSpots.flat().map((g) => g.id));
+    for (const m of started) {
+      if (m.type !== "game.started") continue;
+      expect(gameIds.has(m.spotIds[0]) && gameIds.has(m.spotIds[1])).toBe(true);
+      expect(m.seatSpotIds).toEqual([assignment[m.players[0]], assignment[m.players[1]]]);
+      const sa = byId.get(m.seatSpotIds[0])!;
+      const sb = byId.get(m.seatSpotIds[1])!;
+      expect(Math.hypot(sa.x - sb.x, sa.z - sb.z)).toBeLessThanOrEqual(RPS_PAIR_MAX_DIST);
+      const idx = msgs.indexOf(m);
+      const res = msgs.findIndex((r, i) => i > idx && r.type === "game.result" && r.match.id === m.matchId);
+      expect(res).toBeGreaterThan(idx);
     }
     svc.stop();
   });

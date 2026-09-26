@@ -583,6 +583,20 @@ export type ServerMessage = ({
         agent: number;
     };
     done: boolean;
+}
+/**
+ * Agent auto-match about to be played. The scene walks `players[i]` from its
+ * lounge seat `seatSpotIds[i]` to game spot `spotIds[i]` (LoungeLayout.gameSpots ids,
+ * local to the lounge room), they play for `playMs`, then `game.result` with the same
+ * match id follows and both return to their seats.
+ */
+ | {
+    type: "game.started";
+    matchId: string;
+    players: [string, string];
+    spotIds: [string, string];
+    seatSpotIds: [string, string];
+    playMs: number;
 } | {
     type: "game.result";
     match: Match;
