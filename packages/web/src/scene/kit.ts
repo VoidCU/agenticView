@@ -5,6 +5,7 @@ import {
   seatLocal,
   yawToward,
   managerHome,
+  loungeSpots,
   type Space,
 } from "@agenticview/shared";
 
@@ -333,7 +334,8 @@ function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
   plant(corner(k, 120, 4.7), 1.2, 6);
 }
 
-function loungeRoom(k: Kit, s: Space, occ: RoomOccupancy) {
+function loungeRoom(k: Kit, _s: Space, _occ: RoomOccupancy) {
+  // Rugs and coffee table (center)
   k.cyl("rugLounge", [0, 0.006, 0], 5.4, 0.012);
   k.cyl("rugLounge2", [0, 0.01, 0], 4.2, 0.012);
   k.cyl("rugLounge", [0, 0.014, 0], 3.8, 0.012);
@@ -341,17 +343,28 @@ function loungeRoom(k: Kit, s: Space, occ: RoomOccupancy) {
   k.cyl("deskLeg", [0, 0.19, 0], 0.16, 0.36);
   k.cyl("pot", [0.15, 0.46, 0.1], 0.1, 0.12, { color: "#e4b04a" });
   k.box("book", [-0.2, 0.42, -0.1], [0.3, 0.03, 0.22], { yaw: 0.4, color: "#3f6f8f" });
-  for (let seat = 0; seat < s.seats; seat++) {
-    if (occ.seats.has(seat)) continue;
-    const l = seatLocal("lounge", seat);
-    k.frame(l.x, l.z, l.yaw).rbox(seat % 2 ? "sofa2" : "sofa", [0, 0.2, 0], [0.62, 0.4, 0.62]);
+
+  // Place furniture using the shared loungeSpots layout so positions match agent spots exactly.
+  const { furniture } = loungeSpots();
+  for (const fp of furniture) {
+    const fk = k.frame(fp.x, fp.z, fp.yaw);
+    if (fp.kind === "sofa") {
+      // 3-seat sofa: use wider width (2.6) to span the three spot positions (spaced 0.9 apart)
+      sofa(fk, fp.seats >= 3 ? "sofa" : "sofa2", fp.seats >= 3 ? 2.6 : 1.9);
+    } else if (fp.kind === "armchair") {
+      armchair(fk, "sofa2");
+    } else if (fp.kind === "counter") {
+      kitchenette(fk);
+    } else if (fp.kind === "beanbag") {
+      // Low floor cushion
+      fk.rbox("cushion", [0, 0.12, 0], [0.64, 0.22, 0.64]);
+    }
   }
-  sofa(corner(k, 180, 4.5), "sofa");
-  kitchenette(corner(k, 240, 4.6));
-  sofa(corner(k, 300, 4.5), "sofa2");
+
+  // Corner decor: lamp and plants
   floorLamp(corner(k, 120, 4.6));
   plant(corner(k, 0, 4.7), 1.2, 7);
-  armchair(corner(k, 60, 4.5), "sofa");
+  plant(corner(k, 60, 4.8), 0.8, 8);
 }
 
 /** Every piece of furniture in one space, in world coordinates. */

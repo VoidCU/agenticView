@@ -2,9 +2,9 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
+import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, loungeSpots, assignLoungeSpots, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
-import { useLoungeBreaks, agentRevivePhase, breakSeat } from "./breaks";
+import { useLoungeBreaks, agentRevivePhase } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
 import { layoutFor, seatKey, type OfficeLayout } from "./layout";
 import { Robot, type RobotTarget } from "./Robot";
@@ -646,43 +646,42 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const { visiting, onArrive } = useManagerVisits(tasks, agents, manager?.id);
   const onGrab = useDragToReassign(layout);
   const mountedAt = useRef(Date.now());
+  const prevLoungeAssign = useRef<Record<string, string>>({});
 
   const targets = useMemo(() => {
     const out: Record<string, RobotTarget> = {};
     for (const [id, pose] of Object.entries(layout.poses)) out[id] = pose;
 
-    // Lounge breaks: send idle workers to their lounge seat
+    // Lounge: collect all agents going to the lounge, assign spots via loungeSpots().
     if (lounge) {
-      for (const [id, brk] of loungeBreaks) {
-        const seat = seatPose(lounge, brk.seat);
-        out[id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
-      }
-    }
-
-    // Server-sent lounging (agent.lounging === true): agent goes to a lounge seat.
-    // Use a different seed than breaks to spread them across seats.
-    if (lounge) {
-      const takenSeats = new Set([...loungeBreaks.values()].map((b) => b.seat));
+      // Build the full list of agents heading to the lounge (breaks, server-side lounging, fainted).
+      const loungeAgentIds: string[] = [];
+      for (const [id] of loungeBreaks) loungeAgentIds.push(id);
       for (const a of list) {
-        if (!a.lounging || a.role !== "worker") continue;
-        if (out[a.id] && loungeBreaks.has(a.id)) continue; // already placed by break logic
-        const preferred = breakSeat(a.id, "server-lounge");
-        let seatIdx = preferred;
-        for (let i = 1; takenSeats.has(seatIdx) && i < 4; i++) seatIdx = (preferred + i) % 4;
-        takenSeats.add(seatIdx);
-        const seat = seatPose(lounge, seatIdx);
-        out[a.id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
-      }
-    }
-
-    // Fainting: send fainted/reviving workers to the lounge
-    if (lounge) {
-      for (const a of list) {
+        if (loungeBreaks.has(a.id)) continue; // already included above
+        if (a.lounging && a.role === "worker") { loungeAgentIds.push(a.id); continue; }
         const phase = agentRevivePhase(a);
-        if (phase === "fainted" || phase === "reviving") {
-          const seatIdx = Math.abs(a.id.split("").reduce((n, c) => n * 31 + c.charCodeAt(0), 7)) % 4;
-          const seat = seatPose(lounge, seatIdx);
-          out[a.id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
+        if (phase === "fainted" || phase === "reviving") loungeAgentIds.push(a.id);
+      }
+
+      if (loungeAgentIds.length > 0) {
+        // Get a layout large enough for overflow agents (waiting spots outside door).
+        const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2));
+        // Stable assignment: agents keep their spot unless it's gone.
+        const assignment = assignLoungeSpots(loungeAgentIds, loungeLayout.spots, prevLoungeAssign.current);
+        prevLoungeAssign.current = assignment;
+
+        for (const agentId of loungeAgentIds) {
+          const spotId = assignment[agentId];
+          if (!spotId) continue;
+          const spot = loungeLayout.spots.find((sp) => sp.id === spotId);
+          if (!spot) continue;
+          out[agentId] = {
+            x: lounge.x + spot.x,
+            z: lounge.z + spot.z,
+            yaw: spot.yaw,
+            yOffset: spot.seatHeight,
+          };
         }
       }
     }

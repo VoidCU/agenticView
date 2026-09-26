@@ -15,6 +15,7 @@ import {
   seatLocal,
   yawToward,
   managerHome,
+  loungeSpots,
   type Space,
 } from "@agenticview/shared";
 import type { OfficeLayout } from "./layout";
@@ -179,25 +180,31 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
       }
 
       case "lounge": {
-        // Coffee table (radius 0.75)
+        // Coffee table at center (radius 0.75)
         solids.push({ kind: "table", x: s.x, z: s.z, r: 0.75 });
-        for (let seat = 0; seat < s.seats; seat++) {
-          const l = seatLocal("lounge", seat);
-          solids.push({ kind: "chair", x: s.x + l.x, z: s.z + l.z, w: 0.62, d: 0.62, rot: l.yaw });
+
+        // Use loungeSpots furniture for collision obstacles (matches kit.ts rendering exactly)
+        const { furniture: loungeFurniture } = loungeSpots();
+        for (const fp of loungeFurniture) {
+          const wx = s.x + fp.x;
+          const wz = s.z + fp.z;
+          if (fp.kind === "sofa") {
+            const sofaW = fp.seats >= 3 ? 2.6 : 1.9;
+            solids.push({ kind: "sofa", x: wx, z: wz, w: sofaW, d: 0.86, rot: fp.yaw });
+          } else if (fp.kind === "armchair") {
+            solids.push({ kind: "sofa", x: wx, z: wz, w: 0.95, d: 0.86, rot: fp.yaw });
+          } else if (fp.kind === "counter") {
+            solids.push({ kind: "credenza", x: wx, z: wz, w: 1.94, d: 0.66, rot: fp.yaw });
+          } else if (fp.kind === "beanbag") {
+            solids.push({ kind: "chair", x: wx, z: wz, w: 0.64, d: 0.64, rot: fp.yaw });
+          }
         }
 
-        const s180 = cornerPose(s, 180, 4.5);
-        solids.push({ kind: "sofa", x: s180.x, z: s180.z, w: 1.9, d: 0.86, rot: s180.rot });
-        const k240 = cornerPose(s, 240, 4.6);
-        solids.push({ kind: "credenza", x: k240.x, z: k240.z, w: 1.94, d: 0.66, rot: k240.rot });
-        const s300 = cornerPose(s, 300, 4.5);
-        solids.push({ kind: "sofa", x: s300.x, z: s300.z, w: 1.9, d: 0.86, rot: s300.rot });
+        // Corner decor plants
         const l120 = cornerPose(s, 120, 4.6);
         solids.push({ kind: "plant", x: l120.x, z: l120.z, r: 0.25 });
         const p0 = cornerPose(s, 0, 4.7);
         solids.push({ kind: "plant", x: p0.x, z: p0.z, r: 0.6 });
-        const a60 = cornerPose(s, 60, 4.5);
-        solids.push({ kind: "sofa", x: a60.x, z: a60.z, w: 0.95, d: 0.86, rot: a60.rot });
         break;
       }
     }

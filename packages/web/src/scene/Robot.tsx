@@ -14,6 +14,8 @@ import { useHudPrefs } from "../state/hudPrefs";
 
 export interface RobotTarget extends Point {
   yaw: number;
+  /** Vertical Y offset (world units) for seated or floor-level poses. 0 = standing on floor. */
+  yOffset?: number;
 }
 
 interface Props {
@@ -259,7 +261,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
       st.yaw += angleDiff(desired, st.yaw) * Math.min(1, dt * TURN_RATE);
     }
     livePositions.set(agent.id, { x: st.x, z: st.z });
-    g.position.set(st.x, st.lift, st.z);
+    g.position.set(st.x, st.lift + (target.yOffset ?? 0), st.z);
 
     // Walk cycle: feet step, arms swing, the body bobs and leans into the stride.
     const w = st.walk;
