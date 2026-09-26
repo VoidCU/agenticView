@@ -11,6 +11,8 @@ export const ProjectSettingsSchema = z.object({
   loungeBreaks: z.boolean().default(true),
   /** When true (default), create_agent without an explicit provider/model picks the cheapest available choice. */
   preferCheapModels: z.boolean().default(true),
+  /** Minutes a worker must be idle before it enters the lounge (0 = off). */
+  idleLoungeMinutes: z.number().int().min(0).max(60).default(3),
 });
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 

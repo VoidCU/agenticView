@@ -4,6 +4,7 @@ import { EffortSchema } from "./models.js";
 import { ProjectSettingsSchema, KnownProjectSchema } from "./settings.js";
 import { AgentSessionSchema, MAX_SESSION_CAPACITY } from "./session.js";
 import { LimitInfoSchema } from "./limits.js";
+import { MoveSchema } from "./games.js";
 export const ProviderStatusSchema = z.object({
     provider: ProviderSchema,
     ok: z.boolean(),
@@ -77,6 +78,12 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
         answer: z.enum(["accept", "choose", "dismiss"]),
         provider: ProviderSchema.optional(),
         model: z.string().optional(),
+    }),
+    z.object({
+        type: z.literal("game.play"),
+        opponentId: z.string(),
+        matchId: z.string().optional(),
+        move: MoveSchema,
     }),
 ]);
 export const SpaceNamesSchema = z.record(z.string(), z.string().trim().min(1).max(40));

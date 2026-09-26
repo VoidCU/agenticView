@@ -1,4 +1,4 @@
-export type IdPrefix = "w" | "m" | "t" | "r" | "u" | "lim";
+export type IdPrefix = "w" | "m" | "t" | "r" | "u" | "lim" | "gm";
 
 /** Isomorphic id generator: `<prefix>_<8 hex>` using Web Crypto (Node 22 and browsers). */
 export function newId(prefix: IdPrefix): string {

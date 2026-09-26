@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { ClientMessageSchema, defaultAgent, type ClientMessage, type ServerMessage } from "@agenticview/shared";
+import { ClientMessageSchema, defaultAgent, type ClientMessage, type ServerMessage, type GameRoundResult } from "@agenticview/shared";
 import type { World } from "../world.js";
 import { tokenOf } from "./auth.js";
 import { stat } from "node:fs/promises";
@@ -109,6 +109,20 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
     case "limit.respond":
       orchestrator.respondLimit(msg.id, msg.answer, msg.provider, msg.model);
       return;
+    case "game.play": {
+      const result = await world.playUser(msg.opponentId, msg.matchId, msg.move);
+      send({
+        type: "game.round",
+        matchId: result.matchId,
+        round: result.round,
+        userMove: result.userMove,
+        agentMove: result.agentMove,
+        winner: result.winner,
+        score: result.score,
+        done: result.done,
+      });
+      return;
+    }
   }
 }
 

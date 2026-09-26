@@ -15,6 +15,7 @@ export declare const ProjectSettingsSchema: z.ZodObject<{
     }>>;
     loungeBreaks: z.ZodDefault<z.ZodBoolean>;
     preferCheapModels: z.ZodDefault<z.ZodBoolean>;
+    idleLoungeMinutes: z.ZodDefault<z.ZodNumber>;
 }, z.core.$strip>;
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 export declare const KnownProjectSchema: z.ZodObject<{

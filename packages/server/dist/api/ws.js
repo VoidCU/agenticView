@@ -110,6 +110,20 @@ async function handle(msg, world, opts, send) {
         case "limit.respond":
             orchestrator.respondLimit(msg.id, msg.answer, msg.provider, msg.model);
             return;
+        case "game.play": {
+            const result = await world.playUser(msg.opponentId, msg.matchId, msg.move);
+            send({
+                type: "game.round",
+                matchId: result.matchId,
+                round: result.round,
+                userMove: result.userMove,
+                agentMove: result.agentMove,
+                winner: result.winner,
+                score: result.score,
+                done: result.done,
+            });
+            return;
+        }
     }
 }
 /** Attach the /ws endpoint: token-guarded upgrade, snapshot on connect, bus fan-out, command dispatch. */

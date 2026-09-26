@@ -11,6 +11,7 @@ import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.j
 import { isTerminal } from "@agenticview/shared";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
 import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
+import { GameService } from "./games/gameService.js";
 // ── Explicit-room helpers (used by addRoom / removeRoom) ─────────────────────
 /** Build a Space[] from an explicit room list, assigning seats by kind. */
 function buildSpacesFromExplicit(rooms) {
@@ -186,6 +187,22 @@ export async function createWorld(ref, opts) {
     };
     const usageTracker = new UsageTracker(root);
     await usageTracker.init();
+    const gameService = new GameService({ root, bus: opts.bus, registry });
+    gameService.start();
+    // Idle lounge tracking: watch task state transitions on the bus.
+    opts.bus.on((m) => {
+        if (m.type === "task.updated") {
+            const { task } = m;
+            const agentId = task.assigneeId;
+            const s = settings();
+            if (task.status === "running" || task.status === "assigned") {
+                void gameService.onAgentBusy(agentId);
+            }
+            else if (isTerminal(task.status)) {
+                gameService.onAgentIdle(agentId, s.idleLoungeMinutes);
+            }
+        }
+    });
     let emitProvidersFn = async () => undefined;
     const deps = {
         world: ref,
@@ -363,6 +380,7 @@ export async function createWorld(ref, opts) {
             settings: projectSettings,
             sessions: await sessions(),
             ringCount: rc,
+            games: await gameService.getGames(),
             ...orchestrator.pending(),
         };
     };
@@ -499,6 +517,8 @@ export async function createWorld(ref, opts) {
         },
         getLimits: async () => usageTracker.getLimitsReport(),
         getUsage: async () => usageTracker.getUsageReport(),
+        getGames: () => gameService.getGames(),
+        playUser: (opponentId, matchId, move) => gameService.playUser(opponentId, matchId, move),
         updateSettings: async (patch) => {
             projectSettings = ProjectSettingsSchema.parse({ ...projectSettings, ...patch });
             if (ref.kind === "project")

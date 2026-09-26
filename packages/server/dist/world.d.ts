@@ -1,4 +1,4 @@
-import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type Effort, type LimitsReport, type UsageReport } from "@agenticview/shared";
+import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type Effort, type LimitsReport, type UsageReport, type GamesData } from "@agenticview/shared";
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { type SyncResult } from "./agents/subagents.js";
@@ -56,6 +56,8 @@ export interface World {
     unresolveTask: (taskId: string) => Promise<Task>;
     getLimits: () => Promise<LimitsReport>;
     getUsage: () => Promise<UsageReport>;
+    getGames: () => Promise<GamesData>;
+    playUser: (opponentId: string, matchId: string | undefined, move: import("@agenticview/shared").Move) => Promise<import("@agenticview/shared").GameRoundResult>;
     /**
      * Add a new room to the office layout.
      * Returns {ok:true, spaceId} on success or {ok:false, message} when the office is full.
