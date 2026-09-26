@@ -124,7 +124,7 @@ export function WalkModeController({
     // Lock acquired.
     const onLockChange = () => {
       st.current.locked = isLocked(canvas);
-      if (!st.current.locked) {
+      if (!st.current.locked && !useWalk.getState().paused) {
         // Pointer lock released (user pressed Esc, or browser forced unlock).
         setWalking(false);
       }

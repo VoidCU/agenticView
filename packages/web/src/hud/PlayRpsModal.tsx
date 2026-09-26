@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../state/store";
+import { borrowPointerFromWalk } from "../state/pointerLock";
 import { Modal } from "./ui";
 import type { Move, GameRoundResult } from "@agenticview/shared";
 
-const MOVES: { key: Move; emoji: string; label: string }[] = [
-  { key: "rock", emoji: "✊", label: "Rock" },
-  { key: "paper", emoji: "✋", label: "Paper" },
-  { key: "scissors", emoji: "✌", label: "Scissors" },
+const MOVES: { key: Move; emoji: string; label: string; hint: string }[] = [
+  { key: "rock", emoji: "✊", label: "Rock", hint: "1/R" },
+  { key: "paper", emoji: "✋", label: "Paper", hint: "2/P" },
+  { key: "scissors", emoji: "✌", label: "Scissors", hint: "3/S" },
 ];
+
+const KEY_MOVES: Record<string, Move> = { "1": "rock", r: "rock", "2": "paper", p: "paper", "3": "scissors", s: "scissors" };
+
+/** Keyboard play: 1/2/3 or R/P/S (any case, top row or numpad) pick a move. Exported for tests. */
+export function rpsMoveForKey(key: string, code = ""): Move | undefined {
+  const numpad = /^Numpad([123])$/.exec(code);
+  return KEY_MOVES[numpad ? numpad[1]! : key.toLowerCase()];
+}
 
 const RESULT_LABEL: Record<"you" | "agent" | "draw", string> = {
   you: "You win!",
@@ -80,6 +89,29 @@ export function PlayRpsModal({ agentId, onClose }: { agentId: string; onClose: (
     lastRoundRef.current = undefined;
   };
 
+  // Walk mode holds pointer lock, which makes the buttons unclickable: take the mouse back while open.
+  useEffect(() => borrowPointerFromWalk(), []);
+
+  // Keyboard play (works in walk and overview): 1/2/3 or R/P/S, Enter = play again when finished.
+  const keyActions = useRef({ play, playAgain, done });
+  keyActions.current = { play, playAgain, done };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+      const a = keyActions.current;
+      if (e.key === "Enter" && a.done) { e.preventDefault(); a.playAgain(); return; }
+      const move = rpsMoveForKey(e.key, e.code);
+      if (!move) return;
+      e.preventDefault();
+      e.stopPropagation();
+      a.play(move);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const roundsNeeded = 2; // need 2 wins for best-of-3
 
   return (
@@ -142,7 +174,7 @@ export function PlayRpsModal({ agentId, onClose }: { agentId: string; onClose: (
         {/* Move buttons */}
         {!done && (
           <div className="rps-move-btns" role="group" aria-label="Choose your move">
-            {MOVES.map(({ key, emoji, label }) => (
+            {MOVES.map(({ key, emoji, label, hint }) => (
               <button
                 key={key}
                 type="button"
@@ -150,10 +182,11 @@ export function PlayRpsModal({ agentId, onClose }: { agentId: string; onClose: (
                 onClick={() => play(key)}
                 disabled={waiting}
                 aria-label={label}
+                aria-keyshortcuts={hint.split("/").join(" ")}
                 data-testid={`rps-move-${key}`}
               >
                 <span className="rps-btn-emoji">{emoji}</span>
-                <span className="rps-btn-label">{label}</span>
+                <span className="rps-btn-label">{label} <kbd className="rps-btn-key">[{hint}]</kbd></span>
               </button>
             ))}
           </div>

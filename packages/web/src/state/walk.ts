@@ -9,6 +9,9 @@ export interface WalkState {
   walking: boolean;
   /** Where the player stood when walk mode last ended (the 'You' robot walks home from here). */
   exitAt?: { x: number; z: number; at: number };
+  /** A modal (e.g. RPS) took the mouse: pointer lock was released on purpose, so stay in walk mode. */
+  paused: boolean;
+  setPaused(b: boolean): void;
   setWalking(b: boolean): void;
   setExitAt(p: { x: number; z: number }): void;
 }
@@ -16,6 +19,8 @@ export interface WalkState {
 export const useWalk = create<WalkState>((set) => ({
   walking: false,
   exitAt: undefined,
-  setWalking: (walking) => set({ walking }),
+  paused: false,
+  setPaused: (paused) => set({ paused }),
+  setWalking: (walking) => set(walking ? { walking } : { walking, paused: false }),
   setExitAt: (p) => set({ exitAt: { ...p, at: Date.now() } }),
 }));

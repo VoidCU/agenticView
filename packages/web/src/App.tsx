@@ -173,7 +173,7 @@ export function App() {
         target.isContentEditable
       ) return;
       // Skip when a modal/overlay is open for M and V (avoid accidental toggle)
-      const modalOpen = !!modal || showShortcuts;
+      const modalOpen = !!modal || showShortcuts || !!playAgentId;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       switch (e.key) {
         case "i":
@@ -213,7 +213,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [modal, showShortcuts, walking, setWalking, toggleMap]);
+  }, [modal, showShortcuts, playAgentId, walking, setWalking, toggleMap]);
 
   if (!hasToken) return <NoToken />;
 
