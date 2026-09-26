@@ -16,8 +16,12 @@ import { Timeline } from "./hud/Timeline";
 import { ProjectsPanel } from "./hub/HubView";
 import { CloseIcon } from "./hud/ui";
 import { useDesktopNotifications } from "./hud/useNotifications";
+import { useWalk } from "./state/walk";
+import { useMapOpen } from "./state/map";
+import { ScoreboardModal } from "./hud/ScoreboardModal";
+import { PlayRpsModal } from "./hud/PlayRpsModal";
 
-type Modal = "create" | "settings" | "sessions" | "inbox" | undefined;
+type Modal = "create" | "settings" | "sessions" | "inbox" | "scoreboard" | undefined;
 type Tab = "office" | "tasks" | "chat";
 
 /** Keyboard shortcuts hint overlay */
@@ -38,6 +42,8 @@ function ShortcutsHint({ onClose }: { onClose: () => void }) {
           <dt><kbd>I</kbd></dt><dd>Open Inbox</dd>
           <dt><kbd>T</kbd></dt><dd>Toggle Tasks panel</dd>
           <dt><kbd>L</kbd></dt><dd>Toggle Timeline</dd>
+          <dt><kbd>V</kbd></dt><dd>Toggle Walk mode</dd>
+          <dt><kbd>M</kbd></dt><dd>Toggle Mini-map</dd>
           <dt><kbd>?</kbd></dt><dd>Show this help</dd>
           <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Focus room (scene)</dd>
           <dt><kbd>Esc</kbd></dt><dd>Deselect / close</dd>
@@ -87,6 +93,7 @@ function NoToken() {
 
 export function App() {
   const [modal, setModal] = useState<Modal>();
+  const [playAgentId, setPlayAgentId] = useState<string | undefined>();
   const [tab, setTab] = useState<Tab>("office");
   const [showTimeline, setShowTimeline] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -95,6 +102,8 @@ export function App() {
   const world = useStore((s) => s.world);
   const connected = useStore((s) => s.connected);
   const selected = useStore((s) => s.selectedAgentId);
+  const { walking, setWalking } = useWalk();
+  const { toggle: toggleMap } = useMapOpen();
 
   // Desktop notifications
   useDesktopNotifications();
@@ -120,7 +129,25 @@ export function App() {
     return () => window.removeEventListener("agenticview:open-inbox", handleOpenInbox);
   }, []);
 
-  // Keyboard shortcuts: I=Inbox, T=Tasks, L=Timeline, ?=help
+  useEffect(() => {
+    const handleOpenScoreboard = () => setModal("scoreboard");
+    window.addEventListener("agenticview:open-scoreboard", handleOpenScoreboard);
+    return () => window.removeEventListener("agenticview:open-scoreboard", handleOpenScoreboard);
+  }, []);
+
+  useEffect(() => {
+    const handlePlayRps = (e: Event) => {
+      const agentId = (e as CustomEvent<{ agentId: string }>).detail?.agentId;
+      if (agentId) {
+        setPlayAgentId(agentId);
+        setModal(undefined);
+      }
+    };
+    window.addEventListener("agenticview:play-rps", handlePlayRps);
+    return () => window.removeEventListener("agenticview:play-rps", handlePlayRps);
+  }, []);
+
+  // Keyboard shortcuts: I=Inbox, T=Tasks, L=Timeline, V=Walk, M=MiniMap, ?=help
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Skip when typing in inputs/textareas/selects or contenteditable
@@ -131,6 +158,8 @@ export function App() {
         target.tagName === "SELECT" ||
         target.isContentEditable
       ) return;
+      // Skip when a modal/overlay is open for M and V (avoid accidental toggle)
+      const modalOpen = !!modal || showShortcuts;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       switch (e.key) {
         case "i":
@@ -148,6 +177,20 @@ export function App() {
           e.preventDefault();
           setShowTimeline((v) => !v);
           break;
+        case "v":
+        case "V":
+          if (!modalOpen) {
+            e.preventDefault();
+            setWalking(!walking);
+          }
+          break;
+        case "m":
+        case "M":
+          if (!modalOpen) {
+            e.preventDefault();
+            toggleMap();
+          }
+          break;
         case "?":
           e.preventDefault();
           setShowShortcuts((v) => !v);
@@ -156,7 +199,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [modal, showShortcuts, walking, setWalking, toggleMap]);
 
   if (!hasToken) return <NoToken />;
 
@@ -172,6 +215,8 @@ export function App() {
           onInbox={() => setModal("inbox")}
           onTimeline={() => setShowTimeline((v) => !v)}
           timelineActive={showTimeline}
+          onWalk={() => setWalking(!walking)}
+          walkActive={walking}
         />
         <div className="hud-left">
           {hub && <ProjectsPanel />}
@@ -183,6 +228,11 @@ export function App() {
         {showTimeline && (
           <div className="hud-timeline">
             <Timeline onClose={() => setShowTimeline(false)} />
+          </div>
+        )}
+        {walking && (
+          <div className="walk-hint" role="status" aria-live="polite" data-testid="walk-hint">
+            WASD to move · drag to look · Esc to exit
           </div>
         )}
         <div className="hud-bottom">
@@ -213,6 +263,18 @@ export function App() {
       {modal === "settings" && <SettingsModal onClose={() => setModal(undefined)} />}
       {modal === "sessions" && <SessionsModal onClose={() => setModal(undefined)} />}
       {modal === "inbox" && <Inbox onClose={() => setModal(undefined)} />}
+      {modal === "scoreboard" && (
+        <ScoreboardModal
+          onClose={() => setModal(undefined)}
+          onPlay={(agentId) => { setModal(undefined); setPlayAgentId(agentId); }}
+        />
+      )}
+      {playAgentId && (
+        <PlayRpsModal
+          agentId={playAgentId}
+          onClose={() => setPlayAgentId(undefined)}
+        />
+      )}
       {showShortcuts && <ShortcutsHint onClose={() => setShowShortcuts(false)} />}
     </div>
   );

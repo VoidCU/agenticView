@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Agent, BrainstormParticipant, ClientMessage, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
+import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
 export type Bubble = { text: string; until: number };
@@ -56,6 +56,12 @@ export interface Store {
   opened?: string;
   /** Active brainstorm session (Nova pushes brainstorm.updated when one starts/ends). */
   brainstorm?: BrainstormState;
+  /** Rock-paper-scissors leaderboard and recent matches from the last snapshot / game.result update. */
+  games?: GamesData;
+  /** Latest finished match for RPS animation overlay (~3 s display). */
+  gameAnimation?: { match: Match; at: number };
+  /** Latest round result (user vs agent best-of-3). */
+  lastGameRound?: GameRoundResult;
 
   apply(msg: ServerMessage): void;
   select(id?: string): void;
@@ -123,6 +129,9 @@ const initial = () => ({
   errors: [] as UiError[],
   opened: undefined as string | undefined,
   brainstorm: undefined as BrainstormState | undefined,
+  games: undefined as GamesData | undefined,
+  gameAnimation: undefined as { match: Match; at: number } | undefined,
+  lastGameRound: undefined as GameRoundResult | undefined,
 });
 
 export const useStore = create<Store>()((set, get) => ({
@@ -150,6 +159,7 @@ export const useStore = create<Store>()((set, get) => ({
           permissions: (msg.permissions ?? []).map((p) => ({ id: p.id, agentId: p.agentId, taskId: p.taskId, tool: p.tool, input: p.input })),
           questions: (msg.questions ?? []).map((q) => ({ id: q.id, agentId: q.agentId, taskId: q.taskId, question: q.question })),
           limits: (msg.limits ?? []).map((l) => ({ id: l.id, agentId: l.agentId, taskId: l.taskId, suggested: l.suggested, resetAt: l.resetAt, reason: l.reason })),
+          games: msg.games,
         });
         return;
       }
@@ -239,6 +249,49 @@ export const useStore = create<Store>()((set, get) => ({
             participants: m.participants.map((p: BrainstormParticipant) => p.name),
             answers: m.participants.filter((p: BrainstormParticipant) => p.answer != null).map((p: BrainstormParticipant) => p.answer!),
             complete: m.complete,
+          },
+        });
+        return;
+      }
+      case "game.result": {
+        const match = msg.match;
+        set((s) => {
+          const existing = s.games;
+          const newRecent = [match, ...(existing?.recent ?? [])].slice(0, 50);
+          // Update leaderboard win/loss/draw counts in-memory
+          let leaderboard = existing?.leaderboard ?? [];
+          const updatePlayer = (playerId: string, win: boolean, draw: boolean) => {
+            const idx = leaderboard.findIndex((p) => p.playerId === playerId);
+            if (idx < 0) return;
+            leaderboard = [...leaderboard];
+            const p = leaderboard[idx]!;
+            leaderboard[idx] = {
+              ...p,
+              wins: p.wins + (win ? 1 : 0),
+              losses: p.losses + (!win && !draw ? 1 : 0),
+              draws: p.draws + (draw ? 1 : 0),
+            };
+          };
+          const isDraw = match.winner === null;
+          updatePlayer(match.players[0], match.winner === match.players[0], isDraw);
+          updatePlayer(match.players[1], match.winner === match.players[1], isDraw);
+          return {
+            games: { leaderboard, recent: newRecent },
+            gameAnimation: { match, at: now },
+          };
+        });
+        return;
+      }
+      case "game.round": {
+        set({
+          lastGameRound: {
+            matchId: msg.matchId,
+            round: msg.round,
+            userMove: msg.userMove,
+            agentMove: msg.agentMove,
+            winner: msg.winner,
+            score: msg.score,
+            done: msg.done,
           },
         });
         return;

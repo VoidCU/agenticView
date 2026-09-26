@@ -17,6 +17,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [max, setMax] = useState(settings?.maxConcurrentRuns ?? 3);
   const [limitPolicy, setLimitPolicy] = useState<"ask" | "auto">(settings?.limitPolicy ?? "ask");
   const [loungeBreaks, setLoungeBreaks] = useState(settings?.loungeBreaks ?? true);
+  const [idleLoungeMinutes, setIdleLoungeMinutes] = useState(settings?.idleLoungeMinutes ?? 3);
   const [preferCheapModels, setPreferCheapModels] = useState(settings?.preferCheapModels ?? false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => getNotificationPref());
   const [tab, setTab] = useState<"settings" | "usage">("settings");
@@ -32,6 +33,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         maxConcurrentRuns: Math.min(10, Math.max(1, Math.round(max))),
         limitPolicy,
         loungeBreaks,
+        idleLoungeMinutes: Math.min(60, Math.max(0, Math.round(idleLoungeMinutes))),
         preferCheapModels,
       },
     });
@@ -101,6 +103,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 checked={loungeBreaks}
                 onChange={(e) => setLoungeBreaks(e.target.checked)}
                 aria-label="Lounge breaks"
+              />
+            </label>
+            <label className="field">
+              <span>Go to the lounge after idle (minutes, 0 = off)</span>
+              <input
+                type="number"
+                min={0}
+                max={60}
+                value={idleLoungeMinutes}
+                onChange={(e) => setIdleLoungeMinutes(Number(e.target.value))}
+                aria-label="Idle lounge minutes"
               />
             </label>
             <label className="field field-toggle">
