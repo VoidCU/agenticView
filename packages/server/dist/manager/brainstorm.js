@@ -154,7 +154,6 @@ export function brainstormTool(ctx) {
                 sessions.set(topic, entry);
             }
             const session = await entry;
-            await ctx.setWaiting(ctx.requestTask.id, true);
             let timer;
             try {
                 const seconds = z.number().int().min(1).max(30).parse(args.maxWaitSeconds ?? 20);
@@ -175,7 +174,6 @@ export function brainstormTool(ctx) {
             }
             finally {
                 clearTimeout(timer);
-                await ctx.setWaiting(ctx.requestTask.id, false);
             }
         },
     };
