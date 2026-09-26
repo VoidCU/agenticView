@@ -10,7 +10,7 @@
 import { useMemo, useRef, useCallback, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { seatLocal } from "@agenticview/shared";
+import { POD_SEATS, seatLocal } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import type { FeedItem } from "../state/store";
 
@@ -20,15 +20,21 @@ const MAX_DIST = 24;
 const REFRESH_MS = 2000;
 /** Max concurrent monitor updates per frame batch. */
 const MAX_UPDATES_PER_FRAME = 3;
+/** Distance at which the monitor switches to the high-detail (near) mode. */
+const NEAR_DIST = 8;
 
 // ---- shared geometry (created once) ----
 const monitorGeo = new THREE.PlaneGeometry(0.61, 0.35);
 
 // ---- texture paint helpers ----
 
-const FONT = "12px 'Cascadia Code', 'Fira Code', 'Consolas', monospace";
+const FONT_FAR = "12px 'Cascadia Code', 'Fira Code', 'Consolas', monospace";
+const FONT_NEAR = "18px 'Cascadia Code', 'Fira Code', 'Consolas', monospace";
 const CANVAS_W = 512;
 const CANVAS_H = 294;
+
+// Legacy alias for the far font (used in tests and paintLog below).
+const FONT = FONT_FAR;
 
 function getFeedLines(feed: FeedItem[] | undefined, limit = 6): string[] {
   if (!feed || feed.length === 0) return [];
@@ -94,6 +100,39 @@ function paintLog(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContex
   ctx.globalAlpha = 0.7;
   ctx.fillStyle = "#4caf50";
   ctx.fillText("●  live", 6, CANVAS_H - 12);
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * High-detail paint for monitors visible at walking distance.
+ * Uses a larger font and shows fewer but more readable lines.
+ */
+function paintLogNear(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, lines: string[]) {
+  ctx.fillStyle = "#080b12";
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.font = FONT_NEAR;
+  ctx.textBaseline = "top";
+  // Larger font → fewer lines (max 4).
+  const nearLines = lines.slice(-4);
+  const lineH = 62;
+  const startY = CANVAS_H - nearLines.length * lineH - 10;
+  nearLines.forEach((line, i) => {
+    const y = startY + i * lineH;
+    const fade = 0.5 + (i / Math.max(1, nearLines.length - 1)) * 0.5;
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = "#a8e6f0";
+    // Truncate line to fit wider font in canvas width.
+    const truncated = line.length > 40 ? line.slice(0, 39) + "…" : line;
+    ctx.fillText(truncated, 10, y + 4);
+  });
+  ctx.globalAlpha = 1;
+  // Status bar
+  ctx.fillStyle = "#1a2433";
+  ctx.fillRect(0, CANVAS_H - 18, CANVAS_W, 18);
+  ctx.font = "13px sans-serif";
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = "#4caf50";
+  ctx.fillText("●  live", 8, CANVAS_H - 15);
   ctx.globalAlpha = 1;
 }
 
@@ -174,7 +213,10 @@ export function DeskMonitor({ agentId, position, yaw }: DeskMonitorProps) {
     const dist = camera.position.distanceTo(posVec);
     // Skip update when far away
     if (dist > MAX_DIST) return;
-    if (now - lastUpdate.current < REFRESH_MS) return;
+    // Near monitors refresh more often for readability.
+    const isNear = dist < NEAR_DIST;
+    const refreshMs = isNear ? REFRESH_MS / 2 : REFRESH_MS;
+    if (now - lastUpdate.current < refreshMs) return;
     lastUpdate.current = now;
     const canvas = getTextureCanvas(tex);
     if (!canvas) return;
@@ -183,8 +225,12 @@ export function DeskMonitor({ agentId, position, yaw }: DeskMonitorProps) {
     if (isIdleRef.current) {
       paintIdle(ctx, clock.getElapsedTime());
     } else {
-      const lines = getFeedLines(feedRef.current, 6);
-      paintLog(ctx, lines);
+      const lines = getFeedLines(feedRef.current, isNear ? 8 : 6);
+      if (isNear) {
+        paintLogNear(ctx, lines);
+      } else {
+        paintLog(ctx, lines);
+      }
     }
     tex.needsUpdate = true;
   });
@@ -205,6 +251,7 @@ export function DeskMonitor({ agentId, position, yaw }: DeskMonitorProps) {
       onClick={handleClick}
       onPointerOver={() => (document.body.style.cursor = "pointer")}
       onPointerOut={() => (document.body.style.cursor = "")}
+      userData={{ agentId }}
     >
       <meshBasicMaterial map={tex} toneMapped={false} />
     </mesh>
@@ -219,7 +266,7 @@ export function monitorPoseForSeat(
   spaceZ: number,
   seat: number,
 ): { position: [number, number, number]; yaw: number } | null {
-  if (seat >= 4) return null; // only pod seats 0-3
+  if (seat >= POD_SEATS || seat < 0) return null;
   const l = seatLocal("pod", seat);
   // The desk is offset from the seat along the seat's forward axis
   const fwdZ = Math.cos(l.yaw); // 1 for yaw=0, -1 for yaw=π
@@ -258,4 +305,4 @@ export function AllDeskMonitors({ desks }: AllDeskMonitorsProps) {
 }
 
 // Re-export for throttle testing
-export { getFeedLines, MAX_DIST, REFRESH_MS, MAX_UPDATES_PER_FRAME };
+export { getFeedLines, MAX_DIST, REFRESH_MS, MAX_UPDATES_PER_FRAME, NEAR_DIST };

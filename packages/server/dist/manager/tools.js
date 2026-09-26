@@ -22,6 +22,8 @@ export function workerSystemPrompt(agent, projectPath) {
         `You are ${agent.name}, a ${agent.specialty || "generalist"} engineer on an AgenticView team.`,
         `You are working inside the project at ${projectPath}. Only change files under that path.`,
         "Make the requested change, run the relevant tests or checks when they exist, and finish with a two-sentence summary of what you changed and how you verified it.",
+        // Commits land in the user's repository under the user's name, whatever tool the agent runs in.
+        "If you commit, write plain commit messages: never add Co-Authored-By, \"Generated with\" or any other AI attribution lines, and never change git config or the author.",
         agent.description ? `About you: ${agent.description}` : "",
         agent.systemPrompt,
     ]
@@ -214,8 +216,9 @@ export function managerTools(ctx) {
                 }
                 const line = (t) => ({ id: t.id, title: t.title, status: t.status, result: t.result, error: t.error });
                 const maxMs = typeof args.maxWaitSeconds === "number" ? args.maxWaitSeconds * 1000 : undefined;
-                await ctx.setWaiting(ctx.requestTask.id, true);
-                try {
+                // A Manager waiting on its own workers is still working: the request stays "running". Only a
+                // question or permission for the user moves it to "waiting" (shown as "Waiting on you").
+                {
                     const all = Promise.all(ids.map((id) => ctx.awaitTask(id)));
                     if (maxMs === undefined)
                         return JSON.stringify((await all).map(line), null, 2);
@@ -233,9 +236,6 @@ export function managerTools(ctx) {
                         finished: finished.map(line),
                         message: `Not finished after ${Math.round(maxMs / 1000)}s. Call await_tasks again with taskIds ${JSON.stringify(running.map((t) => t.id))} to keep waiting.`,
                     }, null, 2);
-                }
-                finally {
-                    await ctx.setWaiting(ctx.requestTask.id, false);
                 }
             },
         },

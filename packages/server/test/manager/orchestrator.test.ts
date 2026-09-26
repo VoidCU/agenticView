@@ -81,7 +81,7 @@ describe("Orchestrator", () => {
     const child = (await ctx.tasks.list()).find((x) => x.kind === "work")!;
     expect(child).toMatchObject({ status: "done", result: "vars added", parentId: t.id, createdBy: m.id, projectPath: proj });
     expect(ctx.msgs.filter((x) => x.type === "run.event").length).toBeGreaterThan(0);
-    expect(ctx.msgs.some((x) => x.type === "task.updated" && x.task.id === t.id && x.task.status === "waiting")).toBe(true);
+    expect(ctx.msgs.some((x) => x.type === "task.updated" && x.task.id === t.id && x.task.status === "waiting")).toBe(false); // waiting on workers is not waiting on the user
     expect(ctx.msgs.some((x) => x.type === "agent.updated" && x.agent.name === "Nova")).toBe(true);
     const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
     expect(nova.stats).toMatchObject({ xp: 10, tasksDone: 1 });
@@ -619,7 +619,7 @@ it("settings defaults: limitPolicy=ask, loungeBreaks=true", async () => {
 });
 
 describe("pickReviveProvider", () => {
-  it("prefers claude-session → antigravity → codex, skips the failed provider", async () => {
+  it("follows failoverOrder (default: codex → antigravity → claude-session), skips the failed provider", async () => {
     const make = (p: Provider): Runtime => ({ provider: p, check: async () => ({ provider: p, ok: true }), run: async () => ({ text: "", stopReason: "done" }) });
     const runtimes = new Map<Provider, Runtime>([
       ["claude", make("claude")],
@@ -629,9 +629,15 @@ describe("pickReviveProvider", () => {
       ["gemini", make("gemini")],
     ]);
     const ctx = await setup(async function* () {}, { runtimes });
-    expect(ctx.orch.pickReviveProvider("claude")?.provider).toBe("claude-session");
-    expect(ctx.orch.pickReviveProvider("claude-session")?.provider).toBe("antigravity");
+    // Default failoverOrder is ['codex', 'antigravity', 'claude-session'].
+    // 'claude' is not in the list → iterate from the start → picks 'codex'.
+    expect(ctx.orch.pickReviveProvider("claude")?.provider).toBe("codex");
+    // 'codex' is index 0 → next is 'antigravity'.
+    expect(ctx.orch.pickReviveProvider("codex")?.provider).toBe("antigravity");
+    // 'antigravity' is index 1 → next is 'claude-session'.
     expect(ctx.orch.pickReviveProvider("antigravity")?.provider).toBe("claude-session");
+    // 'claude-session' is last → wraps to 'codex'.
+    expect(ctx.orch.pickReviveProvider("claude-session")?.provider).toBe("codex");
   });
 
   it("skips providers with active limits", async () => {

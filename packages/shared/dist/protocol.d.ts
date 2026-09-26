@@ -378,6 +378,13 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             auto: "auto";
             ask: "ask";
         }>>>;
+        failoverOrder: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            antigravity: "antigravity";
+            gemini: "gemini";
+        }>>>>;
         loungeBreaks: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
         preferCheapModels: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
         idleLoungeMinutes: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;

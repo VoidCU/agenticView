@@ -19,6 +19,7 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
   const agent = useStore((s) => s.agents[task.assigneeId]);
   const tasks = useStore((s) => s.tasks);
   const questions = useStore((s) => s.questions);
+  const permissions = useStore((s) => s.permissions);
   const send = useStore((s) => s.send);
   const select = useStore((s) => s.select);
   const selected = useStore((s) => s.selectedAgentId === task.assigneeId);
@@ -26,9 +27,12 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
   const cancellable = ["queued", "assigned", "running", "waiting"].includes(task.status);
   const isSolved = task.status === "failed" && !!task.resolution;
   const retryable = task.status === "failed" && !isSolved;
-  const isWaiting = task.status === "waiting";
-  const question = isWaiting ? questions.find((q) => q.taskId === task.id) : undefined;
-  const questionText = question?.question || (task.description && task.description !== task.title ? task.description : undefined);
+  // Only a real pending question or permission counts as "waiting on you": the Inbox shows exactly those,
+  // so the button and text appear only when there is something there to answer.
+  const question = task.status === "waiting" ? questions.find((q) => q.taskId === task.id) : undefined;
+  const permission = task.status === "waiting" ? permissions.find((p) => p.taskId === task.id) : undefined;
+  const isWaiting = !!(question || permission);
+  const questionText = question?.question ?? (permission ? `Allow ${permission.tool}?` : undefined);
 
   const resolutionTask = isSolved && task.resolution?.byTaskId
     ? (tasks[task.resolution.byTaskId] ?? null)
@@ -285,6 +289,12 @@ export function TaskBoard({
   }, [filteredTasks, agents]);
 
   const total = filteredTasks.length;
+
+  if (collapsed) {
+    return <button type="button" className="panel-tab panel-tab-tasks" aria-expanded="false" onClick={() => setCollapsed(false)} aria-label={`Expand tasks, ${total} total`}>
+      Tasks <span className="panel-count">{total}</span> <span aria-hidden="true">›</span>
+    </button>;
+  }
 
   const collapseAll = () => setCollapsedGroups(new Set(agentGroups.map(([id]) => id)));
   const expandAll = () => setCollapsedGroups(new Set());

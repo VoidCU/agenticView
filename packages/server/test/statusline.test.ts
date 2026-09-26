@@ -233,3 +233,39 @@ describe("SessionStart record-root", () => {
     }
   });
 });
+
+describe("SessionStart record-root version guard", () => {
+  it("never lets an older plugin folder replace a newer recorded one, but replaces a missing one", async () => {
+    const { mkdtemp, mkdir: mk, writeFile: wf, readFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const base = await mkdtemp(join(tmpdir(), "av-root-guard-"));
+    const home = join(base, "home");
+    const plugin = async (v: string) => {
+      const dir = join(base, `plugin-${v}`);
+      await mk(join(dir, ".claude-plugin"), { recursive: true });
+      await wf(join(dir, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "agenticview", version: v }));
+      return dir;
+    };
+    const saved = process.env.AGENTICVIEW_HOME;
+    process.env.AGENTICVIEW_HOME = home;
+    try {
+      const { recordRoot, compareVersions } = (await import(pathToFileURL(join(repoRoot, "hooks", "hook.mjs")).href)) as {
+        recordRoot: (p: string) => Promise<void>;
+        compareVersions: (a: string, b: string) => number;
+      };
+      expect(compareVersions("0.2.10", "0.2.9")).toBeGreaterThan(0);
+      const newer = await plugin("0.2.9");
+      const older = await plugin("0.2.5");
+      await recordRoot(newer);
+      await recordRoot(older);
+      expect(await readFile(join(home, "plugin-root"), "utf8")).toBe(newer);
+      await rm(newer, { recursive: true, force: true });
+      await recordRoot(older);
+      expect(await readFile(join(home, "plugin-root"), "utf8")).toBe(older);
+    } finally {
+      if (saved === undefined) delete process.env.AGENTICVIEW_HOME;
+      else process.env.AGENTICVIEW_HOME = saved;
+      await rm(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+});

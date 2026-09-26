@@ -22,6 +22,7 @@ function ensureScreenshotsDir() {
   mkdirSync("e2e/screenshots", { recursive: true });
 }
 
+
 /** Seed the manager so the task board has some content. */
 async function seedTasks(page: import("@playwright/test").Page) {
   const bar = page.getByLabel(/Tell Atlas what to build/);
@@ -34,6 +35,30 @@ async function seedTasks(page: import("@playwright/test").Page) {
   ).toBeVisible({ timeout: 30_000 });
 }
 
+async function seedLoungeAgent(page: import("@playwright/test").Page, name: string) {
+  await page.getByRole("button", { name: /new agent/i }).first().click();
+  await page.getByPlaceholder("Nova").fill(name);
+  await page.getByRole("button", { name: "Create agent" }).click();
+  const robotTag = page.locator(".tag-name", { hasText: name });
+  await expect(robotTag).toBeVisible({ timeout: 15_000 });
+  const agentId = await page.locator(".minimap-agent").evaluateAll((nodes, agentName) => {
+    const target = nodes.find((node) => node.getAttribute("aria-label")?.startsWith(`${agentName},`));
+    return target?.getAttribute("data-agent-id") ?? null;
+  }, name);
+  if (!agentId) throw new Error(`Mini-map did not publish ${name} yet`);
+  await page.evaluate(async (id) => {
+    const token = sessionStorage.getItem("agenticview.token") ?? "";
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(`${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`);
+    await new Promise<void>((resolve, reject) => { socket.onopen = () => resolve(); socket.onerror = () => reject(new Error("Could not open test websocket")); });
+    socket.send(JSON.stringify({ type: "agent.update", id, patch: { lounging: true } }));
+    await new Promise<void>((resolve) => setTimeout(resolve, 600));
+    socket.close();
+  }, agentId);
+  // When the live position has entered the Lounge, it may still be finishing its walk cycle.
+  await expect(page.locator(`.minimap-agent[data-agent-id="${agentId}"]`)).toHaveAttribute("aria-label", new RegExp(`${name}, (?:In the lounge|Walking), Lounge`), { timeout: 50_000 });
+}
+
 const viewports = [
   { name: "1920x1080", width: 1920, height: 1080 },
   { name: "1280x800", width: 1280, height: 800 },
@@ -44,10 +69,14 @@ for (const vp of viewports) {
     test.use({ viewport: vp });
 
     test(`HUD light: mini-map, tasks sidebar, walk hint, scoreboard — ${vp.name}`, async ({ page }) => {
+      test.setTimeout(120_000);
       ensureScreenshotsDir();
+      await page.addInitScript(() => localStorage.setItem("av:hud:show-tags", "true"));
       await page.goto(`/#token=${launchToken()}`);
       await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
       await seedTasks(page);
+      await seedLoungeAgent(page, `LoungeLight${vp.name.replaceAll("x", "")}`);
+      await page.screenshot({ path: `e2e/screenshots/hud-lounge-minimap-light-${vp.name}.png`, fullPage: false });
 
       // --- Mini-map OPEN ---
       // The mini-map starts open by default; ensure it's open
@@ -72,6 +101,12 @@ for (const vp of viewports) {
       // --- Tasks sidebar groups ---
       // Make sure tasks panel is visible (T to open if needed)
       await page.screenshot({ path: `e2e/screenshots/hud-tasks-sidebar-light-${vp.name}.png`, fullPage: false });
+      await page.getByTestId("tags-toggle").click();
+      await page.locator(".task-panel-toggle").click();
+      await page.getByTestId("chat-toggle").click();
+      await page.screenshot({ path: `e2e/screenshots/hud-collapsed-tags-off-light-${vp.name}.png`, fullPage: false });
+      await page.keyboard.press("t");
+      await page.getByTestId("chat-toggle").click();
 
       // --- Scoreboard popup (before board, clean state) ---
       await page.evaluate(() => window.dispatchEvent(new Event("agenticview:open-scoreboard")));
@@ -109,11 +144,15 @@ for (const vp of viewports) {
     });
 
     test(`HUD dark: mini-map, tasks sidebar, walk hint, scoreboard — ${vp.name}`, async ({ page }) => {
+      test.setTimeout(120_000);
       ensureScreenshotsDir();
       await page.emulateMedia({ colorScheme: "dark" });
+      await page.addInitScript(() => localStorage.setItem("av:hud:show-tags", "true"));
       await page.goto(`/#token=${launchToken()}`);
       await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
       await seedTasks(page);
+      await seedLoungeAgent(page, `LoungeDark${vp.name.replaceAll("x", "")}`);
+      await page.screenshot({ path: `e2e/screenshots/hud-lounge-minimap-dark-${vp.name}.png`, fullPage: false });
 
       // Mini-map open
       await page.screenshot({ path: `e2e/screenshots/hud-minimap-open-dark-${vp.name}.png`, fullPage: false });
@@ -127,6 +166,12 @@ for (const vp of viewports) {
 
       // Tasks sidebar
       await page.screenshot({ path: `e2e/screenshots/hud-tasks-sidebar-dark-${vp.name}.png`, fullPage: false });
+      await page.getByTestId("tags-toggle").click();
+      await page.locator(".task-panel-toggle").click();
+      await page.getByTestId("chat-toggle").click();
+      await page.screenshot({ path: `e2e/screenshots/hud-collapsed-tags-off-dark-${vp.name}.png`, fullPage: false });
+      await page.keyboard.press("t");
+      await page.getByTestId("chat-toggle").click();
 
       // Walk hint
       const walkBtnDark = page.locator('[data-testid="walk-button"]');
@@ -147,6 +192,7 @@ for (const vp of viewports) {
 
     test(`Play popup mid-game — light ${vp.name}`, async ({ page }) => {
       ensureScreenshotsDir();
+      await page.addInitScript(() => localStorage.setItem("av:hud:show-tags", "true"));
       await page.goto(`/#token=${launchToken()}`);
       await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
 
@@ -180,6 +226,42 @@ for (const vp of viewports) {
         }
         await page.keyboard.press("Escape");
       }
+    });
+
+    test(`Scene overview light+dark — ${vp.name}`, async ({ page }) => {
+      ensureScreenshotsDir();
+      await page.goto(`/#token=${launchToken()}`);
+      await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+      // Light overview
+      await page.screenshot({ path: `e2e/screenshots/scene-overview-light-${vp.name}.png`, fullPage: false });
+      // Dark overview
+      await page.emulateMedia({ colorScheme: "dark" });
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: `e2e/screenshots/scene-overview-dark-${vp.name}.png`, fullPage: false });
+      await page.emulateMedia({ colorScheme: "light" });
+    });
+
+    test(`Walk-mode first-person view — ${vp.name}`, async ({ page }) => {
+      ensureScreenshotsDir();
+      await page.goto(`/#token=${launchToken()}`);
+      await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+
+      // Enter walk mode via the global helper (avoids pointer-lock requirement in headless).
+      await page.evaluate(() => (window as unknown as { __setWalking?: (v: boolean) => void }).__setWalking?.(true));
+      // Allow a couple of R3F frames to position the camera.
+      await page.waitForTimeout(200);
+
+      // Light first-person view (near desks).
+      await page.screenshot({ path: `e2e/screenshots/walk-fp-near-desks-light-${vp.name}.png`, fullPage: false });
+
+      // Dark first-person view.
+      await page.emulateMedia({ colorScheme: "dark" });
+      await page.waitForTimeout(200);
+      await page.screenshot({ path: `e2e/screenshots/walk-fp-near-desks-dark-${vp.name}.png`, fullPage: false });
+
+      // Exit walk mode.
+      await page.evaluate(() => (window as unknown as { __setWalking?: (v: boolean) => void }).__setWalking?.(false));
+      await page.emulateMedia({ colorScheme: "light" });
     });
   });
 }

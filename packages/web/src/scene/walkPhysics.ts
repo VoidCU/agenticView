@@ -3,6 +3,7 @@
  * No React or Three.js imports — safe to test in Node.
  */
 import { spaceAt, type Point, type Space } from "@agenticview/shared";
+import { resolveMove, type Solid } from "./colliders";
 
 /** Returns true when the given position lies inside a known office space. */
 export function isWalkable(spaces: Space[], x: number, z: number): boolean {
@@ -11,7 +12,12 @@ export function isWalkable(spaces: Space[], x: number, z: number): boolean {
 
 /**
  * Attempt to move a player from (x, z) by (dx, dz).
- * Returns the new position, sliding along walls when blocked.
+ *
+ * Two-phase collision:
+ * 1. Interior solid obstacles resolved via sub-stepped AABB/circle push-out
+ *    (prevents tunnelling through furniture).
+ * 2. Outer walkable boundary enforced by isWalkable axis-slide (wall sliding).
+ *
  * dx/dz should already be scaled by dt * speed.
  */
 export function movePlayer(
@@ -20,22 +26,24 @@ export function movePlayer(
   z: number,
   dx: number,
   dz: number,
+  solids: Solid[] = [],
 ): Point {
-  const nx = x + dx;
-  const nz = z + dz;
-  // Try full move first
+  // Phase 1: resolve against interior solid obstacles (sub-stepped).
+  const moved = resolveMove(solids, x, z, dx, dz);
+  const nx = moved.x;
+  const nz = moved.z;
+
+  // Phase 2: outer wall guard — axis-slide so player slides along room edges.
   if (isWalkable(spaces, nx, nz)) return { x: nx, z: nz };
-  // Try sliding along each axis independently
   if (isWalkable(spaces, nx, z)) return { x: nx, z };
   if (isWalkable(spaces, x, nz)) return { x, z: nz };
-  // Completely blocked
   return { x, z };
 }
 
 /**
- * Compute WASD/arrow-key movement delta given key state and yaw (radians).
+ * Compute WASD/arrow-key movement direction given key state and yaw (radians).
  * yaw: camera facing direction (0 = +z, increasing CW around Y).
- * Returns the unscaled direction vector (unit length or zero).
+ * Returns the unscaled unit-direction vector (or zero).
  */
 export function walkDelta(
   keys: Set<string>,
@@ -64,4 +72,45 @@ export function walkDelta(
 export function clampPitch(pitch: number): number {
   const MAX = (80 * Math.PI) / 180;
   return Math.max(-MAX, Math.min(MAX, pitch));
+}
+
+/** Walk speed (world units per second). */
+export const WALK_SPEED = 4.5;
+/** Acceleration factor for smooth start/stop (higher = snappier). */
+export const ACCEL = 12;
+/** Deceleration factor (applied when no key pressed). */
+export const DECEL = 14;
+
+/**
+ * Apply smooth acceleration / deceleration to the player velocity.
+ *
+ * @param vx  current x velocity
+ * @param vz  current z velocity
+ * @param dirX  desired direction x (unit or zero)
+ * @param dirZ  desired direction z (unit or zero)
+ * @param dt  delta time in seconds
+ * @param speed  target speed (default WALK_SPEED)
+ */
+export function applyVelocity(
+  vx: number,
+  vz: number,
+  dirX: number,
+  dirZ: number,
+  dt: number,
+  speed = WALK_SPEED,
+): { vx: number; vz: number } {
+  const hasInput = dirX !== 0 || dirZ !== 0;
+  if (hasInput) {
+    const targetVx = dirX * speed;
+    const targetVz = dirZ * speed;
+    const t = Math.min(1, dt * ACCEL);
+    return {
+      vx: vx + (targetVx - vx) * t,
+      vz: vz + (targetVz - vz) * t,
+    };
+  } else {
+    // Decelerate toward zero.
+    const t = Math.min(1, dt * DECEL);
+    return { vx: vx * (1 - t), vz: vz * (1 - t) };
+  }
 }

@@ -5,6 +5,7 @@ import {
   seatLocal,
   yawToward,
   managerHome,
+  loungeSpots,
   type Space,
 } from "@agenticview/shared";
 
@@ -115,8 +116,9 @@ function hashColor(list: string[], n: number): string {
 
 /** A desk whose front (+z) faces the person sitting at it. */
 export function desk(k: Kit, screen?: string, seed = 0) {
-  k.rbox("deskTop", [0, DESK_H - 0.025, 0], [1.24, 0.05, 0.66]);
-  for (const x of [-0.57, 0.57]) k.box("deskLeg", [x, (DESK_H - 0.05) / 2, 0], [0.05, DESK_H - 0.05, 0.58]);
+  // Width 1.18 gives a comfortable 0.02 gap to adjacent desks at 1.2-unit column spacing.
+  k.rbox("deskTop", [0, DESK_H - 0.025, 0], [1.18, 0.05, 0.66]);
+  for (const x of [-0.54, 0.54]) k.box("deskLeg", [x, (DESK_H - 0.05) / 2, 0], [0.05, DESK_H - 0.05, 0.58]);
   k.box("deskLeg", [0, 0.5, -0.22], [1.1, 0.16, 0.02]);
   // Monitor: bezel, glowing screen, neck, foot.
   k.box("bezel", [0, 1.06, -0.18], [0.66, 0.4, 0.03], { rx: -0.08 });
@@ -265,8 +267,8 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
     if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + (l.z < 0 ? -0.1 : 0.1), l.yaw));
   }
   // Felt privacy screen along the spine of the cluster, with an aluminium cap.
-  k.rbox("felt", [0, DESK_H + 0.2, 0], [2.5, 0.4, 0.05]);
-  k.box("alu", [0, DESK_H + 0.405, 0], [2.5, 0.015, 0.06]);
+  k.rbox("felt", [0, DESK_H + 0.2, 0], [3.8, 0.4, 0.05]);
+  k.box("alu", [0, DESK_H + 0.405, 0], [3.8, 0.015, 0.06]);
   k.box("deskLeg", [0, 0.36, 0], [0.06, 0.72, 0.06]);
   // Corners: tall pieces at the back (away from the camera), low ones at the front.
   bookshelf(corner(k, 180), seed);
@@ -280,8 +282,8 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
 function officeRoom(k: Kit, s: Space) {
   const home = managerHome({ ...s, x: 0, z: 0 });
   // Rug, then the executive desk between the manager and the room.
-  k.cyl("rugOffice", [0, 0.006, 0], 4.3, 0.012);
-  k.cyl("accent", [0, 0.004, 0], 4.38, 0.008);
+  k.cyl("rugOffice", [0, 0.006, 0], 6.0, 0.012);
+  k.cyl("accent", [0, 0.004, 0], 6.1, 0.008);
   const toCam = { x: Math.cos(45 * DEG), z: Math.sin(45 * DEG) };
   const deskAt = { x: home.x + toCam.x * 0.78, z: home.z + toCam.z * 0.78 };
   const dk = k.frame(deskAt.x, deskAt.z, yawToward(deskAt, home));
@@ -312,9 +314,10 @@ function officeRoom(k: Kit, s: Space) {
 }
 
 function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
-  k.cyl("walnut", [0, 0.74, 0], 2.5, 0.07);
-  k.cyl("deskLeg", [0, 0.37, 0], 0.3, 0.7);
-  k.cyl("deskLeg", [0, 0.02, 0], 1.0, 0.04);
+  // Table diameter 4.2 (radius 2.1) suits the 40% bigger rooms; seats are at radius 2.7.
+  k.cyl("walnut", [0, 0.74, 0], 4.2, 0.07);
+  k.cyl("deskLeg", [0, 0.37, 0], 0.48, 0.7);
+  k.cyl("deskLeg", [0, 0.02, 0], 1.6, 0.04);
   for (let i = 0; i < 3; i++) k.box("book", [Math.cos(i * 2.1) * 0.5, 0.79, Math.sin(i * 2.1) * 0.5], [0.22, 0.01, 0.3], { yaw: i, color: "#efe7da" });
   k.cyl("pot", [0, 0.86, 0], 0.18, 0.18);
   k.add("ico", "leaf2", [0, 1.02, 0], [0.26, 0.24, 0.26]);
@@ -333,25 +336,37 @@ function meetingRoom(k: Kit, s: Space, occ: RoomOccupancy) {
   plant(corner(k, 120, 4.7), 1.2, 6);
 }
 
-function loungeRoom(k: Kit, s: Space, occ: RoomOccupancy) {
-  k.cyl("rugLounge", [0, 0.006, 0], 3.9, 0.012);
-  k.cyl("rugLounge2", [0, 0.01, 0], 3.0, 0.012);
-  k.cyl("rugLounge", [0, 0.014, 0], 2.7, 0.012);
-  k.cyl("walnut", [0, 0.38, 0], 1.1, 0.05);
-  k.cyl("deskLeg", [0, 0.19, 0], 0.12, 0.36);
+function loungeRoom(k: Kit, _s: Space, _occ: RoomOccupancy) {
+  // Rugs and coffee table (center)
+  k.cyl("rugLounge", [0, 0.006, 0], 5.4, 0.012);
+  k.cyl("rugLounge2", [0, 0.01, 0], 4.2, 0.012);
+  k.cyl("rugLounge", [0, 0.014, 0], 3.8, 0.012);
+  k.cyl("walnut", [0, 0.38, 0], 1.5, 0.05);
+  k.cyl("deskLeg", [0, 0.19, 0], 0.16, 0.36);
   k.cyl("pot", [0.15, 0.46, 0.1], 0.1, 0.12, { color: "#e4b04a" });
   k.box("book", [-0.2, 0.42, -0.1], [0.3, 0.03, 0.22], { yaw: 0.4, color: "#3f6f8f" });
-  for (let seat = 0; seat < s.seats; seat++) {
-    if (occ.seats.has(seat)) continue;
-    const l = seatLocal("lounge", seat);
-    k.frame(l.x, l.z, l.yaw).rbox(seat % 2 ? "sofa2" : "sofa", [0, 0.2, 0], [0.62, 0.4, 0.62]);
+
+  // Place furniture using the shared loungeSpots layout so positions match agent spots exactly.
+  const { furniture } = loungeSpots();
+  for (const fp of furniture) {
+    const fk = k.frame(fp.x, fp.z, fp.yaw);
+    if (fp.kind === "sofa") {
+      // 3-seat sofa: use wider width (2.6) to span the three spot positions (spaced 0.9 apart)
+      sofa(fk, fp.seats >= 3 ? "sofa" : "sofa2", fp.seats >= 3 ? 2.6 : 1.9);
+    } else if (fp.kind === "armchair") {
+      armchair(fk, "sofa2");
+    } else if (fp.kind === "counter") {
+      kitchenette(fk);
+    } else if (fp.kind === "beanbag") {
+      // Low floor cushion
+      fk.rbox("cushion", [0, 0.12, 0], [0.64, 0.22, 0.64]);
+    }
   }
-  sofa(corner(k, 180, 4.5), "sofa");
-  kitchenette(corner(k, 240, 4.6));
-  sofa(corner(k, 300, 4.5), "sofa2");
+
+  // Corner decor: lamp and plants
   floorLamp(corner(k, 120, 4.6));
   plant(corner(k, 0, 4.7), 1.2, 7);
-  armchair(corner(k, 60, 4.5), "sofa");
+  plant(corner(k, 60, 4.8), 0.8, 8);
 }
 
 /** Every piece of furniture in one space, in world coordinates. */

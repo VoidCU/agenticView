@@ -19,6 +19,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [loungeBreaks, setLoungeBreaks] = useState(settings?.loungeBreaks ?? true);
   const [idleLoungeMinutes, setIdleLoungeMinutes] = useState(settings?.idleLoungeMinutes ?? 3);
   const [preferCheapModels, setPreferCheapModels] = useState(settings?.preferCheapModels ?? false);
+  const [failoverOrder, setFailoverOrder] = useState<Provider[]>(settings?.failoverOrder ?? []);
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => getNotificationPref());
   const [tab, setTab] = useState<"settings" | "usage">("settings");
   const [switchProvider, setSwitchProvider] = useState<Provider | null>(null);
@@ -32,6 +33,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         defaultModel: model.trim() || null,
         maxConcurrentRuns: Math.min(10, Math.max(1, Math.round(max))),
         limitPolicy,
+        failoverOrder,
         loungeBreaks,
         idleLoungeMinutes: Math.min(60, Math.max(0, Math.round(idleLoungeMinutes))),
         preferCheapModels,
@@ -125,6 +127,21 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 aria-label="Prefer cheap models"
               />
             </label>
+            <fieldset className="field-set failover-editor">
+              <legend>Provider failover order</legend>
+              <p className="hint">When a run fails, providers are tried in this order after the current provider. Move providers to change priority.</p>
+              <ol className="failover-list" aria-label="Provider failover order">
+                {failoverOrder.map((item, index) => (
+                  <li key={`${item}-${index}`}>
+                    <span>{index + 1}. {providerLabel(item)}</span>
+                    <div>
+                      <button type="button" className="btn btn-ghost btn-xs" aria-label={`Move ${providerLabel(item)} up`} disabled={index === 0} onClick={() => setFailoverOrder((order) => { const next = [...order]; [next[index - 1], next[index]] = [next[index]!, next[index - 1]!]; return next; })}>↑</button>
+                      <button type="button" className="btn btn-ghost btn-xs" aria-label={`Move ${providerLabel(item)} down`} disabled={index === failoverOrder.length - 1} onClick={() => setFailoverOrder((order) => { const next = [...order]; [next[index], next[index + 1]] = [next[index + 1]!, next[index]!]; return next; })}>↓</button>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </fieldset>
             <label className="field field-toggle">
               <span>Desktop notifications</span>
               <input

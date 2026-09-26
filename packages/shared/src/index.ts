@@ -10,3 +10,4 @@ export * from "./office.js";
 export * from "./session.js";
 export * from "./limits.js";
 export * from "./games.js";
+export * from "./lounge.js";

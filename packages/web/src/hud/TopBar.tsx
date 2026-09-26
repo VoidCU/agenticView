@@ -1,5 +1,6 @@
 import { useStore } from "../state/store";
 import { GearIcon, PlusIcon, ProviderChip } from "./ui";
+import { useHudPrefs } from "../state/hudPrefs";
 
 function Mark() {
   return (
@@ -24,9 +25,12 @@ interface Props {
   timelineActive?: boolean;
   onWalk?: () => void;
   walkActive?: boolean;
+  onToggleTags?: () => void;
+  onToggleChat?: () => void;
+  chatCollapsed?: boolean;
 }
 
-export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, timelineActive, onWalk, walkActive }: Props) {
+export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, timelineActive, onWalk, walkActive, onToggleTags, onToggleChat, chatCollapsed }: Props) {
   const sessions = useStore((s) => s.sessions);
   const online = sessions.filter((s) => s.online).length;
   const world = useStore((s) => s.world);
@@ -37,6 +41,7 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, 
   const limits = useStore((s) => s.limits);
   const pendingCount = questions.length + permissions.length + limits.length;
   const hub = world?.kind === "hub";
+  const showTags = useHudPrefs((s) => s.showTags);
 
   const handleInbox = () => {
     onInbox?.();
@@ -56,10 +61,12 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, 
       </div>
       <div className="topbar-mid" aria-label="Providers">
         {providers.map((p) => (
-          <ProviderChip key={p.provider} status={p} />
+          <span key={p.provider} className="provider-compact" title={`${p.provider}: ${p.ok ? "Ready" : p.reason ?? "Unavailable"}`}><ProviderChip status={p} compact />{p.limit?.limited && <span className="provider-limited">limited</span>}</span>
         ))}
       </div>
       <div className="topbar-right">
+        {onToggleTags && <button type="button" data-testid="tags-toggle" className="btn btn-ghost btn-sm topbar-compact" onClick={onToggleTags} aria-pressed={showTags} title="Toggle robot name tags">Tags {showTags ? "On" : "Off"}</button>}
+        {onToggleChat && <button type="button" data-testid="chat-toggle" className="btn btn-ghost btn-sm topbar-compact" onClick={onToggleChat} aria-expanded={!chatCollapsed} title="Toggle chat panel">Chat {chatCollapsed ? "Show" : "Hide"}</button>}
         <span className="switch" role="group" aria-label="World">
           <span className={`switch-item ${!hub ? "switch-on" : ""}`} title={hub ? "Open a project from the Projects panel" : undefined}>
             Project
@@ -76,6 +83,7 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, 
           aria-label={`Inbox (${pendingCount})`}
           data-testid="inbox-button"
         >
+          <span className="topbar-icon" aria-hidden="true">▣</span>
           Inbox
           <span className={`inbox-badge ${pendingCount === 0 ? "inbox-badge-empty" : ""}`}>
             {pendingCount}
@@ -91,6 +99,7 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, 
             aria-pressed={walkActive}
             data-testid="walk-button"
           >
+            <span className="topbar-icon" aria-hidden="true">⌖</span>
             Walk
           </button>
         )}
@@ -104,11 +113,13 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, 
             aria-pressed={timelineActive}
             data-testid="timeline-button"
           >
+            <span className="topbar-icon" aria-hidden="true">◷</span>
             Timeline
           </button>
         )}
         {onSessions && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={onSessions} title="Claude Code sessions serving this office" data-testid="sessions-button">
+            <span className="topbar-icon" aria-hidden="true">◉</span>
             Sessions{sessions.length ? ` ${online}/${sessions.length}` : ""}
           </button>
         )}
@@ -116,8 +127,9 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, 
           <PlusIcon />
           New agent
         </button>
-        <button type="button" className="icon-btn" onClick={onSettings} aria-label="Settings" title="Settings (?)">
+        <button type="button" className="btn btn-ghost btn-sm topbar-settings" onClick={onSettings} aria-label="Settings" title="Settings (?)">
           <GearIcon />
+          <span>Settings</span>
         </button>
         <span className={`conn ${connected ? "conn-on" : "conn-off"}`} title={connected ? "Connected" : "Reconnecting"} role="status" aria-label={connected ? "Connected" : "Reconnecting"} />
       </div>

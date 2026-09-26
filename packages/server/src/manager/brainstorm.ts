@@ -160,7 +160,6 @@ export function brainstormTool(ctx: ManagerToolContext): BridgeTool {
         sessions.set(topic, entry);
       }
       const session = await entry;
-      await ctx.setWaiting(ctx.requestTask.id, true);
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const seconds = z.number().int().min(1).max(30).parse(args.maxWaitSeconds ?? 20);
@@ -180,7 +179,6 @@ export function brainstormTool(ctx: ManagerToolContext): BridgeTool {
         });
       } finally {
         clearTimeout(timer);
-        await ctx.setWaiting(ctx.requestTask.id, false);
       }
     },
   };

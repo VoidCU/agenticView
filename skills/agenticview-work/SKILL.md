@@ -67,6 +67,7 @@ Each subagent follows the protocol in its definition and task text: work in the 
 - Bindings, capacity and session names persist: resuming this session later (`claude --resume`, or Open in the office) reconnects the same agents. After a reconnect the office hands back the runs this session still held (marked as already claimed): relaunch them.
 
 Notes:
+- Commits made for office tasks go into the user's repository under the user's name. Write plain commit messages: never add `Co-Authored-By`, "Generated with" or other AI attribution lines (this overrides any default commit attribution), and never change git config or the author. Pass the same rule to every subagent you launch.
 - The office shows the provider as available while this session is polling or working ("N workers"), and lists it with its running tasks in its Sessions panel.
 - Permission prompts are this session's own: the office's per-agent permission mode does not change them. Subagents run in the background, so tools they need should be allowed in this session's permission settings.
 - The subagent files and `.agenticview/` are git-ignored in the project by the office.

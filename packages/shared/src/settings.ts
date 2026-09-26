@@ -1,12 +1,28 @@
 import { z } from "zod";
 import { ProviderSchema } from "./agent.js";
 
+/** Default provider order for automatic failover when a run fails or crashes. */
+export const DEFAULT_FAILOVER_ORDER = ["codex", "antigravity", "claude-session"] as const;
+
+/** Default model per provider used when the failover policy switches an agent. */
+export const FAILOVER_PROVIDER_MODELS: Partial<Record<z.infer<typeof ProviderSchema>, string>> = {
+  codex: "gpt-6-luna",
+  antigravity: "gemini-3.8-flash-high",
+  "claude-session": "sonnet",
+};
+
 export const ProjectSettingsSchema = z.object({
   defaultProvider: ProviderSchema.nullable().default(null),
   defaultModel: z.string().nullable().default(null),
   maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
-  /** How to handle an agent whose provider hits a quota/rate-limit: prompt the user ('ask') or revive automatically ('auto'). */
+  /** How to handle an agent whose provider hits a quota/rate-limit or crash: prompt the user ('ask') or revive automatically ('auto'). */
   limitPolicy: z.enum(["ask", "auto"]).default("ask"),
+  /**
+   * Ordered list of providers to try when a run fails (quota, rate-limit, or crash).
+   * The policy picks the first provider after the current one in this list that is
+   * available and not limited.  Empty list disables automatic failover.
+   */
+  failoverOrder: z.array(ProviderSchema).default([...DEFAULT_FAILOVER_ORDER]),
   /** Allow the manager to suggest lounge breaks when the project is quiet. */
   loungeBreaks: z.boolean().default(true),
   /** When true (default), create_agent without an explicit provider/model picks the cheapest available choice. */

@@ -1,4 +1,9 @@
 import { z } from "zod";
+import { ProviderSchema } from "./agent.js";
+/** Default provider order for automatic failover when a run fails or crashes. */
+export declare const DEFAULT_FAILOVER_ORDER: readonly ["codex", "antigravity", "claude-session"];
+/** Default model per provider used when the failover policy switches an agent. */
+export declare const FAILOVER_PROVIDER_MODELS: Partial<Record<z.infer<typeof ProviderSchema>, string>>;
 export declare const ProjectSettingsSchema: z.ZodObject<{
     defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodEnum<{
         claude: "claude";
@@ -13,6 +18,13 @@ export declare const ProjectSettingsSchema: z.ZodObject<{
         auto: "auto";
         ask: "ask";
     }>>;
+    failoverOrder: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        antigravity: "antigravity";
+        gemini: "gemini";
+    }>>>;
     loungeBreaks: z.ZodDefault<z.ZodBoolean>;
     preferCheapModels: z.ZodDefault<z.ZodBoolean>;
     idleLoungeMinutes: z.ZodDefault<z.ZodNumber>;

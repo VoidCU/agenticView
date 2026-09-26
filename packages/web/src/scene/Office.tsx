@@ -2,9 +2,9 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, type Agent, type Space, type Task } from "@agenticview/shared";
+import { HEX_R, managerHome, seatPose, spaceAt, visitPose, yawToward, loungeSpots, assignLoungeSpots, rpsFacing, type Agent, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, type FileChip } from "../state/store";
-import { useLoungeBreaks, agentRevivePhase, breakSeat } from "./breaks";
+import { useLoungeBreaks, agentRevivePhase } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
 import { layoutFor, seatKey, type OfficeLayout } from "./layout";
 import { Robot, type RobotTarget } from "./Robot";
@@ -14,7 +14,7 @@ import { PlusIcon } from "../hud/ui";
 import { Kit, buildWalls, furnishSpace } from "./kit";
 import { Batches, useMaterials } from "./Batches";
 import { PALETTES, carpetTexture, useSceneTheme, woodTexture, type Palette } from "./theme";
-import { dragPoint, livePos, useDrag, useFocus } from "./motion";
+import { dragPoint, livePos, livePositions, useDrag, useFocus } from "./motion";
 import { PodBoard } from "../hud/PodBoard";
 import { BOARD_COLORS, podBoard } from "../state/boards";
 import { keyToRoom } from "./roomKeys";
@@ -24,6 +24,8 @@ import { WalkMode } from "./WalkMode";
 import { AllDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
 import { LoungeScoreboard } from "./LoungeScoreboard";
+import { buildColliders } from "./colliders";
+import { usePositions, type AgentActivity } from "../state/positions";
 
 const DEG = Math.PI / 180;
 
@@ -150,7 +152,7 @@ function FloorDecal({
 
   const a = 45 * DEG;
   // In the open floor between the room's furniture and its front wall, toward the camera.
-  const dist = space.kind === "office" ? 2.9 : space.kind === "meeting" ? 3.0 : 2.7;
+  const dist = space.kind === "office" ? 4.2 : space.kind === "meeting" ? 4.6 : 4.3;
   const x = space.x + dist * Math.cos(a);
   const z = space.z + dist * Math.sin(a);
 
@@ -275,6 +277,7 @@ function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Space) =>
   const rows = Math.max(3, Math.ceil(active.length / cols));
   return <group position={[space.x + x, 0, space.z + z]} rotation={[0, yawToward({ x, z }, { x: 0, z: 0 }), 0]}>
     <mesh position={[0, 1.12, 0.04]}
+      userData={{ boardSpaceId: space.id }}
       onPointerOver={e => { e.stopPropagation(); setHovered(true); }} onPointerOut={() => setHovered(false)}
       onClick={e => { e.stopPropagation(); if (e.delta <= 4) { setHovered(false); onOpen(space); } }}>
       <boxGeometry args={[1.72, 1.02, 0.055]} />
@@ -530,7 +533,7 @@ function CameraRig({ spaces }: { spaces: Space[] }) {
     const target = space ? new THREE.Vector3(space.x, 0.5, space.z) : new THREE.Vector3(1.2, 0, 1.2);
     const az = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
     const polar = space ? 0.82 : 0.78;
-    const dist = space ? 19 : overviewDistance(spaces);
+    const dist = space ? 25 : overviewDistance(spaces);
     const pos = new THREE.Vector3(target.x + dist * Math.sin(polar) * Math.sin(az), dist * Math.cos(polar), target.z + dist * Math.sin(polar) * Math.cos(az));
     goal.current = { target, pos };
     // Rings change the overview distance; a focus change moves there.
@@ -633,6 +636,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const mirrorLatest = useStore((s) => s.mirror[0]);
   const spaceNames = useStore((s) => s.spaceNames);
   const settings = useStore((s) => s.settings);
+  const gameAnimation = useStore((s) => s.gameAnimation);
   const list = useMemo(() => sortedAgents(agents), [agents]);
   const layout = useMemo(() => layoutFor(list, spaceNames), [list, spaceNames]);
   const { spaces } = layout;
@@ -644,43 +648,44 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const { visiting, onArrive } = useManagerVisits(tasks, agents, manager?.id);
   const onGrab = useDragToReassign(layout);
   const mountedAt = useRef(Date.now());
+  const prevLoungeAssign = useRef<Record<string, string>>({});
+  const lastPublishRef = useRef(0);
+  const lastSnapshotRef = useRef<string>("");
 
   const targets = useMemo(() => {
     const out: Record<string, RobotTarget> = {};
     for (const [id, pose] of Object.entries(layout.poses)) out[id] = pose;
 
-    // Lounge breaks: send idle workers to their lounge seat
+    // Lounge: collect all agents going to the lounge, assign spots via loungeSpots().
     if (lounge) {
-      for (const [id, brk] of loungeBreaks) {
-        const seat = seatPose(lounge, brk.seat);
-        out[id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
-      }
-    }
-
-    // Server-sent lounging (agent.lounging === true): agent goes to a lounge seat.
-    // Use a different seed than breaks to spread them across seats.
-    if (lounge) {
-      const takenSeats = new Set([...loungeBreaks.values()].map((b) => b.seat));
+      // Build the full list of agents heading to the lounge (breaks, server-side lounging, fainted).
+      const loungeAgentIds: string[] = [];
+      for (const [id] of loungeBreaks) loungeAgentIds.push(id);
       for (const a of list) {
-        if (!a.lounging || a.role !== "worker") continue;
-        if (out[a.id] && loungeBreaks.has(a.id)) continue; // already placed by break logic
-        const preferred = breakSeat(a.id, "server-lounge");
-        let seatIdx = preferred;
-        for (let i = 1; takenSeats.has(seatIdx) && i < 4; i++) seatIdx = (preferred + i) % 4;
-        takenSeats.add(seatIdx);
-        const seat = seatPose(lounge, seatIdx);
-        out[a.id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
-      }
-    }
-
-    // Fainting: send fainted/reviving workers to the lounge
-    if (lounge) {
-      for (const a of list) {
+        if (loungeBreaks.has(a.id)) continue; // already included above
+        if (a.lounging && a.role === "worker") { loungeAgentIds.push(a.id); continue; }
         const phase = agentRevivePhase(a);
-        if (phase === "fainted" || phase === "reviving") {
-          const seatIdx = Math.abs(a.id.split("").reduce((n, c) => n * 31 + c.charCodeAt(0), 7)) % 4;
-          const seat = seatPose(lounge, seatIdx);
-          out[a.id] = { ...seat, yaw: yawToward(seat, { x: lounge.x, z: lounge.z }) };
+        if (phase === "fainted" || phase === "reviving") loungeAgentIds.push(a.id);
+      }
+
+      if (loungeAgentIds.length > 0) {
+        // Get a layout large enough for overflow agents (waiting spots outside door).
+        const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2));
+        // Stable assignment: agents keep their spot unless it's gone.
+        const assignment = assignLoungeSpots(loungeAgentIds, loungeLayout.spots, prevLoungeAssign.current);
+        prevLoungeAssign.current = assignment;
+
+        for (const agentId of loungeAgentIds) {
+          const spotId = assignment[agentId];
+          if (!spotId) continue;
+          const spot = loungeLayout.spots.find((sp) => sp.id === spotId);
+          if (!spot) continue;
+          out[agentId] = {
+            x: lounge.x + spot.x,
+            z: lounge.z + spot.z,
+            yaw: spot.yaw,
+            yOffset: spot.seatHeight,
+          };
         }
       }
     }
@@ -703,8 +708,21 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       const s = p && spaces.find((o) => o.id === p.space);
       if (s && p) out[manager.id] = visitPose(s, p.seat);
     }
+
+    // RPS: make both players face each other during an active match (< 3 s old).
+    if (gameAnimation && Date.now() - gameAnimation.at < 3000) {
+      const [playerA, playerB] = gameAnimation.match.players;
+      const posA = out[playerA];
+      const posB = out[playerB];
+      if (posA && posB) {
+        const { yawA, yawB } = rpsFacing(posA, posB);
+        out[playerA] = { ...posA, yaw: yawA };
+        out[playerB] = { ...posB, yaw: yawB };
+      }
+    }
+
     return out;
-  }, [layout, manager, visiting, spaces, loungeBreaks, lounge, list]);
+  }, [layout, manager, visiting, spaces, loungeBreaks, lounge, list, gameAnimation]);
 
   const youPose = useMemo(() => {
     const a = 45 * DEG;
@@ -724,8 +742,90 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
     return out;
   }, [layout.occupied, spaces]);
 
+  const colliders = useMemo(() => buildColliders(layout), [layout]);
   const nextPose = layout.next && spaces.find((s) => s.id === layout.next!.space) ? seatPose(spaces.find((s) => s.id === layout.next!.space)!, layout.next.seat) : undefined;
   const at = (id: string) => livePos(id, targets[id]);
+
+  // Throttled position publisher: push to usePositions ~4 times per second, only on change.
+  // Reads livePositions (updated by Robot.tsx every frame) and augments with activity/spaceId.
+  const layoutRef = useRef(layout);
+  const spacesRef = useRef(spaces);
+  const listRef = useRef(list);
+  const targetsRef = useRef(targets);
+  const loungeBreaksRef = useRef(loungeBreaks);
+  layoutRef.current = layout;
+  spacesRef.current = spaces;
+  listRef.current = list;
+  targetsRef.current = targets;
+  loungeBreaksRef.current = loungeBreaks;
+
+  useFrame(({ clock: _clock }) => {
+    const now = Date.now();
+    if (now - lastPublishRef.current < 250) return; // ~4 Hz
+    lastPublishRef.current = now;
+
+    const curLayout = layoutRef.current;
+    const curSpaces = spacesRef.current;
+    const curList = listRef.current;
+    const curLoungeBreaks = loungeBreaksRef.current;
+    const curTargets = targetsRef.current;
+
+    // Build a lounge agent set for fast lookup.
+    const loungeAgentSet = new Set<string>();
+    for (const [id] of curLoungeBreaks) loungeAgentSet.add(id);
+    for (const a of curList) {
+      if (a.lounging && a.role === "worker") loungeAgentSet.add(a.id);
+      const phase = agentRevivePhase(a);
+      if (phase === "fainted" || phase === "reviving") loungeAgentSet.add(a.id);
+    }
+
+    // Determine waiting agents (those assigned to lounge overflow spots).
+    const loungeSpace = curSpaces.find((s) => s.kind === "lounge");
+
+    const result: Record<string, import("../state/positions").AgentPosition> = {};
+    for (const a of curList) {
+      const target = curTargets[a.id];
+      if (!target) continue;
+      const lp = livePositions.get(a.id);
+      const x = lp?.x ?? target.x;
+      const z = lp?.z ?? target.z;
+
+      // Determine activity from the live path and current room, with lounge/faint state taking precedence.
+      const liveSpace = spaceAt(curSpaces, x, z) ?? spaceAt(curSpaces, target.x, target.z);
+      let activity: AgentActivity;
+      if (loungeAgentSet.has(a.id)) {
+        const phase = agentRevivePhase(a);
+        if (phase === "fainted" || phase === "reviving") {
+          activity = "fainted";
+        } else if (lp?.walking) {
+          activity = "walking";
+        } else if (curLoungeBreaks.has(a.id)) {
+          activity = "break";
+        } else if (liveSpace?.kind !== "lounge") {
+          activity = "waiting";
+        } else {
+          activity = "lounge";
+        }
+      } else {
+        if (lp?.walking) activity = "walking";
+        else if (liveSpace?.kind === "meeting") activity = "meeting";
+        else if (lp?.waiting) activity = "waiting";
+        else activity = "desk";
+      }
+
+      // Determine spaceId.
+      const placement = curLayout.placements[a.id];
+      const spaceId = liveSpace?.id ?? (loungeAgentSet.has(a.id) ? loungeSpace?.id : placement?.space) ?? curSpaces[0]!.id;
+
+      result[a.id] = { x, z, spaceId, activity };
+    }
+
+    // Only publish when the snapshot actually changed.
+    const snapshot = JSON.stringify(result);
+    if (snapshot === lastSnapshotRef.current) return;
+    lastSnapshotRef.current = snapshot;
+    usePositions.getState().set(result);
+  });
 
   return (
     <>
@@ -786,7 +886,9 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       {lounge && <LoungeScoreboard lounge={lounge} />}
       <RpsAnimation at={at} agents={agents} />
 
-      <WalkMode spaces={spaces} startX={youPose.x} startZ={youPose.z} />
+      <WalkMode spaces={spaces} startX={youPose.x} startZ={youPose.z} solids={colliders}
+        onBoard={(id) => { const s = spaces.find((sp) => sp.id === id); if (s) onBoard(s); }}
+      />
 
       <OrbitControls
         makeDefault

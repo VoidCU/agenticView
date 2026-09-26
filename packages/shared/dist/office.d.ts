@@ -14,13 +14,15 @@ import type { Agent, Placement } from "./agent.js";
  *   - removeRoom succeeds only when the target room has no seated agents and is not the Manager's Office.
  */
 /** Circumradius of one hex room (center to corner). */
-export declare const HEX_R = 5;
+export declare const HEX_R = 7;
 /** Center to the middle of a wall (where the doorway is). */
 export declare const HEX_APOTHEM: number;
 /** Everyone walks along this circle inside a room; furniture stays inside it or out in the corners. */
-export declare const WALK_R = 2.85;
+export declare const WALK_R = 3.99;
 /** Widest honeycomb the office grows to. */
 export declare const MAX_RINGS = 3;
+/** Desks per pod (2 rows of 3). */
+export declare const POD_SEATS = 6;
 export type SpaceKind = "office" | "pod" | "meeting" | "lounge";
 export interface Space {
     id: string;

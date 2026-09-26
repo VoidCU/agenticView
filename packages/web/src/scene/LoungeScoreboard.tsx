@@ -9,7 +9,7 @@ import { useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { HEX_R, yawToward, type Space } from "@agenticview/shared";
+import { HEX_APOTHEM, HEX_R, yawToward, type Space } from "@agenticview/shared";
 import type { PlayerStats } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { PALETTES, useSceneTheme } from "./theme";
@@ -117,9 +117,9 @@ export function LoungeScoreboard({ lounge }: Props) {
     // The ≤1/s constraint is satisfied by React's batched renders.
   });
 
-  // Position: on the wall between corner 210° and 270° of the lounge hex.
-  const angle = 255 * DEG;
-  const dist = HEX_R * 0.82;
+  // Position: on the clear lounge wall facing the camera (midpoint between 180° and 240°).
+  const angle = 210 * DEG;
+  const dist = HEX_APOTHEM - 0.08;
   const bx = lounge.x + dist * Math.cos(angle);
   const bz = lounge.z + dist * Math.sin(angle);
   const faceYaw = yawToward({ x: bx, z: bz }, { x: lounge.x, z: lounge.z });

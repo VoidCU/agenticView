@@ -49,3 +49,13 @@ test("rejects the page without a token and recovers with one", async ({ page }) 
   await page.reload();
   await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
 });
+
+test("canvas drag suppresses text selection and restores body selection", async ({ page }) => {
+  await page.goto(`/#token=${launchToken()}`);
+  const canvas = page.locator(".office canvas");
+  await expect(canvas).toBeVisible();
+  await canvas.evaluate((element) => element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 })));
+  await expect.poll(() => page.evaluate(() => document.body.style.userSelect)).toBe("none");
+  await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0 })));
+  await expect.poll(() => page.evaluate(() => document.body.style.userSelect)).toBe("");
+});

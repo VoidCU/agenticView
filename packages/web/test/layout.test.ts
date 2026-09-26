@@ -56,18 +56,20 @@ describe("hex grid", () => {
   });
 
   it("grows a ring once the pods have no desk to spare", () => {
+    // Ring 1: 4 pods × 6 seats = 24 desks; ringsFor needs strictly more.
     expect(ringsFor(0)).toBe(1);
-    expect(ringsFor(15)).toBe(1);
-    expect(ringsFor(16)).toBe(2);
+    expect(ringsFor(23)).toBe(1);
+    expect(ringsFor(24)).toBe(2);
   });
 });
 
 describe("planOffice", () => {
   it("fills pod desks in order by creation", () => {
+    // 5 workers → 5 seats in pod-a (0–4); pod-a has 6 seats so no overflow yet.
     const plan = planOffice([manager, w(3), w(1), w(2), w(4), w(5)]);
     expect(plan.placements["w_00000001"]).toEqual({ space: "pod-a", seat: 0 });
     expect(plan.placements["w_00000004"]).toEqual({ space: "pod-a", seat: 3 });
-    expect(plan.placements["w_00000005"]).toEqual({ space: "pod-b", seat: 0 });
+    expect(plan.placements["w_00000005"]).toEqual({ space: "pod-a", seat: 4 });
     expect(plan.placements[manager.id]).toBeUndefined();
   });
 
@@ -95,14 +97,16 @@ describe("planOffice", () => {
   });
 
   it("adds a ring only once every desk of the existing rings is taken", () => {
-    const full = Array.from({ length: 15 }, (_, i) => w(i + 1));
+    // Ring 1 has 4 pods × 6 seats = 24 desks; still ring 1 when under capacity.
+    const full = Array.from({ length: 23 }, (_, i) => w(i + 1));
     expect(Math.max(...planOffice(full).spaces.map((s) => s.ring))).toBe(1);
-    const more = Array.from({ length: 16 }, (_, i) => w(i + 1));
+    // 24 workers fill ring 1 exactly (ringsFor needs *strictly* more) → ring 2.
+    const more = Array.from({ length: 24 }, (_, i) => w(i + 1));
     const plan = planOffice(more);
     expect(Math.max(...plan.spaces.map((s) => s.ring))).toBe(2);
     // Once ring 2 exists, a persisted ring-2 seat is honoured.
-    const moved = planOffice([...more.slice(0, 15), w(16, { space: "pod-e", seat: 1 })]);
-    expect(moved.placements["w_00000016"]).toEqual({ space: "pod-e", seat: 1 });
+    const moved = planOffice([...more.slice(0, 23), w(24, { space: "pod-e", seat: 1 })]);
+    expect(moved.placements["w_00000024"]).toEqual({ space: "pod-e", seat: 1 });
   });
 
   it("nextPlacement is the first free desk", () => {

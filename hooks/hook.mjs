@@ -113,10 +113,38 @@ export async function mirror(stdinText) {
   }
 }
 
+/** The plugin version in `<dir>/.claude-plugin/plugin.json`, or undefined when it can't be read. */
+async function pluginVersion(dir) {
+  try {
+    return JSON.parse(await readFile(join(dir, ".claude-plugin", "plugin.json"), "utf8")).version;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Compare dotted versions numerically: <0 when a is older than b. */
+export function compareVersions(a, b) {
+  const pa = String(a).split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  const pb = String(b).split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
 export async function recordRoot(path) {
   const root = globalRoot();
   await mkdir(root, { recursive: true });
-  await writeFile(join(root, "plugin-root"), String(path), "utf8");
+  const file = join(root, "plugin-root");
+  // A Claude Code window still running an older plugin version must not point everything back at it:
+  // only record this folder when it is at least as new as the recorded one, or that one is gone.
+  const current = await readFile(file, "utf8").then((s) => s.trim(), () => "");
+  if (current && current !== String(path)) {
+    const [mine, theirs] = await Promise.all([pluginVersion(String(path)), pluginVersion(current)]);
+    if (mine && theirs && compareVersions(mine, theirs) < 0) return;
+  }
+  await writeFile(file, String(path), "utf8");
   // The opt-in status line points at this stable copy, so plugin upgrades (new versioned folder) never
   // break it. The relay is dependency-free, so a plain copy runs anywhere.
   await copyFile(join(String(path), "bin", "statusline.mjs"), join(root, "statusline.mjs")).catch(() => undefined);
