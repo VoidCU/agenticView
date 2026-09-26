@@ -3,6 +3,11 @@ import { readdirSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { E2E_HOME } from "./paths";
 
+// Disable tracing: on Windows the test-results directory may not exist, causing an ENOENT
+// when Playwright tries to write the trace zip even for passing tests (retain-on-failure
+// triggers a write attempt during browserContext.close regardless of pass/fail on Windows).
+test.use({ trace: "off" });
+
 function launchToken(): string {
   const dir = join(E2E_HOME, "instances");
   const files = readdirSync(dir).filter((f) => f.endsWith(".json") && f !== "hub.json");
