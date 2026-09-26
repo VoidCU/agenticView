@@ -3412,8 +3412,30 @@ kbd {
 .walk-crosshair::before, .walk-crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,.9); box-shadow: 0 1px 3px #000; }
 .walk-crosshair::before { width: 2px; height: 16px; left: 7px; }
 .walk-crosshair::after { height: 2px; width: 16px; top: 7px; }
-.panel-tab { pointer-events: auto; writing-mode: vertical-rl; padding: 14px 7px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); cursor: pointer; box-shadow: var(--shadow); }
-.panel-tab-chat { align-self: flex-start; }
+.panel-tab {
+  position: fixed;
+  z-index: 25;
+  top: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  pointer-events: auto;
+  writing-mode: vertical-rl;
+  padding: 14px 7px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-solid);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transform: translateY(-50%);
+}
+.panel-tab:hover { background: var(--input); border-color: var(--line-strong); }
+.panel-tab:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.panel-tab-tasks { left: 0; border-left: 0; border-radius: 0 9px 9px 0; }
+.panel-tab-chat { right: 0; border-right: 0; border-radius: 9px 0 0 9px; }
+.panel-tab .panel-count { margin: 0; }
+
 .chat-collapse { position: absolute; z-index: 2; right: 8px; top: 8px; }
 .topbar { flex-wrap: wrap; gap: 8px; }
 .topbar-left, .topbar-mid, .topbar-right { min-width: 0; }

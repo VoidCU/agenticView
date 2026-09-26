@@ -24,7 +24,12 @@ describe("ChatPanel", () => {
     }
     render(<Harness />);
     await userEvent.click(screen.getByRole("button", { name: "Collapse chat" }));
-    await userEvent.click(screen.getByRole("button", { name: /chat/i }));
+    const chatTab = screen.getByRole("button", { name: "Expand chat" });
+    expect(chatTab).toHaveAttribute("aria-expanded", "false");
+    expect(chatTab).toHaveClass("panel-tab-chat");
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+    chatTab.focus();
+    await userEvent.keyboard("{Enter}");
     expect(screen.getByRole("heading", { name: "Pixel" })).toBeInTheDocument();
   });
 

@@ -173,8 +173,11 @@ describe("TaskBoard", () => {
     expect(within(group).getByText("Done")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Collapse tasks" }));
-    expect(screen.getByRole("button", { name: /Expand tasks/ })).toHaveAttribute("aria-expanded", "false");
-    await userEvent.click(screen.getByRole("button", { name: /Expand tasks/ }));
+    const tasksTab = screen.getByRole("button", { name: /Expand tasks/ });
+    expect(tasksTab).toHaveAttribute("aria-expanded", "false");
+    expect(tasksTab).toHaveClass("panel-tab-tasks");
+    tasksTab.focus();
+    await userEvent.keyboard("{Enter}");
     // Group is still collapsed after panel expand/collapse
     expect(isGroupCollapsed(group)).toBe(true);
   });
