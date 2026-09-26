@@ -117,4 +117,131 @@ test.describe("office overview screenshots", () => {
     await page.waitForTimeout(2_000);
     await page.screenshot({ path: "e2e/screenshots/lounge-walkmode-light-1920x1080.png", fullPage: false });
   });
+
+  test("lounge walk mode dark - from inside the lounge", async ({ page }) => {
+    ensureScreenshotsDir();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(1_500);
+    // Seed 8 workers as lounging so the dark walk mode shows a busy lounge.
+    await page.evaluate(() => {
+      const store = (window as unknown as { __agenticviewStore?: { getState(): { agents: Record<string, unknown> } } }).__agenticviewStore;
+      if (!store) return;
+      const state = store.getState();
+      const workerIds = Object.keys(state.agents).filter(
+        (id) => (state.agents[id] as { role?: string }).role === "worker",
+      );
+      for (const id of workerIds.slice(0, 8)) {
+        const send = (state as unknown as { send?(m: unknown): void }).send;
+        if (send) send({ type: "agent.update", id, patch: { lounging: true } });
+      }
+    });
+    await page.waitForTimeout(500);
+    await page.evaluate(() => {
+      const setWalking = (window as unknown as { __setWalking?: (v: boolean) => void }).__setWalking;
+      if (setWalking) setWalking(true);
+    });
+    await page.waitForTimeout(2_000);
+    await page.screenshot({ path: "e2e/screenshots/lounge-walkmode-dark-1920x1080.png", fullPage: false });
+  });
+});
+
+test.describe("1280x800 overview screenshots", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("light overview 1280x800", async ({ page }) => {
+    ensureScreenshotsDir();
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(2_000);
+    await page.screenshot({ path: "e2e/screenshots/overview-light-1280x800.png", fullPage: false });
+  });
+
+  test("dark overview 1280x800", async ({ page }) => {
+    ensureScreenshotsDir();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(2_000);
+    await page.screenshot({ path: "e2e/screenshots/overview-dark-1280x800.png", fullPage: false });
+  });
+
+  test("busy lounge 8+ agents light 1280x800", async ({ page }) => {
+    ensureScreenshotsDir();
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(1_500);
+    await page.evaluate(() => {
+      const store = (window as unknown as { __agenticviewStore?: { getState(): { agents: Record<string, unknown> } } }).__agenticviewStore;
+      if (!store) return;
+      const state = store.getState();
+      const workerIds = Object.keys(state.agents).filter(
+        (id) => (state.agents[id] as { role?: string }).role === "worker",
+      );
+      for (const id of workerIds.slice(0, 8)) {
+        const send = (state as unknown as { send?(m: unknown): void }).send;
+        if (send) send({ type: "agent.update", id, patch: { lounging: true } });
+      }
+    });
+    await page.waitForTimeout(500);
+    await page.keyboard.press("Digit6");
+    await page.waitForTimeout(2_500);
+    await page.screenshot({ path: "e2e/screenshots/lounge-busy-light-1280x800.png", fullPage: false });
+  });
+
+  test("busy lounge 8+ agents dark 1280x800", async ({ page }) => {
+    ensureScreenshotsDir();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(1_500);
+    await page.evaluate(() => {
+      const store = (window as unknown as { __agenticviewStore?: { getState(): { agents: Record<string, unknown> } } }).__agenticviewStore;
+      if (!store) return;
+      const state = store.getState();
+      const workerIds = Object.keys(state.agents).filter(
+        (id) => (state.agents[id] as { role?: string }).role === "worker",
+      );
+      for (const id of workerIds.slice(0, 8)) {
+        const send = (state as unknown as { send?(m: unknown): void }).send;
+        if (send) send({ type: "agent.update", id, patch: { lounging: true } });
+      }
+    });
+    await page.waitForTimeout(500);
+    await page.keyboard.press("Digit6");
+    await page.waitForTimeout(2_500);
+    await page.screenshot({ path: "e2e/screenshots/lounge-busy-dark-1280x800.png", fullPage: false });
+  });
+
+  test("lounge walk mode light 1280x800", async ({ page }) => {
+    ensureScreenshotsDir();
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(1_500);
+    await page.evaluate(() => {
+      const setWalking = (window as unknown as { __setWalking?: (v: boolean) => void }).__setWalking;
+      if (setWalking) setWalking(true);
+    });
+    await page.waitForTimeout(2_000);
+    await page.screenshot({ path: "e2e/screenshots/lounge-walkmode-light-1280x800.png", fullPage: false });
+  });
+
+  test("lounge walk mode dark 1280x800", async ({ page }) => {
+    ensureScreenshotsDir();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".office canvas")).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(1_500);
+    await page.evaluate(() => {
+      const setWalking = (window as unknown as { __setWalking?: (v: boolean) => void }).__setWalking;
+      if (setWalking) setWalking(true);
+    });
+    await page.waitForTimeout(2_000);
+    await page.screenshot({ path: "e2e/screenshots/lounge-walkmode-dark-1280x800.png", fullPage: false });
+  });
 });
