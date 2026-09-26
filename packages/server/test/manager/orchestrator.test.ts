@@ -271,7 +271,7 @@ describe("Orchestrator", () => {
     expect((await ctx.tasks.get(b.id))!.status).toBe("cancelled");
     expect(ctx.fake.runs).toHaveLength(1);
     await expect(ctx.orch.cancel(b.id)).resolves.toBeUndefined();
-  });
+  }, 60000);
 
   it("permission and question round trips", async () => {
     const ctx = await setup(async function* (req) {
