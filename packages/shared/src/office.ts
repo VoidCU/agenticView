@@ -1,9 +1,18 @@
+import { z } from "zod";
 import type { Agent, Placement } from "./agent.js";
 
 /**
- * The office is a honeycomb of flat-top hexagonal rooms ("spaces").
+ * Office layout — honeycomb of flat-top hexagonal rooms ("spaces").
  * Axial coordinates (q, r); world x/z on the floor plane (y up).
  * Angles are measured in the x/z plane: angle 0 points along +x, 90 degrees along +z.
+ *
+ * Growth rules (ring-by-ring):
+ *   - Ring 0 is always the Manager's Office (origin hex, never removed).
+ *   - Ring 1 has six hexes (four pod slots, one meeting, one lounge).
+ *   - Rings 2 and 3 add a full shell of pod hexes (12 and 18 respectively).
+ *   - addRoom may not begin a new ring until every hex of the current ring is occupied.
+ *   - The office is capped at MAX_RINGS (3); addRoom returns an error beyond that.
+ *   - removeRoom succeeds only when the target room has no seated agents and is not the Manager's Office.
  */
 
 /** Circumradius of one hex room (center to corner). */
@@ -399,4 +408,121 @@ export function findSpace(spaces: Space[], ref: string): Space | undefined {
 /** Everywhere a worker could be moved to: every seat of the current honeycomb (it grows by itself when full). */
 export function assignableSpaces(agents: Agent[]): Space[] {
   return planOffice(agents).spaces.filter((s) => s.seats > 0);
+}
+
+/**
+ * Same as `planOffice` but uses a pre-built Space[] instead of deriving it from worker count.
+ * Used when the world has an explicit room layout (addRoom/removeRoom).
+ */
+export function planOfficeWithSpaces(spaces: Space[], agents: Agent[]): OfficePlan {
+  const workers = agents.filter((a) => a.role === "worker").sort(byCreation);
+  const byId = new Map(spaces.map((s) => [s.id, s]));
+  const taken = new Set<string>();
+  const placements: Record<string, Placement> = {};
+  const key = (p: Placement) => `${p.space}#${p.seat}`;
+  for (const w of workers) {
+    const p = w.placement;
+    const s = p && byId.get(p.space);
+    if (!p || !s || p.seat < 0 || p.seat >= s.seats || taken.has(key(p))) continue;
+    placements[w.id] = { space: p.space, seat: p.seat };
+    taken.add(key(p));
+  }
+  for (const w of workers) {
+    if (placements[w.id]) continue;
+    const free = firstFreeSeat(spaces, taken);
+    if (!free) continue;
+    placements[w.id] = free;
+    taken.add(key(free));
+  }
+  return { spaces, placements };
+}
+
+/** Explicit room record persisted in rooms.json. */
+export interface ExplicitRoom {
+  id: string;
+  kind: "pod" | "meeting" | "lounge";
+  name: string;
+  q: number;
+  r: number;
+}
+
+export const ExplicitRoomSchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(["pod", "meeting", "lounge"]),
+  name: z.string(),
+  q: z.number().int(),
+  r: z.number().int(),
+});
+
+export const ExplicitRoomsSchema = z.array(ExplicitRoomSchema);
+
+// ---------- ring-by-ring layout helpers (used by world.addRoom) ----------
+
+/**
+ * All hexes for a given ring in the canonical addRoom order.
+ * Ring 1: RING1_PODS (4) then MEETING_HEX then LOUNGE_HEX.
+ * Rings 2+: hexRing(k) sorted by viewOrder (closest to camera first).
+ */
+export function hexesForRing(ring: number): readonly { q: number; r: number }[] {
+  if (ring === 1) {
+    return [
+      ...RING1_PODS.map(([q, r]) => ({ q, r })),
+      { q: MEETING_HEX[0], r: MEETING_HEX[1] },
+      { q: LOUNGE_HEX[0], r: LOUNGE_HEX[1] },
+    ];
+  }
+  return hexRing(ring).sort(viewOrder);
+}
+
+/**
+ * Returns the current maximum ring in use (0 = only manager's office).
+ */
+export function currentOfficeRings(rooms: { q: number; r: number }[]): number {
+  if (rooms.length === 0) return 0;
+  return Math.max(...rooms.map((r) => hexDistance(r, { q: 0, r: 0 })));
+}
+
+/**
+ * Returns the next hex to use for addRoom (ring-by-ring order).
+ * Returns null when all MAX_RINGS rings are full.
+ * The ring-fill rule is enforced implicitly: ring k is only considered when ring k-1 is completely full.
+ */
+export function nextAddRoomHex(rooms: { q: number; r: number }[]): { q: number; r: number; ring: number } | null {
+  const occupied = new Set(rooms.map((r) => `${r.q},${r.r}`));
+  occupied.add("0,0"); // manager's office is always present
+  for (let k = 1; k <= MAX_RINGS; k++) {
+    const hexes = hexesForRing(k);
+    const free = hexes.find((h) => !occupied.has(`${h.q},${h.r}`));
+    if (free !== undefined) return { ...free, ring: k };
+  }
+  return null; // all MAX_RINGS rings are full
+}
+
+/** Generate a unique room ID for the next room of the given kind. */
+export function nextRoomId(kind: Exclude<SpaceKind, "office">, rooms: ExplicitRoom[]): string {
+  if (kind === "pod") {
+    const count = rooms.filter((r) => r.kind === "pod").length;
+    return `pod-${podLetter(count).toLowerCase()}`;
+  }
+  const count = rooms.filter((r) => r.kind === kind).length;
+  if (count === 0) return kind; // 'meeting' or 'lounge'
+  return `${kind}-${count + 1}`;
+}
+
+/** Builds a Space[] from an explicit room list (always prepends the Manager's Office at ring 0). */
+export function buildSpacesFromExplicit(rooms: ExplicitRoom[]): Space[] {
+  const mk = (id: string, name: string, kind: SpaceKind, q: number, r: number): Space => ({
+    id,
+    name,
+    kind,
+    q,
+    r,
+    ring: hexDistance({ q, r }, { q: 0, r: 0 }),
+    ...axialToWorld(q, r),
+    seats: SEATS_BY_KIND[kind],
+  });
+  return [
+    mk("office", "Manager's Office", "office", 0, 0),
+    ...rooms.map((r) => mk(r.id, r.name, r.kind, r.q, r.r)),
+  ];
 }
