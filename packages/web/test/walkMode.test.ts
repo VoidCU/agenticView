@@ -4,11 +4,14 @@
  * - Monitor throttle constants and getFeedLines helper
  * - useWalk store
  * - monitorPoseForSeat geometry
+ * - applyVelocity smooth acceleration
+ * - pointer-lock state machine (store-level)
+ * - NEAR_DIST proximity constant
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { buildSpaces } from "@agenticview/shared";
-import { isWalkable, movePlayer, walkDelta, clampPitch } from "../src/scene/walkPhysics";
-import { getFeedLines, MAX_DIST, REFRESH_MS, MAX_UPDATES_PER_FRAME, monitorPoseForSeat } from "../src/scene/DeskMonitor";
+import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, WALK_SPEED, ACCEL, DECEL } from "../src/scene/walkPhysics";
+import { getFeedLines, MAX_DIST, REFRESH_MS, MAX_UPDATES_PER_FRAME, monitorPoseForSeat, NEAR_DIST } from "../src/scene/DeskMonitor";
 import { useWalk } from "../src/state/walk";
 
 // ---- isWalkable ----
@@ -207,12 +210,13 @@ describe("getFeedLines", () => {
 
 describe("monitorPoseForSeat", () => {
   it("returns null for seats outside pod range", () => {
-    expect(monitorPoseForSeat(0, 0, 4)).toBeNull();
+    // Pods now have 6 seats (0–5); 6+ should be null.
+    expect(monitorPoseForSeat(0, 0, 6)).toBeNull();
     expect(monitorPoseForSeat(0, 0, 10)).toBeNull();
   });
 
-  it("returns a position for each valid pod seat (0-3)", () => {
-    for (let seat = 0; seat < 4; seat++) {
+  it("returns a position for each valid pod seat (0-5)", () => {
+    for (let seat = 0; seat < 6; seat++) {
       const pose = monitorPoseForSeat(0, 0, seat);
       expect(pose).not.toBeNull();
       expect(pose!.position).toHaveLength(3);
@@ -220,16 +224,16 @@ describe("monitorPoseForSeat", () => {
   });
 
   it("places monitors at desk height (y ~= 1.06)", () => {
-    for (let seat = 0; seat < 4; seat++) {
+    for (let seat = 0; seat < 6; seat++) {
       const pose = monitorPoseForSeat(0, 0, seat)!;
       expect(pose.position[1]).toBeCloseTo(1.06, 2);
     }
   });
 
-  it("front seats (0,1) have monitors further from center than back seats (2,3) in z", () => {
+  it("front seats (0-2) have monitors on the negative-z side of center", () => {
     const front0 = monitorPoseForSeat(0, 0, 0)!;
-    // Seat 0: l.z=-1.22, forward +z → monZ = -0.20 (closer to center)
-    // Should be between z=-1.22 and z=0
+    // Seat 0 (front row): l.z=-1.4, yaw=0, fwdZ=+1 → monZ = -1.4 + 1.02 = -0.38
+    // Should be between z=-1.5 and z=0
     expect(front0.position[2]).toBeGreaterThan(-1.5);
     expect(front0.position[2]).toBeLessThan(0);
   });
@@ -268,5 +272,99 @@ describe("useWalk store", () => {
     useWalk.getState().setWalking(true);
     useWalk.getState().setWalking(true);
     expect(useWalk.getState().walking).toBe(true);
+  });
+});
+
+// ---- applyVelocity (smooth acceleration / deceleration) ----
+
+describe("applyVelocity", () => {
+  it("accelerates toward target speed when keys held", () => {
+    // Start at rest, move forward for dt=0.1
+    const { vx, vz } = applyVelocity(0, 0, 0, 1, 0.1);
+    // Should have gained velocity toward (0, WALK_SPEED)
+    expect(vz).toBeGreaterThan(0);
+    expect(vz).toBeLessThanOrEqual(WALK_SPEED);
+    expect(vx).toBeCloseTo(0, 5);
+  });
+
+  it("does not overshoot target speed after many steps", () => {
+    let vx = 0, vz = 0;
+    for (let i = 0; i < 100; i++) {
+      ({ vx, vz } = applyVelocity(vx, vz, 0, 1, 0.016));
+    }
+    expect(vz).toBeLessThanOrEqual(WALK_SPEED + 1e-6);
+  });
+
+  it("decelerates when no input", () => {
+    const { vx, vz } = applyVelocity(WALK_SPEED, 0, 0, 0, 0.1);
+    expect(vx).toBeLessThan(WALK_SPEED);
+    expect(vx).toBeGreaterThanOrEqual(0);
+    expect(vz).toBeCloseTo(0, 5);
+  });
+
+  it("reaches near-zero speed after several frames of no input", () => {
+    let vx = WALK_SPEED, vz = 0;
+    for (let i = 0; i < 20; i++) {
+      ({ vx, vz } = applyVelocity(vx, vz, 0, 0, 0.1));
+    }
+    expect(Math.abs(vx)).toBeLessThan(0.01);
+  });
+
+  it("ACCEL and DECEL are positive constants", () => {
+    expect(ACCEL).toBeGreaterThan(0);
+    expect(DECEL).toBeGreaterThan(0);
+  });
+});
+
+// ---- movePlayer with solids (sub-stepping anti-tunnel) ----
+
+describe("movePlayer with solids", () => {
+  const spaces = buildSpaces(1);
+  const office = spaces.find((s) => s.id === "office")!;
+
+  it("accepts empty solids array and moves freely", () => {
+    const result = movePlayer(spaces, office.x, office.z, 0.3, 0.0, []);
+    expect(result.x).toBeCloseTo(office.x + 0.3, 3);
+    expect(result.z).toBeCloseTo(office.z, 3);
+  });
+
+  it("blocks movement via solid box", () => {
+    const wall = { kind: "box" as const, box: { minX: office.x + 0.3, maxX: office.x + 0.6, minZ: -50, maxZ: 50 } };
+    const result = movePlayer(spaces, office.x, office.z, 1.5, 0, [wall]);
+    // Should be pushed out to the left of the wall
+    expect(result.x).toBeLessThanOrEqual(wall.box.minX);
+  });
+});
+
+// ---- Pointer-lock state machine (via useWalk store) ----
+
+describe("pointer-lock state machine (store)", () => {
+  // The pointer-lock behaviour in WalkMode is browser-API-driven; we test the
+  // store transitions that mirror it: setWalking(false) is called when lock is
+  // released.
+
+  beforeEach(() => {
+    useWalk.setState({ walking: false });
+  });
+
+  it("entering walk mode sets walking=true", () => {
+    useWalk.getState().setWalking(true);
+    expect(useWalk.getState().walking).toBe(true);
+  });
+
+  it("simulated Esc / lock-release calls setWalking(false)", () => {
+    useWalk.getState().setWalking(true);
+    // Simulate pointerlockchange → exit handler.
+    useWalk.getState().setWalking(false);
+    expect(useWalk.getState().walking).toBe(false);
+  });
+});
+
+// ---- NEAR_DIST monitor proximity constant ----
+
+describe("NEAR_DIST", () => {
+  it("is a positive number less than MAX_DIST", () => {
+    expect(NEAR_DIST).toBeGreaterThan(0);
+    expect(NEAR_DIST).toBeLessThan(MAX_DIST);
   });
 });

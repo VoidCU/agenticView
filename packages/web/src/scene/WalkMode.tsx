@@ -1,217 +1,255 @@
 /**
- * WalkMode — third-person walk camera and player avatar.
+ * WalkMode — true first-person walk camera.
  *
  * When useWalk().walking is true:
- *  - OrbitControls are replaced by WASD/arrow movement + mouse-drag look.
- *  - A "You" avatar follows the player position.
- *  - Collision is enforced via walkPhysics.movePlayer.
- *  - Esc or setWalking(false) returns to overview.
- *  - Keys are ignored while typing in inputs or when a modal is open.
- *  - Near a whiteboard, clicking it fires the onOpenBoard callback.
+ *  - Camera is placed at eye height; OrbitControls disabled.
+ *  - WASD/arrows move the player; smooth acceleration/deceleration.
+ *  - Mouse look via Pointer Lock API (click canvas → captured; Esc → released + exit walk mode).
+ *  - Walking head-bob (vertical sine + lateral cosine).
+ *  - Collision via movePlayer (AABB sub-step + isWalkable outer wall).
+ *  - Screen-centre raycast: clicking while locked fires select on the nearest
+ *    DeskMonitor or whiteboard within MAX_INTERACT_DIST.
+ *  - Keys ignored while typing in inputs or a modal is open.
  */
-import { useRef, useEffect, useCallback, useMemo } from "react";
+import { useRef, useEffect } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { type Space } from "@agenticview/shared";
 import { useWalk } from "../state/walk";
-import { movePlayer, walkDelta, clampPitch } from "./walkPhysics";
-import { Robot } from "./Robot";
+import { useStore } from "../state/store";
+import { movePlayer, walkDelta, clampPitch, applyVelocity } from "./walkPhysics";
+import { type Solid } from "./colliders";
 
-/** Walk speed in world units per second. */
-const WALK_SPEED = 4.5;
-/** Mouse sensitivity (radians per pixel). */
-const MOUSE_SENSITIVITY = 0.004;
+// ---- Constants ----
+
 /** Camera height above floor (eye level). */
 const EYE_HEIGHT = 1.7;
-/** Camera follows player at this distance behind + above (third-person). */
-const CAM_OFFSET_BACK = 3.2;
-const CAM_OFFSET_UP = 1.2;
+/** Mouse sensitivity (radians per pixel via pointer lock movementX/Y). */
+const MOUSE_SENSITIVITY = 0.0022;
 
-/** Player you-avatar definition (reuses scene YOU constant shape). */
-const YOU_AGENT = {
-  id: "__walk_you__",
-  name: "You",
-  role: "worker" as const,
-  scope: "project" as const,
-  specialty: "You",
-  description: "",
-  provider: "claude" as const,
-  model: null,
-  systemPrompt: "",
-  tools: { edit: true, shell: true, web: true, screenshot: false },
-  permissionMode: "ask" as const,
-  appearance: { color: "#e6e8f0", accent: "#ffd166", eyes: "dots" as const },
-  stats: { xp: 0, level: 1, tasksDone: 0, tasksFailed: 0 },
-  createdAt: "",
-  updatedAt: "",
-};
+/** Head-bob amplitude (Y, world units). */
+const BOB_AMP_Y = 0.055;
+/** Head-bob amplitude (X, lateral sway). */
+const BOB_AMP_X = 0.022;
+/** Head-bob frequency (cycles per world-unit walked). */
+const BOB_FREQ = 3.8;
 
-interface WalkModeProps {
-  spaces: Space[];
-  /** Initial player world-space start position. */
-  startX: number;
-  startZ: number;
+/** Max distance for monitor/whiteboard interaction raycast. */
+const MAX_INTERACT_DIST = 7;
+
+// ---- Pointer-lock helpers ----
+
+/** True when the canvas is currently pointer-locked. */
+function isLocked(domElement: HTMLElement): boolean {
+  return document.pointerLockElement === domElement;
 }
 
-/** Inner component: handles input, updates camera, renders avatar. Mounted only while walking. */
-export function WalkModeController({ spaces, startX, startZ }: WalkModeProps) {
-  const { camera, gl } = useThree();
-  const setWalking = useWalk((s) => s.setWalking);
+// ---- Inner controller (mounted only while walking) ----
 
-  // Mutable state (not React state: updated per-frame without triggering re-renders).
-  const state = useRef({
+interface WalkControllerProps {
+  spaces: Space[];
+  startX: number;
+  startZ: number;
+  solids?: Solid[];
+  /** Called when the player clicks a whiteboard (identified by its space id). */
+  onBoard?: (spaceId: string) => void;
+}
+
+/**
+ * Inner component: handles input, updates the camera, enforces collision.
+ * Mounted only while useWalk().walking is true.
+ */
+export function WalkModeController({
+  spaces,
+  startX,
+  startZ,
+  solids = [],
+  onBoard,
+}: WalkControllerProps) {
+  const { camera, gl, scene } = useThree();
+  const setWalking = useWalk((s) => s.setWalking);
+  const select = useStore((s) => s.select);
+
+  // Mutable per-frame state (not React state — no re-render on change).
+  const st = useRef({
     x: startX,
     z: startZ,
-    yaw: 0,     // camera look direction (Y rotation)
-    pitch: 0,   // camera tilt (X rotation)
-    dragging: false,
-    /** True while pointer is down but hasn't moved far enough to be a real drag yet. */
-    dragPending: false,
-    prevMX: 0,
-    prevMY: 0,
+    yaw: 0,   // horizontal look (Y-axis rotation)
+    pitch: 0, // vertical look (X-axis rotation)
+    vx: 0,    // horizontal velocity X
+    vz: 0,    // horizontal velocity Z
+    bobPhase: 0,
+    locked: false,       // is pointer lock active?
+    clickPending: false, // user pressed primary button while locked
   });
 
   const keys = useRef(new Set<string>());
 
-  // Position vector for Robot target
-  const robotTarget = useMemo(
-    () => ({ x: startX, z: startZ, yaw: 0 }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
+  // ---- Pointer lock setup ----
 
-  // ---- Input setup ----
+  useEffect(() => {
+    const canvas = gl.domElement;
+
+    // Click canvas → request pointer lock (only if not already locked).
+    const onCanvasClick = () => {
+      if (!isLocked(canvas)) {
+        canvas.requestPointerLock();
+      } else {
+        // Already locked: schedule a raycast interaction on next frame.
+        st.current.clickPending = true;
+      }
+    };
+
+    // Lock acquired.
+    const onLockChange = () => {
+      st.current.locked = isLocked(canvas);
+      if (!st.current.locked) {
+        // Pointer lock released (user pressed Esc, or browser forced unlock).
+        setWalking(false);
+      }
+    };
+
+    // Mouse look (only runs while locked).
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isLocked(canvas)) return;
+      st.current.yaw -= e.movementX * MOUSE_SENSITIVITY;
+      st.current.pitch = clampPitch(
+        st.current.pitch - e.movementY * MOUSE_SENSITIVITY,
+      );
+    };
+
+    canvas.addEventListener("click", onCanvasClick);
+    document.addEventListener("pointerlockchange", onLockChange);
+    document.addEventListener("mousemove", onMouseMove);
+    return () => {
+      canvas.removeEventListener("click", onCanvasClick);
+      document.removeEventListener("pointerlockchange", onLockChange);
+      document.removeEventListener("mousemove", onMouseMove);
+      // Release lock if still held when component unmounts.
+      if (isLocked(canvas)) document.exitPointerLock();
+    };
+  }, [gl, setWalking]);
+
+  // ---- Keyboard input ----
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      // Ignore when typing in a text input or modal.
       const el = document.activeElement;
       if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
       if (document.querySelector('[role="dialog"]')) return;
       if (e.key === "Escape") {
-        setWalking(false);
+        // Esc: release pointer lock → onLockChange fires → setWalking(false).
+        // If not locked (e.g. browser already released), exit manually.
+        if (!isLocked(gl.domElement)) setWalking(false);
+        // If locked, exitPointerLock triggers the pointerlockchange handler.
         return;
       }
       keys.current.add(e.code);
     };
-    const onKeyUp = (e: KeyboardEvent) => {
-      keys.current.delete(e.code);
-    };
+    const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [setWalking]);
+  }, [gl, setWalking]);
 
-  // Mouse drag for look.
-  // We do NOT start rotating the camera until the pointer has moved > 4 px; this
-  // ensures that a clean click on a whiteboard (or any 3D mesh) does not cause a
-  // camera jerk and lets the R3F onClick event fire without interference.
-  useEffect(() => {
-    const canvas = gl.domElement;
-    const DRAG_THRESHOLD = 4;
-    const onDown = (e: PointerEvent) => {
-      if (e.button !== 0) return;
-      state.current.dragPending = true;
-      state.current.dragging = false;
-      state.current.prevMX = e.clientX;
-      state.current.prevMY = e.clientY;
-    };
-    const onMove = (e: PointerEvent) => {
-      const st = state.current;
-      if (!st.dragPending && !st.dragging) return;
-      const dx = e.clientX - st.prevMX;
-      const dy = e.clientY - st.prevMY;
-      if (st.dragPending) {
-        // Activate look-drag only once threshold is exceeded.
-        if (Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
-          st.dragPending = false;
-          st.dragging = true;
-        } else {
-          return; // not yet a drag — don't rotate
-        }
-      }
-      st.prevMX = e.clientX;
-      st.prevMY = e.clientY;
-      st.yaw -= dx * MOUSE_SENSITIVITY;
-      st.pitch = clampPitch(st.pitch - dy * MOUSE_SENSITIVITY);
-    };
-    const onUp = () => {
-      state.current.dragging = false;
-      state.current.dragPending = false;
-    };
-    canvas.addEventListener("pointerdown", onDown);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      canvas.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [gl]);
+  // ---- Raycaster for screen-centre interaction ----
+
+  const raycaster = useRef(new THREE.Raycaster());
 
   // ---- Per-frame update ----
 
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.08);
-    const st = state.current;
+    const cur = st.current;
 
-    // Movement
-    const { dx, dz } = walkDelta(keys.current, st.yaw);
-    if (dx !== 0 || dz !== 0) {
-      const step = WALK_SPEED * dt;
-      const next = movePlayer(spaces, st.x, st.z, dx * step, dz * step);
-      st.x = next.x;
-      st.z = next.z;
-      // Face the direction of movement
-      if (Math.abs(dx) + Math.abs(dz) > 0.01) {
-        st.yaw = Math.atan2(dx, dz);
-      }
+    // Movement direction from keys.
+    const { dx, dz } = walkDelta(keys.current, cur.yaw);
+
+    // Smooth velocity.
+    const vel = applyVelocity(cur.vx, cur.vz, dx, dz, dt);
+    cur.vx = vel.vx;
+    cur.vz = vel.vz;
+
+    const moveDist = Math.hypot(cur.vx, cur.vz) * dt;
+    if (moveDist > 1e-4) {
+      const next = movePlayer(spaces, cur.x, cur.z, cur.vx * dt, cur.vz * dt, solids);
+      cur.x = next.x;
+      cur.z = next.z;
+      cur.bobPhase += moveDist * BOB_FREQ;
     }
 
-    // Update robot target to match player position
-    robotTarget.x = st.x;
-    robotTarget.z = st.z;
-    robotTarget.yaw = st.yaw;
+    // Head-bob: applied only while moving.
+    const speed = Math.hypot(cur.vx, cur.vz);
+    const bobWeight = Math.min(1, speed / 2);
+    const bobY = Math.sin(cur.bobPhase * 2) * BOB_AMP_Y * bobWeight;
+    const bobX = Math.cos(cur.bobPhase) * BOB_AMP_X * bobWeight;
 
-    // Third-person camera: behind and above the player
-    const sinY = Math.sin(st.yaw);
-    const cosY = Math.cos(st.yaw);
-    const camX = st.x - sinY * CAM_OFFSET_BACK;
-    const camZ = st.z - cosY * CAM_OFFSET_BACK;
-    const camY = EYE_HEIGHT + CAM_OFFSET_UP;
-    camera.position.lerp(new THREE.Vector3(camX, camY, camZ), Math.min(1, dt * 10));
-    // Look at the player's eye level from behind
-    const lookX = st.x + sinY * 1.5;
-    const lookZ = st.z + cosY * 1.5;
-    camera.lookAt(lookX, EYE_HEIGHT * 0.85, lookZ);
+    // Apply camera.
+    camera.position.set(cur.x + bobX, EYE_HEIGHT + bobY, cur.z);
+
+    // Build rotation from yaw + pitch.
+    const euler = new THREE.Euler(cur.pitch, cur.yaw, 0, "YXZ");
+    camera.quaternion.setFromEuler(euler);
+
+    // Screen-centre raycast: fire when click was pending.
+    if (cur.clickPending) {
+      cur.clickPending = false;
+      raycaster.current.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const hits = raycaster.current.intersectObjects(scene.children, true);
+      for (const hit of hits) {
+        if (hit.distance > MAX_INTERACT_DIST) break;
+        // Walk up the hierarchy looking for userData.agentId or userData.boardSpaceId.
+        let obj: THREE.Object3D | null = hit.object;
+        while (obj) {
+          if (obj.userData?.agentId) {
+            select(obj.userData.agentId as string);
+            break;
+          }
+          if (obj.userData?.boardSpaceId) {
+            onBoard?.(obj.userData.boardSpaceId as string);
+            break;
+          }
+          obj = obj.parent;
+        }
+        if (obj) break;
+      }
+    }
   });
 
-  return (
-    <Robot
-      agent={YOU_AGENT}
-      target={robotTarget}
-      spaces={spaces}
-    />
-  );
+  // No visual avatar in first-person mode.
+  return null;
 }
 
-/**
- * Mount point: renders WalkModeController only while walking=true.
- * Also disables OrbitControls while walking.
- */
-interface WalkModeProps2 {
+// ---- Public mount point ----
+
+interface WalkModeProps {
   spaces: Space[];
   startX: number;
   startZ: number;
+  /** Optional interior solid obstacles (from scene/colliders.ts buildColliders). */
+  solids?: Solid[];
+  /** Called when the player clicks a whiteboard (identified by its space id). */
+  onBoard?: (spaceId: string) => void;
 }
 
-export function WalkMode({ spaces, startX, startZ }: WalkModeProps2) {
+/**
+ * Renders WalkModeController only while useWalk().walking is true.
+ * Place inside the R3F Canvas alongside OrbitControls; WalkMode suppresses
+ * OrbitControls via the walk state which the Office component reads.
+ */
+export function WalkMode({ spaces, startX, startZ, solids, onBoard }: WalkModeProps) {
   const walking = useWalk((s) => s.walking);
   if (!walking) return null;
-  return <WalkModeController spaces={spaces} startX={startX} startZ={startZ} />;
+  return (
+    <WalkModeController
+      spaces={spaces}
+      startX={startX}
+      startZ={startZ}
+      solids={solids}
+      onBoard={onBoard}
+    />
+  );
 }

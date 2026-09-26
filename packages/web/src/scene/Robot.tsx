@@ -9,6 +9,8 @@ import { LimitChip, SwitchAgentModal } from "../hud/LimitChip";
 import { levelAccents } from "./accents";
 import { dragPoint, livePositions, useDrag } from "./motion";
 import { agentActivityText } from "./selectors";
+import { useWalk } from "../state/walk";
+import { useHudPrefs } from "../state/hudPrefs";
 
 export interface RobotTarget extends Point {
   yaw: number;
@@ -134,6 +136,10 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   const feed = useStore((s) => s.feed[agent.id]);
   const activity = useMemo(() => agentActivityText(agent, tasks, feed), [agent, tasks, feed]);
   const held = useDrag((s) => s.heldId === agent.id && s.active);
+  // Hide tags/bubbles in walk mode or when showTags is disabled.
+  const walking = useWalk((s) => s.walking);
+  const showTags = useHudPrefs((s) => s.showTags);
+  const tagsVisible = !walking && showTags;
   const root = useRef<THREE.Group>(null);
   const yawG = useRef<THREE.Group>(null);
   const tilt = useRef<THREE.Group>(null);
@@ -157,10 +163,21 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   // Turn round to the viewer when being talked to.
   const faceViewer = selected || Boolean(permission || question);
 
-  const motion = useRef<{ x: number; z: number; yaw: number; path: Point[]; key: string; walk: number; phase: number; lift: number } | null>(null);
+  // Extended motion state: vx/vz for path-update velocity blending.
+  const motion = useRef<{
+    x: number; z: number; yaw: number;
+    path: Point[]; key: string;
+    walk: number; phase: number; lift: number;
+    vx: number; vz: number; // current velocity for smooth path transitions
+  } | null>(null);
   if (!motion.current) {
     const start = spawnAt ?? target;
-    motion.current = { x: start.x, z: start.z, yaw: target.yaw, path: [], key: spawnAt ? "" : `${target.x.toFixed(3)},${target.z.toFixed(3)}`, walk: 0, phase: 0, lift: 0 };
+    motion.current = {
+      x: start.x, z: start.z, yaw: target.yaw,
+      path: [], key: spawnAt ? "" : `${target.x.toFixed(3)},${target.z.toFixed(3)}`,
+      walk: 0, phase: 0, lift: 0,
+      vx: 0, vz: 0,
+    };
   }
 
   useFrame(({ clock, camera }, rawDt) => {
@@ -186,32 +203,59 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           st.path = [];
           onArrive?.(agent.id);
         } else {
+          // Recalculate path from current position.
+          // Preserve vx/vz so we don't jitter — velocity blends naturally.
           st.path = route(spaces, { x: st.x, z: st.z }, target).slice(1);
         }
       }
-      let budget = WALK_SPEED * dt;
+      // Walk along path using velocity-blended stepping.
       let heading: number | undefined;
-      while (budget > 0 && st.path.length) {
+      if (st.path.length) {
         const next = st.path[0]!;
         const dx = next.x - st.x;
         const dz = next.z - st.z;
         const d = Math.hypot(dx, dz);
-        if (d > 1e-4) heading = Math.atan2(dx, dz);
-        if (d <= budget) {
-          st.x = next.x;
-          st.z = next.z;
-          budget -= d;
-          st.path.shift();
-          if (!st.path.length) onArrive?.(agent.id);
-        } else {
-          st.x += (dx / d) * budget;
-          st.z += (dz / d) * budget;
-          budget = 0;
+        if (d > 1e-4) {
+          heading = Math.atan2(dx, dz);
+          // Blend velocity toward the direction of the next waypoint.
+          const targetVx = (dx / d) * WALK_SPEED;
+          const targetVz = (dz / d) * WALK_SPEED;
+          const blend = Math.min(1, dt * 10);
+          st.vx += (targetVx - st.vx) * blend;
+          st.vz += (targetVz - st.vz) * blend;
         }
+        const step = WALK_SPEED * dt;
+        let budget = step;
+        while (budget > 0 && st.path.length) {
+          const wp = st.path[0]!;
+          const wdx = wp.x - st.x;
+          const wdz = wp.z - st.z;
+          const wd = Math.hypot(wdx, wdz);
+          if (wd <= budget) {
+            st.x = wp.x;
+            st.z = wp.z;
+            budget -= wd;
+            st.path.shift();
+            if (!st.path.length) onArrive?.(agent.id);
+          } else {
+            st.x += (wdx / wd) * budget;
+            st.z += (wdz / wd) * budget;
+            budget = 0;
+          }
+        }
+      } else {
+        // No path: decelerate velocity to zero.
+        st.vx *= Math.max(0, 1 - dt * 12);
+        st.vz *= Math.max(0, 1 - dt * 12);
       }
-      const walking = st.path.length > 0;
-      st.walk += ((walking ? 1 : 0) - st.walk) * Math.min(1, dt * 8);
-      const desired = walking && heading !== undefined ? heading : faceViewer ? Math.atan2(camera.position.x - st.x, camera.position.z - st.z) : target.yaw;
+      const isWalking = st.path.length > 0;
+      st.walk += ((isWalking ? 1 : 0) - st.walk) * Math.min(1, dt * 8);
+      // Smoothly rotate to face direction of travel; snap to target.yaw at rest.
+      const desired = isWalking && heading !== undefined
+        ? heading
+        : faceViewer
+          ? Math.atan2(camera.position.x - st.x, camera.position.z - st.z)
+          : target.yaw;
       st.yaw += angleDiff(desired, st.yaw) * Math.min(1, dt * TURN_RATE);
     }
     livePositions.set(agent.id, { x: st.x, z: st.z });
@@ -414,6 +458,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           <meshBasicMaterial color={accent === "#ffffff" ? agent.appearance.color : accent} transparent opacity={0.22} toneMapped={false} />
         </mesh>
       )}
+      {tagsVisible && (
       <Html center distanceFactor={18} position={[0, 2.35 * ROBOT_SCALE + 0.15, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
         {/* Stop DOM events here: fiber listens on the canvas wrapper, so a click on the tag would otherwise count as a "pointer missed" and deselect. */}
         <div
@@ -503,7 +548,8 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
           </button>
         </div>
       </Html>
-      {fainted && (
+      )}
+      {fainted && tagsVisible && (
         <Html center position={[0, 2.2 * ROBOT_SCALE, 0]} distanceFactor={18} zIndexRange={[18, 0]} style={{ pointerEvents: "none" }}>
           <div className="faint-zz" aria-label="Fainted – quota exceeded">
             <span className="faint-z z1">z</span>

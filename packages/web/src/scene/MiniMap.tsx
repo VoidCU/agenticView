@@ -120,7 +120,7 @@ export function MiniMap() {
   // Small round button shown when map is closed
   if (!open) {
     return (
-      <div style={anchorStyle}>
+      <div className="mini-map-hud" style={anchorStyle}>
         <button
           type="button"
           className="minimap-toggle-btn"
@@ -138,7 +138,7 @@ export function MiniMap() {
   }
 
   return (
-    <div style={{ ...anchorStyle, pointerEvents: "none" }}>
+    <div className="mini-map-hud" style={{ ...anchorStyle, pointerEvents: "none" }}>
       <div
         style={{
           background: containerBg,
