@@ -294,6 +294,8 @@ The built bundles in `packages/server/dist` and `packages/web/dist` are committe
 
 One opt-in live test runs a real Claude worker in a temp directory: `AGENTICVIEW_LIVE=1 npm test`.
 
+Review screenshots of the HUD and boards (light and dark, 1920×1080 and 1280×800) are opt-in because they are slow in headless CI: `AGENTICVIEW_SCREENSHOTS=1 npm run test:e2e` writes them to `e2e/screenshots/`.
+
 ### Releasing
 
 Prepare the release on `main`. Keep the version consistent across these seven files (the lockfile is refreshed by npm):

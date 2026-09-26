@@ -18,6 +18,12 @@ if (!process.env.AGENTICVIEW_E2E_CLEANED) {
 export default defineConfig({
   testDir: ".",
   testMatch: /.*\.spec\.ts/,
+  /*
+   * *-screenshots.spec.ts files render the full 3D office at several sizes and themes to produce review
+   * screenshots. They are too slow for CI's software-rendered browser and assert little behaviour, so they
+   * only run on request: AGENTICVIEW_SCREENSHOTS=1 npm run test:e2e.
+   */
+  testIgnore: process.env.AGENTICVIEW_SCREENSHOTS ? [] : [/-screenshots\.spec\.ts$/],
   timeout: 60_000,
   /* Both tests drive one shared server and project directory, so they must not interleave. */
   workers: 1,
