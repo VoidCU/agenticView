@@ -24,7 +24,7 @@ function mkSnapshot(extra: Partial<Extract<ServerMessage, { type: "snapshot" }>>
     agents: [],
     tasks: [],
     providers: [],
-    settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3, limitPolicy: "ask" as const, loungeBreaks: true },
+    settings: { defaultProvider: null, defaultModel: null, maxConcurrentRuns: 3, limitPolicy: "ask" as const, loungeBreaks: true, preferCheapModels: true },
     permissions: [],
     questions: [],
     ...extra,

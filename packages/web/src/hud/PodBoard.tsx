@@ -13,6 +13,135 @@ import { RetryButton } from "./LimitChip";
 /** Stable empty array used as a fallback in selectors to avoid new-reference churn. */
 const NO_FEED: import("../state/store").FeedItem[] = [];
 
+// ── Changes view ──────────────────────────────────────────────────────────────
+
+interface ChangesData {
+  files: { path: string; kind: string }[];
+  diff: string;
+  truncated: boolean;
+}
+
+function DiffLine({ line }: { line: string }) {
+  if (line.startsWith("+++") || line.startsWith("---")) {
+    return <span className="diff-file-header">{line}</span>;
+  }
+  if (line.startsWith("@@")) {
+    return <span className="diff-hunk">{line}</span>;
+  }
+  if (line.startsWith("+")) {
+    return <span className="diff-add">{line}</span>;
+  }
+  if (line.startsWith("-")) {
+    return <span className="diff-del">{line}</span>;
+  }
+  return <span className="diff-ctx">{line}</span>;
+}
+
+function ChangesView({ taskId, onClose }: { taskId: string; onClose: () => void }) {
+  const [data, setData] = useState<ChangesData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetch(`/api/tasks/${encodeURIComponent(taskId)}/changes`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<ChangesData>;
+      })
+      .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
+      .catch((e: unknown) => { if (!cancelled) { setError(String(e)); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [taskId]);
+
+  const toggleFile = (key: string) => {
+    setCollapsedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  // Split diff into per-file sections
+  const fileSections = (() => {
+    if (!data?.diff) return [];
+    const sections: { header: string; lines: string[] }[] = [];
+    let current: { header: string; lines: string[] } | null = null;
+    for (const line of data.diff.split("\n")) {
+      if (line.startsWith("diff --git")) {
+        if (current) sections.push(current);
+        current = { header: line, lines: [line] };
+      } else if (current) {
+        current.lines.push(line);
+      } else {
+        current = { header: line, lines: [line] };
+      }
+    }
+    if (current) sections.push(current);
+    return sections;
+  })();
+
+  return (
+    <div className="changes-view" data-testid="changes-view">
+      <div className="changes-view-head">
+        <h4>Changes</h4>
+        <button type="button" className="icon-btn icon-btn-xs" onClick={onClose} aria-label="Close changes">
+          <CloseIcon />
+        </button>
+      </div>
+      {loading && <p className="changes-loading">Loading changes…</p>}
+      {error && <p className="changes-error">Could not load changes: {error}</p>}
+      {data && !loading && (
+        <>
+          {data.truncated && (
+            <p className="changes-truncated">Diff is large and has been truncated. Only the first portion is shown.</p>
+          )}
+          {data.files.length > 0 && (
+            <ul className="changes-file-list" aria-label="Changed files">
+              {data.files.map((f) => (
+                <li key={f.path} className={`changes-file-item changes-file-${f.kind}`} title={f.path}>
+                  <span className="changes-file-kind">{f.kind[0]?.toUpperCase()}</span>
+                  <span className="changes-file-path">{f.path.split(/[\\/]/).pop() ?? f.path}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {fileSections.length > 0 ? (
+            <div className="changes-diff">
+              {fileSections.map((sec, i) => {
+                const key = `${i}-${sec.header}`;
+                const collapsed = collapsedFiles.has(key);
+                const title = sec.lines.find((l) => l.startsWith("+++ ") || l.startsWith("--- ")) ?? sec.header;
+                return (
+                  <details key={key} className="diff-file-section" open={!collapsed}>
+                    <summary className="diff-file-summary" onClick={() => toggleFile(key)}>
+                      {title.replace(/^[+-]{3} [ab]\//, "")}
+                    </summary>
+                    <pre className="diff-body">
+                      {sec.lines.map((line, j) => (
+                        <DiffLine key={j} line={line} />
+                      ))}
+                    </pre>
+                  </details>
+                );
+              })}
+            </div>
+          ) : data.diff ? (
+            <pre className="diff-body diff-plain">
+              {data.diff.split("\n").map((line, i) => <DiffLine key={i} line={line} />)}
+            </pre>
+          ) : (
+            <p className="changes-empty">No diff available.</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function agentInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
@@ -38,6 +167,7 @@ function TaskDrawer({
 }) {
   const sessions = useStore((s) => s.sessions);
   const drawerRef = useRef<HTMLDivElement>(null);
+  const [showChanges, setShowChanges] = useState(false);
 
   // Focus first interactive element on mount
   useEffect(() => {
@@ -49,10 +179,15 @@ function TaskDrawer({
 
   // Close on Escape (handled by parent Modal's key listener, but also intercept here)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        if (showChanges) setShowChanges(false); else onClose();
+      }
+    };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [onClose, showChanges]);
 
   const session = agent ? sessions.find((s) => s.agentIds.includes(agent.id)) : undefined;
 
@@ -114,7 +249,18 @@ function TaskDrawer({
         {/* Files changed */}
         {filesChanged.length > 0 && (
           <div className="kanban-drawer-section">
-            <h4>Files changed ({filesChanged.length})</h4>
+            <div className="kanban-drawer-files-head">
+              <h4>Files changed ({filesChanged.length})</h4>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                onClick={() => setShowChanges(true)}
+                aria-label="View diff"
+                data-testid="changes-button"
+              >
+                Changes
+              </button>
+            </div>
             <ul className="kanban-drawer-files" aria-label="Files changed">
               {filesChanged.map((f) => (
                 <li key={f} title={f}>{basename(f)}</li>
@@ -125,6 +271,17 @@ function TaskDrawer({
 
         {/* Actions */}
         <div className="kanban-drawer-actions">
+          {filesChanged.length === 0 && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              onClick={() => setShowChanges(true)}
+              aria-label="View changes"
+              data-testid="changes-button"
+            >
+              Changes
+            </button>
+          )}
           {task.status === "failed" && <RetryButton taskId={task.id} taskTitle={task.title} />}
           {task.status === "waiting" && onOpenInbox && (
             <button
@@ -139,6 +296,11 @@ function TaskDrawer({
             </button>
           )}
         </div>
+
+        {/* Changes panel */}
+        {showChanges && (
+          <ChangesView taskId={task.id} onClose={() => setShowChanges(false)} />
+        )}
       </div>
     </div>
   );

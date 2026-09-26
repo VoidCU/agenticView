@@ -82,14 +82,27 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
   );
 }
 
-export function TaskBoard({ onOpenInbox }: { onOpenInbox?: () => void } = {}) {
+export function TaskBoard({
+  onOpenInbox,
+  externalCollapsed,
+  onCollapseChange,
+}: {
+  onOpenInbox?: () => void;
+  externalCollapsed?: boolean;
+  onCollapseChange?: (v: boolean) => void;
+} = {}) {
   const tasks = useStore((s) => s.tasks);
   const agents = useStore((s) => s.agents);
   const world = useStore((s) => s.world);
   const spaceNames = useStore((s) => s.spaceNames);
 
   const [selectedRoom, setSelectedRoom] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
+  const collapsed = externalCollapsed !== undefined ? externalCollapsed : internalCollapsed;
+  const setCollapsed = (v: boolean) => {
+    setInternalCollapsed(v);
+    onCollapseChange?.(v);
+  };
   const bodyId = useId();
   const roomSelectId = useId();
 

@@ -4,6 +4,7 @@ import { useStore } from "../state/store";
 import { LimitChip, SwitchProviderModal } from "./LimitChip";
 import { UsagePanel } from "./UsagePanel";
 import { Modal, ProviderChip, automaticLabel, providerLabel } from "./ui";
+import { getNotificationPref, requestNotificationPermission, setNotificationPref } from "./useNotifications";
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const settings = useStore((s) => s.settings);
@@ -16,6 +17,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [max, setMax] = useState(settings?.maxConcurrentRuns ?? 3);
   const [limitPolicy, setLimitPolicy] = useState<"ask" | "auto">(settings?.limitPolicy ?? "ask");
   const [loungeBreaks, setLoungeBreaks] = useState(settings?.loungeBreaks ?? true);
+  const [preferCheapModels, setPreferCheapModels] = useState(settings?.preferCheapModels ?? false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => getNotificationPref());
   const [tab, setTab] = useState<"settings" | "usage">("settings");
   const [switchProvider, setSwitchProvider] = useState<Provider | null>(null);
 
@@ -29,6 +32,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         maxConcurrentRuns: Math.min(10, Math.max(1, Math.round(max))),
         limitPolicy,
         loungeBreaks,
+        preferCheapModels,
       },
     });
     onClose();
@@ -97,6 +101,32 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 checked={loungeBreaks}
                 onChange={(e) => setLoungeBreaks(e.target.checked)}
                 aria-label="Lounge breaks"
+              />
+            </label>
+            <label className="field field-toggle">
+              <span>Prefer cheap models</span>
+              <input
+                type="checkbox"
+                checked={preferCheapModels}
+                onChange={(e) => setPreferCheapModels(e.target.checked)}
+                aria-label="Prefer cheap models"
+              />
+            </label>
+            <label className="field field-toggle">
+              <span>Desktop notifications</span>
+              <input
+                type="checkbox"
+                checked={notificationsEnabled}
+                onChange={async (e) => {
+                  if (e.target.checked) {
+                    const granted = await requestNotificationPermission();
+                    setNotificationsEnabled(granted);
+                  } else {
+                    setNotificationPref(false);
+                    setNotificationsEnabled(false);
+                  }
+                }}
+                aria-label="Desktop notifications"
               />
             </label>
           </div>

@@ -2828,3 +2828,329 @@ h3 {
   word-break: break-all;
 }
 
+/* ── Changes view ──────────────────────────────────────────────────────────── */
+
+.kanban-drawer-files-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.kanban-drawer-files-head h4 {
+  margin: 0;
+}
+
+.changes-view {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.changes-view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.changes-view-head h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.changes-loading,
+.changes-error,
+.changes-empty {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 4px 0;
+}
+
+.changes-error { color: var(--red); }
+
+.changes-truncated {
+  font-size: 12px;
+  color: var(--amber);
+  margin: 4px 0 8px;
+  padding: 4px 8px;
+  background: rgba(255, 209, 102, 0.08);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--amber);
+}
+
+.changes-file-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.changes-file-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-file-create { border-color: var(--green); color: var(--green); }
+.changes-file-modify { border-color: var(--blue); color: var(--blue); }
+.changes-file-delete { border-color: var(--red); color: var(--red); }
+
+.changes-file-kind {
+  font-weight: 800;
+  font-size: 10px;
+  flex: none;
+}
+
+.changes-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.diff-file-section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.diff-file-summary {
+  cursor: pointer;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: var(--mono);
+  background: var(--input);
+  color: var(--muted);
+  list-style: none;
+  user-select: none;
+}
+
+.diff-file-summary:hover { color: var(--text); }
+
+.diff-body {
+  margin: 0;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.diff-plain {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  max-height: 400px;
+  overflow: auto;
+}
+
+.diff-add { display: block; color: var(--green); background: rgba(61, 220, 151, 0.06); }
+.diff-del { display: block; color: var(--red); background: rgba(239, 68, 68, 0.06); }
+.diff-hunk { display: block; color: var(--blue); }
+.diff-file-header { display: block; color: var(--amber); font-weight: 700; }
+.diff-ctx { display: block; color: var(--muted); }
+
+/* ── Timeline panel ──────────────────────────────────────────────────────────── */
+
+.hud-timeline {
+  position: absolute;
+  left: var(--gutter);
+  top: calc(var(--gutter) + 52px);
+  bottom: calc(var(--gutter) + 60px);
+  width: clamp(280px, 28vw, 360px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+}
+
+.panel-timeline {
+  flex: 1 1 auto;
+}
+
+.tl-filters {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tl-filters .task-room-select {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.tl-close {
+  margin-left: auto;
+  flex: none;
+}
+
+.tl-body {
+  padding: 8px 10px;
+}
+
+.tl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tl-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.tl-entry:hover { background: var(--input); }
+
+.tl-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  flex: none;
+  margin-top: 1px;
+}
+
+.tl-entry-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tl-icon {
+  font-size: 11px;
+  margin-right: 4px;
+  opacity: 0.7;
+}
+
+.tl-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tl-detail {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.tl-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.tl-done .tl-icon { color: var(--green); }
+.tl-failed .tl-icon { color: var(--red); }
+.tl-waiting .tl-icon { color: var(--amber); }
+.tl-started .tl-icon { color: var(--blue); }
+.tl-file .tl-icon { color: var(--muted); }
+.tl-question .tl-icon { color: var(--amber); }
+
+/* ── Keyboard shortcuts overlay ───────────────────────────────────────────────── */
+
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shortcuts-card {
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  min-width: 280px;
+  box-shadow: var(--shadow);
+}
+
+.shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.shortcuts-head h3 { font-size: 15px; }
+
+.shortcuts-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  align-items: center;
+}
+
+.shortcuts-list dt {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.shortcuts-list dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--input);
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: var(--text);
+}
+
+/* ── btn-ghost-active variant ─────────────────────────────────────────────── */
+
+.btn-ghost-active {
+  background: rgba(91, 140, 255, 0.15);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
