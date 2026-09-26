@@ -4,7 +4,7 @@ import { useStore, useAgentStatus, type FeedItem } from "../state/store";
 import { uploadImage } from "../net/ws";
 import { AgentMenu } from "./AgentMenu";
 import { LimitChip, SwitchAgentModal } from "./LimitChip";
-import { ServingChip, SessionChip, SessionNotice } from "./sessions";
+import { ServingChip, SessionChip, SessionNotice, displayModelOf } from "./sessions";
 import { WorkLog } from "./WorkLog";
 import { ImageIcon, SendIcon, basename, defaultProviderOf, prettyInput, providerLabel, xpProgress } from "./ui";
 
@@ -88,6 +88,8 @@ function Header({ agent }: { agent: Agent }) {
   const autoProvider = useStore((s) => s.autoProvider);
   const provider = agent.provider ?? defaultProviderOf(settings?.defaultProvider, autoProvider);
   const pstat = providers.find((p) => p.provider === provider);
+  const sessions = useStore((s) => s.sessions);
+  const shownModel = displayModelOf(agent, provider, sessions);
   const chipEffort = effectiveEffort(provider, agent.model, agent.effort);
   const { pct, next } = xpProgress(agent.stats.xp, agent.stats.level);
   const [switchOpen, setSwitchOpen] = useState(false);
@@ -103,7 +105,7 @@ function Header({ agent }: { agent: Agent }) {
           <span className={`chip ${pstat && !pstat.ok ? "chip-off" : "chip-ok"}`} title={pstat?.ok === false ? pstat.reason : undefined}>
             <span className="chip-dot" aria-hidden="true" />
             {providerLabel(provider)}
-            {agent.model ? ` · ${modelLabel(provider, agent.model)}` : ""}
+            {shownModel ? ` · ${modelLabel(provider, shownModel)}` : ""}
             {chipEffort ? ` · ${EFFORT_LABELS[chipEffort]} effort` : ""}
           </span>
           {provider === "claude-session" && <SessionChip agent={agent} />}

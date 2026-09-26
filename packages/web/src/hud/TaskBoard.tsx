@@ -4,6 +4,7 @@ import { useStore, useAgentStatus } from "../state/store";
 import { filterTasksByRoom, groupTasksByAgent, isTaskInProject } from "../state/taskGroups";
 import { RetryButton } from "./LimitChip";
 import { timeAgo } from "./ui";
+import { displayModelOf } from "./sessions";
 
 const STATUS_WORD: Record<TaskStatus, string> = {
   running: "running",
@@ -156,7 +157,8 @@ function AgentGroupHeader({
   const agentStatusVal = useAgentStatus(agentId);
 
   const session = agent ? sessions.find((s) => s.agentIds.includes(agentId)) : undefined;
-  const model = session?.model ?? null;
+  // Session agents: the serving session's model (agent.sessionModel), not a stale stored one.
+  const model = agent?.provider === "claude-session" ? displayModelOf(agent, "claude-session", sessions) : session?.model ?? null;
   const spaceId = agent?.placement?.space;
   const room = spaceId ? (roomName ?? (spaceNames[spaceId]?.trim() || spaceId)) : undefined;
 

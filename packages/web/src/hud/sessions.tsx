@@ -37,6 +37,16 @@ export function sessionModelOf(agent: Agent, sessions: WorkerSessionInfo[]): str
   return agent.sessionModel ?? boundSession(agent, sessions)?.model ?? null;
 }
 
+/**
+ * The model to show for an agent (chat header chip, Tasks group header). Claude Code session agents run on
+ * their serving session's model (`agent.sessionModel`, else the bound session's), falling back to their own
+ * stored model; every other provider shows its own model.
+ */
+export function displayModelOf(agent: Agent, provider: Provider, sessions: WorkerSessionInfo[]): string | null {
+  if (provider === "claude-session") return sessionModelOf(agent, sessions) ?? agent.model;
+  return agent.model;
+}
+
 /** The run serving an agent right now, with its session (a session may run several agents at once). */
 export function servingRun(agentId: string, sessions: WorkerSessionInfo[]): { session: WorkerSessionInfo; run: SessionRunInfo } | undefined {
   for (const session of sessions) {
