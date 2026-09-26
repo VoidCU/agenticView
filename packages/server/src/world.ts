@@ -25,6 +25,7 @@ import {
   type ExplicitRoom,
   planOfficeWithSpaces,
   planOffice,
+  loungeSpots,
 } from "@agenticview/shared";
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime, type RecentWork } from "./runtimes/session.js";
@@ -42,6 +43,7 @@ import { isTerminal, type Agent, type Task } from "@agenticview/shared";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
 import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
 import { GameService } from "./games/gameService.js";
+import { IdleBehaviourService } from "./games/idleBehaviour.js";
 
 export interface WorldOptions {
   runtimes: Map<Provider, Runtime>;
@@ -286,19 +288,43 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   const gameService = new GameService({ root, bus: opts.bus, registry });
   gameService.start();
 
-  // Idle lounge tracking: watch task state transitions on the bus.
+  // Idle behaviour (desk / visit / lounge rolls): server-local randomness only, never a model call.
+  const officeSpaces = async (): Promise<{ spaces: Space[]; agents: Agent[] }> => {
+    const agents = await registry.list();
+    const spaces = explicitRooms !== null ? buildSpacesFromExplicit(explicitRooms) : buildSpaces(ringsFor(agents.filter((a) => a.role === "worker").length));
+    return { spaces, agents };
+  };
+  const loungeBaseSpots = loungeSpots(0).spots.filter((sp) => !sp.waiting).length;
+  const idle = new IdleBehaviourService({
+    registry,
+    bus: opts.bus,
+    settings: () => ({ idleMinutes: settings().idleLoungeMinutes, behaviour: settings().idleBehaviour }),
+    loungeSpots: async () => (await officeSpaces()).spaces.filter((s) => s.kind === "lounge").length * loungeBaseSpots,
+    desks: async () => {
+      const { spaces, agents } = await officeSpaces();
+      const seats = spaces.filter((s) => s.kind === "pod").flatMap((s) => Array.from({ length: s.seats }, (_, seat) => ({ space: s.id, seat })));
+      return { seats, placements: planOfficeWithSpaces(spaces, agents).placements };
+    },
+    whiteboardSpace: async () => (await officeSpaces()).spaces.find((s) => s.kind === "meeting")?.id,
+  });
+  const hasOpenWork = async (agentId: string) => (await tasks.list()).some((t) => t.assigneeId === agentId && !isTerminal(t.status));
   opts.bus.on((m) => {
     if (m.type === "task.updated") {
       const { task } = m;
       const agentId = task.assigneeId;
-      const s = settings();
-      if (task.status === "running" || task.status === "assigned") {
-        void gameService.onAgentBusy(agentId);
+      if (task.status === "running" || task.status === "assigned" || task.status === "waiting" || task.status === "queued") {
+        if (!idle.isBusy(agentId)) void idle.onBusy(agentId).catch(() => undefined);
       } else if (isTerminal(task.status)) {
-        gameService.onAgentIdle(agentId, s.idleLoungeMinutes);
+        void hasOpenWork(agentId).then((open) => {
+          if (!open) idle.onIdle(agentId);
+        }, () => undefined);
       }
     }
   });
+  {
+    const open = new Set((await tasks.list()).filter((t) => !isTerminal(t.status)).map((t) => t.assigneeId));
+    idle.start((await registry.list()).filter((a) => a.role === "worker" && !open.has(a.id)).map((a) => a.id));
+  }
 
   let emitProvidersFn: () => Promise<void> = async () => undefined;
 

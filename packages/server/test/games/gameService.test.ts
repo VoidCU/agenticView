@@ -376,7 +376,46 @@ describe("game.result broadcast", () => {
     svc.stop();
   });
 
-  it("emits game.started with game spots and seats before game.result, and only pairs neighbours", async () => {
+  it("pairs any two lounging agents, one match at a time; user games take any agent", async () => {
+    const { svc, msgs, registry } = makeService({ randomDelay: () => 999_999_999 });
+    const ids: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      const ag = await registry.create({ name: `Q${i}`, specialty: "x", role: "worker", scope: "project" });
+      await registry.update(ag.id, { lounging: true });
+      ids.push(ag.id);
+    }
+    const { layout, assignment } = loungeAssignmentFor(ids);
+    const byId = new Map(layout.spots.map((sp) => [sp.id, sp]));
+    const seen = new Set<string>();
+    for (let n = 0; n < 60; n++) await svc.runAutoMatch();
+    let far = 0;
+    for (const m of msgs) {
+      if (m.type !== "game.started") continue;
+      seen.add([...m.players].sort().join("|"));
+      const sa = byId.get(assignment[m.players[0]]!)!;
+      const sb = byId.get(assignment[m.players[1]]!)!;
+      if (Math.hypot(sa.x - sb.x, sa.z - sb.z) > RPS_PAIR_MAX_DIST) far++;
+    }
+    // Pairs are not limited to neighbours.
+    expect(far).toBeGreaterThan(0);
+    expect(seen.size).toBeGreaterThan(3);
+
+    // While a match holds the game spots, no second match starts.
+    const slow = makeService({ randomDelay: () => 999_999_999 });
+    const s2 = new GameService({ root: proj, bus: slow.bus, registry, matchPlayMs: 200 });
+    const first = s2.runAutoMatch();
+    expect(await s2.runAutoMatch()).toBeNull();
+    expect(await first).not.toBeNull();
+
+    // A user can challenge any agent, lounging or not.
+    const desk = await registry.create({ name: "Desk", specialty: "x", role: "worker", scope: "project" });
+    const r = await svc.playUser(desk.id, undefined, "rock");
+    expect(r.round).toBe(1);
+    svc.stop();
+    s2.stop();
+  }, 60000);
+
+  it("emits game.started with game spots and seats before game.result", async () => {
     const { svc, msgs, registry } = makeService({ randomDelay: () => 999_999_999 });
     svc.start();
     const ids: string[] = [];
@@ -398,9 +437,7 @@ describe("game.result broadcast", () => {
       if (m.type !== "game.started") continue;
       expect(gameIds.has(m.spotIds[0]) && gameIds.has(m.spotIds[1])).toBe(true);
       expect(m.seatSpotIds).toEqual([assignment[m.players[0]], assignment[m.players[1]]]);
-      const sa = byId.get(m.seatSpotIds[0])!;
-      const sb = byId.get(m.seatSpotIds[1])!;
-      expect(Math.hypot(sa.x - sb.x, sa.z - sb.z)).toBeLessThanOrEqual(RPS_PAIR_MAX_DIST);
+      expect(byId.has(m.seatSpotIds[0]) && byId.has(m.seatSpotIds[1])).toBe(true);
       const idx = msgs.indexOf(m);
       const res = msgs.findIndex((r, i) => i > idx && r.type === "game.result" && r.match.id === m.matchId);
       expect(res).toBeGreaterThan(idx);

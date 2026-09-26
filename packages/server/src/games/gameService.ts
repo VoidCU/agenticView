@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { randomInt as cryptoRandomInt } from "node:crypto";
 import { z } from "zod";
-import { newId, loungeAssignmentFor, nearbyRpsPairs } from "@agenticview/shared";
+import { newId, loungeAssignmentFor, loungeRpsPairs } from "@agenticview/shared";
 import { MoveSchema, MatchSchema } from "@agenticview/shared";
 import type { Move, Match, GamesData, GameRoundResult, PlayerStats } from "@agenticview/shared";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
@@ -92,6 +92,8 @@ export class GameService {
   /** Last lounge spot assignment, so spots stay stable like in the scene. */
   private loungePrior: Record<string, string> = {};
   private stopped = false;
+  /** True while two agents are at the centre table's game spots. */
+  private matchInProgress = false;
 
   constructor(private readonly deps: GameServiceDeps) {
     this.gamesFile = join(deps.root, "games.json");
@@ -249,14 +251,25 @@ export class GameService {
   /** Run one auto-match between two random lounging agents. */
   async runAutoMatch(): Promise<Match | null> {
     if (this.stopped) return null;
-    const lounging = await this.loungingAgents();
-    if (lounging.length < 2) return null;
-    // Only neighbours (spots within RPS_PAIR_MAX_DIST) may play each other.
-    const { layout, assignment } = loungeAssignmentFor(lounging.map((l) => l.id), this.loungePrior);
-    this.loungePrior = assignment;
-    const pairs = nearbyRpsPairs(assignment, layout.spots);
-    if (pairs.length === 0) return null;
-    const pair = pairs[this.getRandomInt(pairs.length)]!;
+    // The centre table's game spots hold one match at a time.
+    if (this.matchInProgress) return null;
+    this.matchInProgress = true;
+    try {
+      const lounging = await this.loungingAgents();
+      if (lounging.length < 2) return null;
+      // Any two lounging (hence free) agents may play, wherever they sit: one walks over and invites the other.
+      const { layout, assignment } = loungeAssignmentFor(lounging.map((l) => l.id), this.loungePrior);
+      this.loungePrior = assignment;
+      const pairs = loungeRpsPairs(assignment);
+      if (pairs.length === 0) return null;
+      const pair = pairs[this.getRandomInt(pairs.length)]!;
+      return await this.playAgents(pair, layout, assignment);
+    } finally {
+      this.matchInProgress = false;
+    }
+  }
+
+  private async playAgents(pair: { a: string; b: string }, layout: ReturnType<typeof loungeAssignmentFor>["layout"], assignment: Record<string, string>): Promise<Match | null> {
     const a = { id: pair.a };
     const b = { id: pair.b };
     const matchId = newId("gm");

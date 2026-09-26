@@ -262,6 +262,18 @@ export function nearbyRpsPairs(
   return out;
 }
 
+/**
+ * Every pair of lounging agents that may play rock-paper-scissors: any two agents with a lounge spot,
+ * wherever they sit (one walks over and invites the other; both then walk to the centre table's game
+ * spots). Deterministic order by agent ids; each pair is [a, b] with a < b.
+ */
+export function loungeRpsPairs(assignment: Record<string, string>): { a: string; b: string }[] {
+  const ids = Object.keys(assignment).filter((id) => assignment[id]).sort();
+  const out: { a: string; b: string }[] = [];
+  for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) out.push({ a: ids[i]!, b: ids[j]! });
+  return out;
+}
+
 /** The layout + assignment the scene uses for a set of lounging agents (same call as Office.tsx). */
 export function loungeAssignmentFor(
   agentIds: string[],
