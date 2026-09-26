@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { EFFORT_LABELS, effectiveEffort, modelLabel, type Agent, type RunEvent } from "@agenticview/shared";
 import { useStore, useAgentStatus, type FeedItem } from "../state/store";
 import { uploadImage } from "../net/ws";
@@ -6,6 +6,7 @@ import { AgentMenu } from "./AgentMenu";
 import { LimitChip, SwitchAgentModal } from "./LimitChip";
 import { ServingChip, SessionChip, SessionNotice, displayModelOf } from "./sessions";
 import { WorkLog } from "./WorkLog";
+import { SimpleMarkdown } from "./markdown";
 import { ImageIcon, SendIcon, basename, defaultProviderOf, prettyInput, providerLabel, xpProgress } from "./ui";
 
 interface Attachment {
@@ -16,10 +17,12 @@ interface Attachment {
 
 const STATUS_WORD = { idle: "Idle", thinking: "Thinking", editing: "Editing", waiting: "Waiting on you", error: "Hit an error" } as const;
 
-function EventLine({ event }: { event: RunEvent }) {
+/** One feed event. Memoised on the (immutable) event object: a streaming feed re-renders only its new lines. */
+const EventLine = memo(function EventLine({ event }: { event: RunEvent }) {
   switch (event.type) {
     case "text":
-      return <div className="msg msg-agent">{event.text}</div>;
+      // Agent replies are markdown (bold, code, lists...), rendered safely; user lines stay plain text.
+      return <div className="msg msg-agent"><SimpleMarkdown text={event.text} className="msg-md" /></div>;
     case "tool_start":
       return (
         <div className="evt evt-tool">
@@ -57,7 +60,7 @@ function EventLine({ event }: { event: RunEvent }) {
     default:
       return null;
   }
-}
+});
 
 function Feed({ items }: { items: FeedItem[] }) {
   const endRef = useRef<HTMLDivElement>(null);

@@ -7,6 +7,7 @@ import {
 } from "../state/boards";
 import { CloseIcon, Modal } from "./ui";
 import { RetryButton } from "./LimitChip";
+import { SimpleMarkdown } from "./markdown";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -29,63 +30,6 @@ function taskDuration(startedAt: string, finishedAt: string): string {
   const m = Math.round(s / 60);
   if (m < 60) return `${m}m`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-// ── Small safe markdown renderer ──────────────────────────────────────────────
-
-function inlineMarkdown(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = [];
-  const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
-  let last = 0;
-  let key = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(text.slice(last, m.index));
-    const s = m[0];
-    if (s.startsWith("**")) parts.push(<strong key={key++}>{s.slice(2, -2)}</strong>);
-    else if (s.startsWith("*")) parts.push(<em key={key++}>{s.slice(1, -1)}</em>);
-    else parts.push(<code key={key++}>{s.slice(1, -1)}</code>);
-    last = m.index + s.length;
-  }
-  if (last < text.length) parts.push(text.slice(last));
-  return parts.length === 1 ? parts[0] : parts;
-}
-
-function SimpleMarkdown({ text }: { text: string }) {
-  if (!text) return null;
-  const lines = text.split("\n");
-  const elements: React.ReactNode[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i] ?? "";
-    if (line.startsWith("- ") || line.startsWith("* ")) {
-      const items: string[] = [];
-      while (i < lines.length && ((lines[i] ?? "").startsWith("- ") || (lines[i] ?? "").startsWith("* "))) {
-        items.push((lines[i] ?? "").slice(2));
-        i++;
-      }
-      elements.push(
-        <ul key={`list-${i}`} className="smd-list">
-          {items.map((item, j) => <li key={j}>{inlineMarkdown(item)}</li>)}
-        </ul>,
-      );
-    } else if (line.trim() === "") {
-      i++;
-    } else {
-      const paras: string[] = [];
-      while (
-        i < lines.length &&
-        (lines[i] ?? "").trim() !== "" &&
-        !(lines[i] ?? "").startsWith("- ") &&
-        !(lines[i] ?? "").startsWith("* ")
-      ) {
-        paras.push(lines[i] ?? "");
-        i++;
-      }
-      elements.push(<p key={`p-${i}`} className="smd-p">{inlineMarkdown(paras.join(" "))}</p>);
-    }
-  }
-  return <div className="simple-md">{elements}</div>;
 }
 
 // ── Changes view ──────────────────────────────────────────────────────────────
