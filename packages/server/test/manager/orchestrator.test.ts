@@ -537,7 +537,7 @@ it("brainstorm returns stillRunning and a follow-up collects the same tasks afte
       await gate.promise;
       yield { type: "text", text: "- Done" };
     }
-  });
+  }, 60000);
   const worker = await ctx.reg.create({ name: "Nova", specialty: "backend" });
   const parent = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "brainstorm" });
   const final = await ctx.orch.awaitTask(parent.id);
@@ -598,7 +598,7 @@ it("session brainstorms route to the generated read-only companion instead of th
   const managerRuntime = new FakeRuntime(async function* (req) {
     const result = await req.bridgeTools.find(t => t.name === "brainstorm")!.handler({ topic: "session design" });
     yield { type: "text", text: result };
-  });
+  }, 60000);
   const ctx = await setup(async function* () {}, { runtimes: new Map<Provider, Runtime>([["claude", managerRuntime], ["claude-session", session]]) });
   await ctx.reg.create({ name: "Nova", specialty: "backend", provider: "claude-session" });
   const parent = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "design" });
