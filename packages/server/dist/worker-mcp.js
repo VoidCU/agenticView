@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { modelFamily, sessionModelMatches, WORK_COMMAND } from "@agenticview/shared";
+import { WORK_COMMAND } from "@agenticview/shared";
 import { liveInstance } from "./instances.js";
 import { SessionRuntime } from "./runtimes/session.js";
 /** Fallback identity when the skill could not pass Claude Code's session id. */
@@ -128,7 +128,9 @@ function recentWorkLines(t) {
         const when = w.finishedAt ? ` ${w.finishedAt.slice(0, 16).replace("T", " ")}` : "";
         const files = w.files.length ? ` [files: ${w.files.join(", ")}]` : "";
         const sub = w.subagentId ? ` (subagent id ${w.subagentId}${w.sessionName ? ` in "${w.sessionName}"` : ""})` : "";
-        return `- [${w.status}] "${w.title}" (task ${w.taskId}${when})${sub}: ${w.summary || "(no result text)"}${files}`;
+        const via = [w.provider, w.model].filter(Boolean).join("/");
+        const again = w.earlierAttempt ? " (an earlier attempt of THIS task)" : "";
+        return `- [${w.status}] "${w.title}"${again} (task ${w.taskId}${when}${via ? `, ${via}` : ""})${sub}: ${w.summary || "(no result text)"}${files}`;
     });
 }
 /** The full text of one task: what the coordinator passes, unchanged, to the agent's subagent. */
@@ -141,7 +143,6 @@ export function formatTask(t) {
     const bridge = t.bridgeTools.length
         ? t.bridgeTools.map((b) => `- ${b.name}: ${b.description}\n  args schema: ${JSON.stringify(b.inputSchema)}`).join("\n")
         : "(none)";
-    const mismatch = t.model && t.session?.model && !sessionModelMatches(t.model, t.session.model);
     return [
         `# AgenticView task ${t.runId}`,
         `run_id: ${t.runId}   (pass this run_id to every agenticview_report / agenticview_complete / agenticview_bridge call)`,
@@ -151,11 +152,7 @@ export function formatTask(t) {
         t.session ? `Claude Code session: "${t.session.name}" (${t.agent.name} is served by it)` : "",
         `Working directory: ${t.cwd}`,
         `Permission mode: ${t.permissionMode}`,
-        t.model ? `Requested model: ${t.model}${t.subagent && modelFamily(t.model) ? ` (the ${t.subagent} subagent runs on ${modelFamily(t.model)})` : " (informational; keep using this session's model)"}` : "",
-        mismatch && !(t.subagent && modelFamily(t.model))
-            ? `MODEL MISMATCH: the office asked for "${t.model}" but this session reported "${t.session.model}". Say so in your first agenticview_report ("Session is on ${t.session.model}; run /model ${t.model} in this session to switch") and carry on with the current model. Never try to switch models yourself.`
-            : "",
-        t.effort ? `Requested effort: ${t.effort} (scale how thorough you are to this level)` : "",
+        `Model and effort: inherited from this Claude Code session${t.session?.model ? ` (${t.session.model})` : ""}. Never try to switch models yourself.`,
         "",
         "## Allowed tools",
         ...allowed.map((a) => `- ${a}`),

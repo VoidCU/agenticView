@@ -31,6 +31,8 @@ export declare class GameService {
     /** Last lounge spot assignment, so spots stay stable like in the scene. */
     private loungePrior;
     private stopped;
+    /** True while two agents are at the centre table's game spots. */
+    private matchInProgress;
     constructor(deps: GameServiceDeps);
     private getNow;
     private getRandomInt;
@@ -60,6 +62,7 @@ export declare class GameService {
     private scheduleAutoMatch;
     /** Run one auto-match between two random lounging agents. */
     runAutoMatch(): Promise<Match | null>;
+    private playAgents;
     /**
      * Handle a `game.play` message. Creates or continues a best-of-3 match.
      */

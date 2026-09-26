@@ -171,6 +171,12 @@ export declare const AgentSchema: z.ZodObject<{
         resetAt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
     lounging: z.ZodOptional<z.ZodBoolean>;
+    visiting: z.ZodOptional<z.ZodObject<{
+        targetAgentId: z.ZodOptional<z.ZodString>;
+        spaceId: z.ZodOptional<z.ZodString>;
+        until: z.ZodString;
+    }, z.core.$strip>>;
+    sessionModel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     createdAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;

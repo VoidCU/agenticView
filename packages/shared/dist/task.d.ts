@@ -81,6 +81,25 @@ export declare const TaskSchema: z.ZodObject<{
         files: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
     images: z.ZodArray<z.ZodString>;
+    tier: z.ZodOptional<z.ZodObject<{
+        provider: z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            antigravity: "antigravity";
+            gemini: "gemini";
+        }>;
+        model: z.ZodOptional<z.ZodString>;
+        effort: z.ZodOptional<z.ZodEnum<{
+            minimal: "minimal";
+            low: "low";
+            medium: "medium";
+            high: "high";
+            xhigh: "xhigh";
+            max: "max";
+            ultra: "ultra";
+        }>>;
+    }, z.core.$strip>>;
     result: z.ZodOptional<z.ZodString>;
     error: z.ZodOptional<z.ZodString>;
     resolution: z.ZodOptional<z.ZodObject<{

@@ -146,7 +146,7 @@ export function attachWs(server, opts) {
         ws.on("error", () => undefined);
         const send = (m) => {
             if (ws.readyState === ws.OPEN)
-                ws.send(JSON.stringify(m));
+                ws.send(JSON.stringify(opts.world.decorate ? opts.world.decorate(m) : m));
         };
         const off = opts.world.bus.on(send);
         void opts.world.snapshot().then((s) => send({ type: "snapshot", ...s }));

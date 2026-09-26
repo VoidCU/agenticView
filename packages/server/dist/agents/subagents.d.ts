@@ -1,4 +1,4 @@
-import { type Agent } from "@agenticview/shared";
+import type { Agent } from "@agenticview/shared";
 /**
  * Claude Code subagent files for `claude-session` agents.
  *
@@ -27,8 +27,11 @@ export declare function subagentSlug(name: string): string;
 export declare function subagentNames(agents: Pick<Agent, "id" | "name" | "createdAt">[]): Map<string, string>;
 /** The `tools` frontmatter line, or undefined to inherit every tool (including all MCP tools). */
 export declare function subagentTools(tools: Agent["tools"]): string[] | undefined;
-/** Subagent `model`: the agent's Claude family alias (opus, sonnet, haiku, fable), else inherit the session's. */
-export declare function subagentModel(model: string | null | undefined): string;
+/**
+ * Subagent `model`: always "inherit". A claude-session agent runs on the model (and effort) of the Claude
+ * Code session that serves it; the Manager routes work to the session whose model fits (assign_session).
+ */
+export declare function subagentModel(_model?: string | null): string;
 /** Full file text of an agent's subagent. */
 export declare function renderSubagent(agent: Agent, name: string, readOnly?: boolean): string;
 /** The agent id in a generated file, or undefined for a user-authored file. */

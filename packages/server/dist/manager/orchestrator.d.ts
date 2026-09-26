@@ -1,9 +1,10 @@
-import { type Agent, type Provider, type ProjectSettings, type PendingPermissionInfo, type PendingQuestionInfo, type PendingLimitInfo, type Task, type WorldInfo } from "@agenticview/shared";
+import { type Agent, type Provider, type ProjectSettings, type PendingPermissionInfo, type PendingQuestionInfo, type PendingLimitInfo, type Task, type WorldInfo, type WorkerSessionInfo } from "@agenticview/shared";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
 import type { BridgeTool, Runtime } from "../runtimes/types.js";
 import type { ToolRegistry } from "../bridge/toolRegistry.js";
 import type { EventBus } from "../events/bus.js";
+import { type AgentMemory } from "../agents/memory.js";
 export interface ResolvedSettings extends ProjectSettings {
     globalDefaultProvider: Provider | null;
     globalDefaultModel: string | null;
@@ -43,6 +44,10 @@ export interface WorldDeps {
     reviveDelayMs?: number;
     /** Override the revive-done clear delay (ms) for tests. Default 5000. */
     reviveClearMs?: number;
+    /** Claude Code sessions with live state (for list_sessions / assign_session). */
+    sessions?: () => Promise<WorkerSessionInfo[]>;
+    /** Per-agent task memory (see agents/memory.ts). */
+    memory?: AgentMemory;
 }
 export interface UserMessageInput {
     agentId: string;
@@ -133,6 +138,19 @@ export declare class Orchestrator {
     private loadSession;
     private saveSession;
     private buildPrompt;
+    /** Project path the agent memory of a task is kept under ("" = the world root). */
+    private memoryKey;
+    /** Append a finished worker task to its agent's memory (any provider). */
+    private remember;
+    /** "Limits now: codex limited until X; antigravity ok; ..." for the configured providers. */
+    private limitSummary;
+    /** Notes for the Manager's next preamble (limit policy "manager"). */
+    private readonly providerNotes;
+    /** Queue a note for the Manager's next request preamble. */
+    addProviderNote(note: string): void;
+    /** Notes waiting for the Manager (read without consuming; for tests and snapshots). */
+    peekProviderNotes(): string[];
+    private takeProviderNotes;
     /**
      * claude-session deadlock guard for a Manager run `runId`. A session runs several tasks at once (one
      * subagent each), so a worker bound to the Manager's own session is fine as long as that session has

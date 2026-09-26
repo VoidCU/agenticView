@@ -28,6 +28,11 @@ export interface RecentWork {
     finishedAt?: string;
     subagentId?: string;
     sessionName?: string;
+    /** Provider and model the task ran on (from the agent memory store). */
+    provider?: string;
+    model?: string;
+    /** An earlier attempt of the task being handed out now (e.g. before a limit failover). */
+    earlierAttempt?: boolean;
 }
 /** What a worker receives when it claims a run. */
 export interface SessionTask {

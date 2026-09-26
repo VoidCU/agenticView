@@ -23,6 +23,12 @@ export interface CreateAgentInput {
         name?: string;
     } | null;
 }
+/**
+ * Invariants applied to every stored agent:
+ * - a claude-session agent inherits model and effort from the session that serves it, so none is stored;
+ * - `sessionModel` is wire-only and never persisted.
+ */
+export declare function normalizeAgent(agent: Agent): Agent;
 export declare class ScopeError extends Error {
     constructor(msg: string);
 }

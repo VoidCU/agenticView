@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ProviderSchema } from "./agent.js";
+import { EffortSchema } from "./models.js";
 export const TaskStatusSchema = z.enum(["queued", "assigned", "running", "waiting", "done", "failed", "cancelled"]);
 export const TaskKindSchema = z.enum(["request", "work", "chat"]);
 export const TRANSITIONS = {
@@ -51,6 +52,11 @@ export const TaskSchema = z.object({
     /** claude-session tasks: which Claude Code session and subagent did the work (continuity and the work log). */
     worker: TaskWorkerSchema.optional(),
     images: z.array(z.string()),
+    /**
+     * Per-task model tier chosen by the Manager (assign_task model/effort). Used for this task's runs only,
+     * and only while the assignee is still on `provider` (a failover to another provider drops it).
+     */
+    tier: z.object({ provider: ProviderSchema, model: z.string().optional(), effort: EffortSchema.optional() }).optional(),
     result: z.string().optional(),
     error: z.string().optional(),
     /** Set when a failed task has been marked as resolved (fixed by another task or noted as acceptable). */
