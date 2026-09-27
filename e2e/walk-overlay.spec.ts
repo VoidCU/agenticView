@@ -57,9 +57,19 @@ test("a board opened from walk mode frees the mouse, works, and walking resumes 
   await expect(page.locator(".walk-crosshair")).toBeVisible(); // still walking
 
   // The cursor works over the board: expand a request row with a real click.
-  const row = board.getByRole("button", { name: "walk overlay check" }).first();
-  await row.click();
-  await expect(row).toHaveAttribute("aria-expanded", "true");
+  const details = board.getByRole("button", { name: "Show details: walk overlay check" }).first();
+  await details.click();
+  await expect(board.getByRole("button", { name: "Hide details: walk overlay check" }).first()).toHaveAttribute("aria-expanded", "true");
+
+  // The request's timeline swaps into the same dialog; the mouse stays free; Esc steps back to the board.
+  await board.getByRole("button", { name: "View timeline: walk overlay check" }).first().click();
+  const workflow = page.getByRole("dialog", { name: "Workflow · walk overlay check" });
+  await expect(workflow).toBeVisible();
+  await expect(workflow.getByTestId("wf-step").first()).toBeVisible();
+  expect(await lockedOnCanvas()).toBeNull();
+  await page.keyboard.press("Escape");
+  await expect(board).toBeVisible();
+  expect(await lockedOnCanvas()).toBeNull();
 
   // Close: still walking, the hint asks for a click, which re-locks.
   await page.keyboard.press("Escape");
