@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { IdleBehaviourSchema } from "@agenticview/shared";
+import { IdleBehaviourSchema, freeDeskFor } from "@agenticview/shared";
 const cryptoRng = () => randomInt(0, 2 ** 32) / 2 ** 32;
 /** Pick an outcome from the configured chances (relative weights) with one uniform draw `r` in [0, 1). */
 export function pickOutcome(b, r) {
@@ -86,8 +86,11 @@ export class IdleBehaviourService {
         this.timers.clear();
         this.visitTimers.clear();
     }
-    /** A worker got work: stop its idle cycle; if it was lounging or visiting it sits back down. */
-    async onBusy(agentId) {
+    /**
+     * A worker got work: stop its idle cycle. With `toDesk` (every task but a brainstorm meeting) it walks
+     * to its designated desk (workSeat); otherwise, if it was lounging or visiting, it sits back down.
+     */
+    async onBusy(agentId, opts = {}) {
         this.busy.add(agentId);
         this.clearTimer(this.timers.get(agentId));
         this.timers.delete(agentId);
@@ -97,11 +100,48 @@ export class IdleBehaviourService {
             const a = await this.deps.registry.get(agentId);
             if (!a || a.role !== "worker")
                 return;
-            if (a.lounging)
+            if (opts.toDesk && a.workSeat)
+                await this.takeWorkSeat(a);
+            else if (a.lounging)
                 await this.sitDown(a);
             else if (a.visiting)
                 this.emit(await this.deps.registry.update(a.id, { visiting: undefined }));
         });
+    }
+    /** A busy worker starts (more) desk work: walk it to its workSeat. Idempotent. */
+    toWorkSeat(agentId) {
+        return this.serialize(async () => {
+            const a = await this.deps.registry.get(agentId);
+            if (a && a.role === "worker" && a.workSeat)
+                await this.takeWorkSeat(a);
+        });
+    }
+    /**
+     * Sit `a` at its workSeat, displacing whoever else sits there (squatter rule). No-op when it is already
+     * seated there and neither lounging nor visiting. Returns the updated agent.
+     */
+    async takeWorkSeat(a) {
+        const desk = a.workSeat;
+        const key = seatKey(desk);
+        const { seats, placements } = await this.deps.desks();
+        const agents = await this.deps.registry.list();
+        const next = { ...placements, [a.id]: desk };
+        for (const s of agents) {
+            const p = placements[s.id];
+            if (s.id === a.id || s.role !== "worker" || !p || seatKey(p) !== key)
+                continue;
+            const spot = freeDeskFor(s.id, seats, next, agents);
+            if (spot)
+                next[s.id] = spot;
+            else
+                delete next[s.id];
+            this.emit(await this.deps.registry.update(s.id, spot ? { placement: spot } : { placement: undefined, lounging: true, visiting: undefined }));
+        }
+        if (!a.lounging && !a.visiting && a.placement && seatKey(a.placement) === key)
+            return a;
+        const moved = await this.deps.registry.update(a.id, { placement: { space: desk.space, seat: desk.seat }, lounging: undefined, visiting: undefined });
+        this.emit(moved);
+        return moved;
     }
     /** A worker finished its work: after the idle threshold it starts rolling. */
     onIdle(agentId) {

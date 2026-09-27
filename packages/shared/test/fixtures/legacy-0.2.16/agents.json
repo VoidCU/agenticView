@@ -1,0 +1,11 @@
+[
+  { "id": "m_boss", "name": "Boss", "role": "manager", "createdAt": "2026-09-01T00:00:00.000Z" },
+  { "id": "w_lounger", "name": "Lounger", "role": "worker", "createdAt": "2026-09-01T00:00:01.000Z", "placement": { "space": "lounge", "seat": 2 } },
+  { "id": "w_displaced", "name": "Displaced", "role": "worker", "createdAt": "2026-09-01T00:00:02.000Z", "placement": { "space": "pod-o", "seat": 1 } },
+  { "id": "w_frontend", "name": "Frontend", "role": "worker", "createdAt": "2026-09-01T00:00:03.000Z", "placement": { "space": "pod-b", "seat": 0 } },
+  { "id": "w_night", "name": "Night", "role": "worker", "createdAt": "2026-09-01T00:00:04.000Z", "placement": { "space": "pod-m", "seat": 5 } },
+  { "id": "w_ghost", "name": "Ghost", "role": "worker", "createdAt": "2026-09-01T00:00:05.000Z", "placement": { "space": "pod-zz", "seat": 3 } },
+  { "id": "w_stale", "name": "Stale", "role": "worker", "createdAt": "2026-09-01T00:00:06.000Z", "placement": { "space": "pod-a", "seat": 9 } },
+  { "id": "w_pod_a", "name": "PodA", "role": "worker", "createdAt": "2026-09-01T00:00:07.000Z", "placement": { "space": "pod-a", "seat": 0 } },
+  { "id": "w_fresh", "name": "Fresh", "role": "worker", "createdAt": "2026-09-01T00:00:08.000Z" }
+]

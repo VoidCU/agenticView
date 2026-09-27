@@ -2,7 +2,15 @@ import {
   AgentSchema,
   defaultAgent,
   MANAGER_TOOLS,
+  buildSpacesFromLayout,
+  defaultLayout,
+  designatedSeats,
+  isDeskKind,
+  nextPlacement,
   planOffice,
+  placementKey,
+  seatLabel,
+  type OfficeLayout,
   type Agent,
   type Effort,
   type Role,
@@ -11,8 +19,10 @@ import {
   type ToolAllowance,
   type PermissionMode,
   type Appearance,
+  type Placement,
 } from "@agenticview/shared";
 import { join } from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { JsonStore } from "../store/jsonStore.js";
 import { globalRoot, projectRoot } from "../store/paths.js";
 
@@ -60,6 +70,38 @@ export class ScopeError extends Error {
 export class AgentRegistry {
   private readonly global: JsonStore<Agent>;
   private readonly project?: JsonStore<Agent>;
+  private layout?: () => OfficeLayout;
+  private ensureDesk?: (workerCount: number) => Promise<void>;
+  /**
+   * The desk lock: every operation that changes a workSeat (create, copy, an update carrying workSeat,
+   * move/swap, the workSeat migration) runs through this one queue, so the "is this desk free?" check and
+   * the write that takes it are atomic. It is reentrant for the holder's own async chain (a move that
+   * calls update, a create that grows the layout and re-runs the migration) via AsyncLocalStorage; the
+   * token must still be the active holder, so a stray continuation after release queues normally.
+   */
+  private deskQueue: Promise<void> = Promise.resolve();
+  private deskHolder: object | null = null;
+  private readonly deskContext = new AsyncLocalStorage<object>();
+
+  withDeskLock<T>(fn: () => Promise<T>): Promise<T> {
+    const mine = this.deskContext.getStore();
+    if (mine && mine === this.deskHolder) return fn();
+    const token = {};
+    const work = this.deskQueue.then(() => {
+      this.deskHolder = token;
+      return this.deskContext.run(token, fn);
+    });
+    this.deskQueue = work.then(
+      () => { if (this.deskHolder === token) this.deskHolder = null; },
+      () => { if (this.deskHolder === token) this.deskHolder = null; },
+    );
+    return work;
+  }
+
+  useLayout(layout: () => OfficeLayout, ensureDesk: (workerCount: number) => Promise<void>): void {
+    this.layout = layout;
+    this.ensureDesk = ensureDesk;
+  }
 
   constructor(readonly world: WorldRef) {
     this.global = new JsonStore(join(globalRoot(), "agents"), AgentSchema);
@@ -86,6 +128,10 @@ export class AgentRegistry {
   }
 
   async create(input: CreateAgentInput): Promise<Agent> {
+    return this.withDeskLock(() => this.createUnqueued(input));
+  }
+
+  private async createUnqueued(input: CreateAgentInput): Promise<Agent> {
     const scope = input.scope ?? (this.world.kind === "project" ? "project" : "global");
     const store = this.storeFor(scope);
     const agent = normalizeAgent(
@@ -98,17 +144,27 @@ export class AgentRegistry {
       }),
     );
     if (agent.role === "worker") {
-      // Take the next free desk now so the seat is stable even as the roster changes around it.
-      const seat = planOffice([...(await this.list()), agent]).placements[agent.id];
-      if (seat) agent.placement = seat;
+      await this.ensureDesk?.((await this.list()).filter((a) => a.role === "worker").length + 1);
+      // Take the next free desk now (nobody sits there and it is nobody's designated desk): it becomes
+      // the new worker's workSeat, so the seat is stable even as the roster changes around it.
+      const seat = nextPlacement(await this.list(), this.layout?.());
+      if (seat) {
+        agent.placement = { ...seat };
+        agent.workSeat = { ...seat };
+      }
     }
     await store.write(agent.id, agent);
     return agent;
   }
 
   async update(id: string, patch: Partial<Agent>): Promise<Agent> {
+    return "workSeat" in patch ? this.withDeskLock(() => this.updateUnlocked(id, patch)) : this.updateUnlocked(id, patch);
+  }
+
+  private async updateUnlocked(id: string, patch: Partial<Agent>): Promise<Agent> {
     const cur = await this.get(id);
     if (!cur) throw new Error(`Unknown agent ${id}`);
+    if (patch.workSeat) await this.assertDeskFree(id, patch.workSeat);
     const next = normalizeAgent(AgentSchema.parse({
       ...cur,
       ...patch,
@@ -122,14 +178,38 @@ export class AgentRegistry {
     return next;
   }
 
+  /**
+   * The office-wide invariants: two agents never share a designated desk (workSeat), and a designated desk
+   * is a work desk (a seat of a pod, the Production Room or the Research Room). Call under the desk lock.
+   */
+  async assertDeskFree(id: string, seat: Placement): Promise<void> {
+    const agents = await this.list();
+    const spaces = buildSpacesFromLayout(this.layout?.() ?? defaultLayout(agents.filter((a) => a.role === "worker").length));
+    const space = spaces.find((s) => s.id === seat.space);
+    if (space && !isDeskKind(space.kind)) throw new Error(`${space.name} has no work desks; a designated desk must be in a pod, the Production Room or the Research Room`);
+    const owner = designatedSeats(agents, id).get(placementKey(seat));
+    if (owner) throw new Error(`${seatLabel(spaces, seat)} is ${owner.name}'s designated desk`);
+  }
+
   /** Clone a global agent into this project with fresh id and stats, remembering its origin. */
   async copyToProject(id: string): Promise<Agent> {
+    return this.withDeskLock(() => this.copyToProjectUnlocked(id));
+  }
+
+  private async copyToProjectUnlocked(id: string): Promise<Agent> {
     if (this.world.kind !== "project" || !this.project) throw new ScopeError("copyToProject requires a project world");
     const src = await this.get(id);
     if (!src) throw new Error(`Unknown agent ${id}`);
     if (src.scope !== "global") throw new ScopeError("Only global agents can be copied into a project");
-    const { id: _id, stats: _stats, createdAt: _c, updatedAt: _u, originId: _o, placement: _p, ...rest } = src;
+    const { id: _id, stats: _stats, createdAt: _c, updatedAt: _u, originId: _o, placement: _p, workSeat: _w, ...rest } = src;
     const copy = defaultAgent({ ...rest, scope: "project", originId: src.id });
+    if (copy.role === "worker") {
+      const seat = nextPlacement(await this.list(), this.layout?.());
+      if (seat) {
+        copy.placement = { ...seat };
+        copy.workSeat = { ...seat };
+      }
+    }
     await this.project.write(copy.id, copy);
     return copy;
   }
@@ -140,7 +220,7 @@ export class AgentRegistry {
    */
   async pinPlacements(): Promise<Agent[]> {
     const all = await this.list();
-    const { placements } = planOffice(all);
+    const { placements } = planOffice(all, this.layout?.());
     const changed: Agent[] = [];
     for (const a of all) {
       const p = placements[a.id];

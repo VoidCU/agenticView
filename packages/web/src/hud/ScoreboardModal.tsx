@@ -39,9 +39,6 @@ export function ScoreboardModal({ onClose, onPlay }: { onClose: () => void; onPl
   const leaderboard = games?.leaderboard ?? [];
   const recent = games?.recent ?? [];
 
-  // Sort by wins desc, then losses asc
-  const sorted = [...leaderboard].sort((a, b) => b.wins - a.wins || a.losses - b.losses);
-
   const nameOf = (id: string) => (id === "you" ? "You" : agents[id]?.name ?? id);
 
   return (
@@ -50,7 +47,7 @@ export function ScoreboardModal({ onClose, onPlay }: { onClose: () => void; onPl
         {/* Leaderboard */}
         <section className="scoreboard-section">
           <h4 className="scoreboard-section-title">Leaderboard</h4>
-          {sorted.length === 0 ? (
+          {leaderboard.length === 0 ? (
             <p className="scoreboard-empty">No matches yet. Challenge an agent!</p>
           ) : (
             <table className="scoreboard-table" aria-label="Leaderboard">
@@ -66,7 +63,7 @@ export function ScoreboardModal({ onClose, onPlay }: { onClose: () => void; onPl
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((p, i) => {
+                {leaderboard.map((p, i) => {
                   const isAgent = p.playerId !== "you" && !!agents[p.playerId];
                   return (
                     <tr key={p.playerId} className="scoreboard-row">

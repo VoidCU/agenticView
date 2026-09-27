@@ -12,6 +12,8 @@ beforeEach(() => useStore.getState().reset());
 
 const podA: Space = { id: "pod-a", name: "Pod A", kind: "pod", q: 1, r: 0, ring: 1, x: 0, z: 0, seats: 4 };
 const officeSpace: Space = { id: "office", name: "Manager's Office", kind: "office", q: 0, r: 0, ring: 0, x: 0, z: 0, seats: 1 };
+const productionRoom: Space = { id: "production-room", name: "Production Room", kind: "production", q: 1, r: 0, ring: 1, x: 0, z: 0, seats: 4 };
+const researchRoom: Space = { id: "research-room", name: "Research Room", kind: "research", q: 1, r: 0, ring: 1, x: 0, z: 0, seats: 4 };
 
 // ── boards.ts helpers ─────────────────────────────────────────────────────────
 
@@ -54,6 +56,49 @@ describe("countBranches", () => {
 // ── PodBoard kanban ───────────────────────────────────────────────────────────
 
 describe("PodBoard kanban columns", () => {
+  it.each([
+    [productionRoom, "Production Room board", "No production tasks yet"],
+    [researchRoom, "Research Room board", "No research tasks yet"],
+  ] as const)("shows the %s room's own board and empty state", (space, title, emptyMessage) => {
+    useStore.getState().apply(snapshot([manager], []));
+    render(<PodBoard space={space} onClose={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText(emptyMessage)).toBeInTheDocument();
+  });
+
+  it.each([
+    [productionRoom, "Production Room", "Production task"],
+    [researchRoom, "Research Room", "Research task"],
+  ] as const)("lists only agents and tasks from %s", (space, title, taskTitle) => {
+    const seated = { ...worker, placement: { space: space.id, seat: 0 } };
+    const elsewhere = { ...worker2, placement: { space: "pod-a", seat: 0 } };
+    useStore.getState().apply(snapshot([manager, seated, elsewhere], [
+      task({ id: `${space.id}-task`, title: taskTitle, assigneeId: seated.id }),
+      task({ id: `${space.id}-other`, title: "Other room task", assigneeId: elsewhere.id }),
+    ]));
+    useStore.setState({ layout: { version: 1, rooms: [
+      { id: space.id, kind: space.kind as "production" | "research", q: 1, r: 0 },
+      { id: "pod-a", kind: "pod", q: 0, r: 1 },
+    ] } });
+    render(<PodBoard space={space} onClose={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: `${title} board` })).toBeInTheDocument();
+    expect(screen.getByText(taskTitle)).toBeInTheDocument();
+    expect(screen.queryByText("Other room task")).not.toBeInTheDocument();
+  });
+
+  it("opens the Manager board from a meeting room whiteboard", () => {
+    useStore.getState().apply(snapshot([manager], []));
+    const meeting: Space = { ...officeSpace, id: "meeting", name: "Meeting Room", kind: "meeting" };
+    render(<PodBoard space={meeting} onClose={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Manager board" })).toBeInTheDocument();
+  });
+
+  it("does not render a board for My Office", () => {
+    const myOffice: Space = { ...officeSpace, id: "myoffice", name: "My Office", kind: "myoffice" };
+    const { container } = render(<PodBoard space={myOffice} onClose={vi.fn()} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("renders all 5 columns with correct task grouping", () => {
     const workerInPodA = { ...worker, placement: { space: "pod-a", seat: 0 } };
     useStore.getState().apply(

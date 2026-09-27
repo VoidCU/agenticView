@@ -26,6 +26,8 @@ export interface CreateTaskInput {
   parentId?: string;
   images?: string[];
   readOnly?: boolean;
+  /** Brainstorm work in the Meeting Room: the assignee does not walk to its workSeat. */
+  meeting?: boolean;
   tier?: Task["tier"];
 }
 
@@ -71,6 +73,7 @@ export class TaskService {
       createdAt: new Date().toISOString(),
     };
     if (input.readOnly) task.readOnly = true;
+    if (input.meeting) task.meeting = true;
     if (input.tier) task.tier = input.tier;
     if (input.parentId) task.parentId = input.parentId;
     await this.store.write(task.id, task);

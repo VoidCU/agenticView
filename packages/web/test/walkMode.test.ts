@@ -9,11 +9,16 @@
  * - NEAR_DIST proximity constant
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { buildSpaces } from "@agenticview/shared";
+import { buildSpaces, spaceAt, userHome, WALL_SCREEN, type Space } from "@agenticview/shared";
+import { layoutFor } from "../src/scene/layout";
+import { myOfficeChairFrame } from "../src/scene/kit";
+import { circleVsChair } from "../src/scene/pushChairs";
+import { buildColliders, overlapsAny, PLAYER_RADIUS } from "../src/scene/colliders";
 import * as THREE from "three";
 import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, WALK_SPEED, ACCEL, DECEL } from "../src/scene/walkPhysics";
 import { getFeedLines, MAX_DIST, REFRESH_MS, MAX_UPDATES_PER_FRAME, monitorPoseForSeat, NEAR_DIST } from "../src/scene/DeskMonitor";
 import { useWalk } from "../src/state/walk";
+import { walkInteraction, walkStartPose, WALK_START_CLEARANCE } from "../src/scene/WalkMode";
 
 // ---- isWalkable ----
 
@@ -374,6 +379,89 @@ describe("pointer-lock state machine (store)", () => {
     // Simulate pointerlockchange → exit handler.
     useWalk.getState().setWalking(false);
     expect(useWalk.getState().walking).toBe(false);
+  });
+});
+
+// ---- WalkMode start position: My Office, facing WALL_SCREEN ----
+
+describe("WalkMode start position (My Office)", () => {
+  it("userHome's robot yaw + PI is the camera yaw that looks straight at WALL_SCREEN", () => {
+    // userHome()/SeatPose yaw is a robot-facing yaw (three.js convention: 0 looks along +z, so its
+    // forward vector is (sin, cos)). The walk camera's forward at yaw 0 is -Z (see walkDelta's own
+    // test), i.e. (-sin, -cos): the two conventions are PI apart.
+    const space: Space = { id: "myoffice", name: "My Office", kind: "myoffice", q: -2, r: 0, x: 10, z: -4, ring: 2, seats: 0 };
+    const home = userHome(space);
+    const camYaw = home.yaw + Math.PI;
+    const fwd = { x: -Math.sin(camYaw), z: -Math.cos(camYaw) };
+    const toScreen = { x: space.x + WALL_SCREEN.x - home.x, z: space.z + WALL_SCREEN.z - home.z };
+    const len = Math.hypot(toScreen.x, toScreen.z);
+    const dot = (fwd.x * toScreen.x + fwd.z * toScreen.z) / len;
+    expect(dot).toBeCloseTo(1, 5);
+  });
+
+  // Spawning on userHome() put the walker inside the pushable desk chair: the first frame shoved it.
+  describe("walkStartPose", () => {
+    const layout = layoutFor([]);
+    const space = layout.spaces.find((s) => s.kind === "myoffice")!;
+    const start = walkStartPose(space);
+
+    it("is in My Office, a small step from userHome toward the room centre", () => {
+      const home = userHome(space);
+      expect(spaceAt(layout.spaces, start.x, start.z)?.id).toBe(space.id);
+      const step = Math.hypot(start.x - home.x, start.z - home.z);
+      expect(step).toBeGreaterThan(0.3);
+      expect(step).toBeLessThan(1.2);
+      // Toward the centre: closer to it than the seated spot.
+      expect(Math.hypot(start.x - space.x, start.z - space.z)).toBeLessThan(Math.hypot(home.x - space.x, home.z - space.z) + 1e-9);
+      expect(Math.hypot(start.x - space.x, start.z - space.z)).toBeLessThan(0.5);
+    });
+
+    it("does not overlap the desk chair, so walking in never shoves it", () => {
+      const ch = myOfficeChairFrame();
+      const out = { x: 0, z: 0 };
+      expect(circleVsChair(start.x, start.z, PLAYER_RADIUS, space.x + ch.x, space.z + ch.z, ch.yaw, out)).toBe(false);
+      // Not even a hair: a margin around the walker still clears the chair.
+      expect(circleVsChair(start.x, start.z, PLAYER_RADIUS + WALK_START_CLEARANCE * 0.9, space.x + ch.x, space.z + ch.z, ch.yaw, out)).toBe(false);
+    });
+
+    it("stands clear of every solid (chairs included), so the first frame does not depenetrate", () => {
+      expect(overlapsAny(buildColliders(layout), start.x, start.z, PLAYER_RADIUS)).toBe(false);
+    });
+
+    it("the walk camera yaw looks straight at WALL_SCREEN (forward = (-sin, -cos))", () => {
+      const fwd = { x: -Math.sin(start.yaw), z: -Math.cos(start.yaw) };
+      const to = { x: space.x + WALL_SCREEN.x - start.x, z: space.z + WALL_SCREEN.z - start.z };
+      expect((fwd.x * to.x + fwd.z * to.z) / Math.hypot(to.x, to.z)).toBeCloseTo(1, 5);
+      // Same heading as the seated view (the start lies on the centre -> desk -> screen line).
+      const home = userHome(space);
+      expect(Math.cos(start.yaw - (home.yaw + Math.PI))).toBeCloseTo(1, 5);
+    });
+  });
+});
+
+// ---- walkInteraction: My Office wall screen -> Settings/Connections ----
+
+describe("walkInteraction: My Office wall screen", () => {
+  const hit = (kind: string) => [{ distance: 3, object: { userData: { wallScreenKind: kind }, parent: null } as unknown as THREE.Object3D }];
+
+  it("clicking the myoffice wall screen opens Settings on Connections", () => {
+    const action = walkInteraction(hit("myoffice"), { x: 0, z: 0 }, new THREE.Vector3(), "click");
+    expect(action).toEqual({ kind: "settings", id: "connections" });
+  });
+
+  it("is click-only, same as boards and monitors (E/G/H do nothing)", () => {
+    for (const intent of ["bonk", "challenge", "greet"] as const) {
+      expect(walkInteraction(hit("myoffice"), { x: 0, z: 0 }, new THREE.Vector3(), intent)).toBeUndefined();
+    }
+  });
+
+  it("the production screen is tagged but has no click action yet", () => {
+    expect(walkInteraction(hit("production"), { x: 0, z: 0 }, new THREE.Vector3(), "click")).toBeUndefined();
+  });
+
+  it("beyond MAX_INTERACT_DIST, nothing happens", () => {
+    const far = [{ distance: 50, object: { userData: { wallScreenKind: "myoffice" }, parent: null } as unknown as THREE.Object3D }];
+    expect(walkInteraction(far, { x: 0, z: 0 }, new THREE.Vector3(), "click")).toBeUndefined();
   });
 });
 

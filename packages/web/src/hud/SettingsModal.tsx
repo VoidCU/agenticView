@@ -5,13 +5,16 @@ import { UsagePanel } from "./UsagePanel";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { Modal, ProviderOptions, automaticLabel, providerLabel } from "./ui";
 import { getNotificationPref, requestNotificationPermission, setNotificationPref } from "./useNotifications";
+import { LayoutEditor } from "./LayoutEditor";
 
-export type SettingsTab = "general" | "providers" | "office" | "usage";
+export type SettingsTab = "general" | "providers" | "office" | "layout" | "connections" | "usage";
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "providers", label: "Providers" },
   { id: "office", label: "Office life" },
+  { id: "layout", label: "Layout" },
+  { id: "connections", label: "Connections" },
   { id: "usage", label: "Usage" },
 ];
 
@@ -274,9 +277,19 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
         </form>
 
         <div {...panel("usage")}>{tab === "usage" && <UsagePanel />}</div>
+        <div {...panel("layout")}>{tab === "layout" && <LayoutEditor />}</div>
+        <div {...panel("connections")}>
+          <section className="settings-section connections-section">
+            <header><h3>Connections</h3><p className="section-desc">Messages, comments, likes and recent feeds will appear on the My Office wall screen.</p></header>
+            <div className="connection-options">
+              <div><button type="button" className="btn btn-ghost" disabled>Connect Instagram</button><span className="chip">Coming soon</span></div>
+              <div><button type="button" className="btn btn-ghost" disabled>Connect Meta</button><span className="chip">Coming soon</span></div>
+            </div>
+          </section>
+        </div>
       </div>
 
-      {tab !== "usage" && (
+      {tab !== "usage" && tab !== "layout" && tab !== "connections" && (
         <div className="form-actions settings-actions">
           <span className="settings-actions-note">{tab === "providers" ? "Order and failover are saved with the settings; keys and custom providers save on their own." : ""}</span>
           <button type="button" className="btn btn-ghost" onClick={onClose}>

@@ -161,7 +161,7 @@ function makeWorld() {
 }
 
 describe("world.addRoom", () => {
-  it("places the first room and persists it in rooms.json", async () => {
+  it("places the first room and persists it in layout.json", async () => {
     const world = await makeWorld();
     const result = await world.addRoom("pod", "Alpha Pod");
     expect(result).toMatchObject({ ok: true });
@@ -169,12 +169,11 @@ describe("world.addRoom", () => {
     // The ID should be a pod-X pattern (exact letter depends on auto-init).
     expect(result.spaceId).toMatch(/^pod-/);
 
-    // rooms.json is written inside <project>/.agenticview/rooms.json
-    const roomsFile = join(tmpProj, ".agenticview", "rooms.json");
+    const roomsFile = join(tmpProj, ".agenticview", "layout.json");
     const raw = await readFile(roomsFile, "utf8").catch(() => undefined);
     expect(raw).toBeDefined();
     if (raw !== undefined) {
-      const rooms = JSON.parse(raw) as ExplicitRoom[];
+      const rooms = (JSON.parse(raw) as { rooms: ExplicitRoom[] }).rooms;
       expect(rooms.find((r) => r.id === result.spaceId)).toBeDefined();
     }
   });
@@ -227,7 +226,7 @@ describe("world.removeRoom", () => {
     if (!removeResult.ok) expect(removeResult.message).toMatch(/seated|Tester/i);
   });
 
-  it("removes an empty room and updates rooms.json", async () => {
+  it("removes an empty room and updates layout.json", async () => {
     const world = await makeWorld();
     const addResult = await world.addRoom("pod", "Temp Pod");
     expect(addResult.ok).toBe(true);

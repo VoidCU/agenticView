@@ -36,7 +36,7 @@ describe("office bridge tools", () => {
     const { ctx } = fakeWorld(roster());
     const reg = new ToolRegistry();
     const { token } = reg.register("run1", officeTools(ctx));
-    expect(reg.describe("run1", token).map((t) => t.name)).toEqual(["list_spaces", "rename_space", "move_worker", "arrange_workers"]);
+    expect(reg.describe("run1", token).map((t) => t.name)).toEqual(["list_spaces", "rename_space", "set_layout", "move_room", "set_room_kind", "move_worker", "arrange_workers"]);
     const rows = JSON.parse(await reg.call("run1", token, "list_spaces", {})) as { id: string; seats: { seat: number; name?: string; free?: boolean }[] }[];
     const podA = rows.find((r) => r.id === "pod-a")!;
     expect(podA.seats.map((s) => s.name ?? "free")).toEqual(["W1", "W2", "W3", "free", "free", "free"]);
@@ -48,16 +48,28 @@ describe("office bridge tools", () => {
     const { ctx, byId, emitted } = fakeWorld(roster());
     const reg = new ToolRegistry();
     const { token } = reg.register("run1", officeTools(ctx));
-    const out = await reg.call("run1", token, "move_worker", { agent: "W3", space: "Meeting Room" });
-    expect(out).toBe("Moved W3 to Meeting Room seat 0");
-    expect(byId.get("w_3")!.placement).toEqual({ space: "meeting", seat: 0 });
+    const out = await reg.call("run1", token, "move_worker", { agent: "W3", space: "Pod B" });
+    expect(out).toBe("Moved W3 to Pod B seat 0 (its designated desk)");
+    expect(byId.get("w_3")!.placement).toEqual({ space: "pod-b", seat: 0 });
+    expect(byId.get("w_3")!.workSeat).toEqual({ space: "pod-b", seat: 0 });
     expect(emitted.map((a) => a.id)).toEqual(["w_3"]);
   });
 
-  it("swaps desks when the target seat is taken", async () => {
+  it("move_worker to the meeting room is a temporary seat that keeps the designated desk", async () => {
+    const { ctx, byId, emitted } = fakeWorld(roster());
+    const reg = new ToolRegistry();
+    const { token } = reg.register("run1", officeTools(ctx));
+    const out = await reg.call("run1", token, "move_worker", { agent: "W3", space: "Meeting Room" });
+    expect(out).toBe("Moved W3 to Meeting Room seat 0 (temporary seat: Meeting Room has no work desks, so W3's designated desk is unchanged)");
+    expect(byId.get("w_3")!.placement).toEqual({ space: "meeting", seat: 0 });
+    expect(byId.get("w_3")!.workSeat).toBeUndefined();
+    expect(emitted.map((a) => a.id)).toEqual(["w_3"]);
+  });
+
+  it("moves an idle worker who merely sits at the destination (no designated desk) elsewhere", async () => {
     const { ctx, byId } = fakeWorld(roster());
     const out = await moveWorker(ctx, "w_3", "pod-a", 0);
-    expect(out).toMatch(/W1 swapped to pod-a seat 2/);
+    expect(out).toMatch(/W1 got up from there and moved to pod-a seat 2/);
     expect(byId.get("w_3")!.placement).toEqual({ space: "pod-a", seat: 0 });
     expect(byId.get("w_1")!.placement).toEqual({ space: "pod-a", seat: 2 });
     const plan = planOffice([...byId.values()]);

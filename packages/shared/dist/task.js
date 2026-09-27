@@ -47,6 +47,11 @@ export const TaskSchema = z.object({
     parentId: z.string().optional(),
     /** Per-run restrictions; never changes the saved worker permissions. */
     readOnly: z.boolean().optional(),
+    /**
+     * Meeting-room work (brainstorm): the assignee stays in the Meeting Room for this task instead of
+     * walking to its designated desk (workSeat).
+     */
+    meeting: z.boolean().optional(),
     projectPath: z.string(),
     session: z.object({ provider: ProviderSchema, sessionId: z.string() }).optional(),
     /** claude-session tasks: which Claude Code session and subagent did the work (continuity and the work log). */

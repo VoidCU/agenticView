@@ -90,7 +90,7 @@ describe("planOffice", () => {
   it("does not grow a ring for a stale outer-ring placement while inner desks are free", () => {
     // Four workers, two of them with seats persisted in ring 2 (e.g. from a bigger roster or another world).
     const plan = planOffice([w(1, { space: "pod-e", seat: 1 }), w(2, { space: "pod-p", seat: 0 }), w(3), w(4)]);
-    expect(Math.max(...plan.spaces.map((s) => s.ring))).toBe(1);
+    expect(Math.max(...plan.spaces.filter((s) => s.kind === "pod").map((s) => s.ring))).toBe(1);
     expect(plan.spaces.filter((s) => s.kind === "pod")).toHaveLength(4);
     expect(Object.values(plan.placements).every((p) => ["pod-a", "pod-b", "pod-c", "pod-d"].includes(p.space))).toBe(true);
     expect(new Set(Object.values(plan.placements).map((p) => `${p.space}#${p.seat}`)).size).toBe(4);
@@ -99,11 +99,11 @@ describe("planOffice", () => {
   it("adds a ring only once every desk of the existing rings is taken", () => {
     // Ring 1 has 4 pods × 6 seats = 24 desks; still ring 1 when under capacity.
     const full = Array.from({ length: 23 }, (_, i) => w(i + 1));
-    expect(Math.max(...planOffice(full).spaces.map((s) => s.ring))).toBe(1);
+    expect(Math.max(...planOffice(full).spaces.filter((s) => s.kind === "pod").map((s) => s.ring))).toBe(1);
     // 24 workers fill ring 1 exactly (ringsFor needs *strictly* more) → ring 2.
     const more = Array.from({ length: 24 }, (_, i) => w(i + 1));
     const plan = planOffice(more);
-    expect(Math.max(...plan.spaces.map((s) => s.ring))).toBe(2);
+    expect(Math.max(...plan.spaces.filter((s) => s.kind === "pod").map((s) => s.ring))).toBe(2);
     // Once ring 2 exists, a persisted ring-2 seat is honoured.
     const moved = planOffice([...more.slice(0, 23), w(24, { space: "pod-e", seat: 1 })]);
     expect(moved.placements["w_00000024"]).toEqual({ space: "pod-e", seat: 1 });

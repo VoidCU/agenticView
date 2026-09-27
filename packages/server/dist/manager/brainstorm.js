@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { isTerminal, planOffice } from "@agenticview/shared";
 import { resolveAssignmentTarget } from "./tools.js";
-import { moveWorker } from "./officeTools.js";
+import { seatWorker } from "./officeTools.js";
 function toParticipants(participants, tasks) {
     return participants.map((p) => {
         const t = tasks.get(p.task.id) ?? p.task;
@@ -28,7 +28,7 @@ export function brainstormTool(ctx) {
     async function begin(topic, refs) {
         const agents = await ctx.registry.list();
         const tasks = await ctx.tasks.list();
-        const plan = planOffice(agents);
+        const plan = planOffice(agents, ctx.layout?.(), ctx.spaceNames?.());
         const session = { participants: [], skipped: [], completion: Promise.resolve() };
         const workers = agents.filter(a => a.role === "worker");
         for (const ref of refs) {
@@ -57,7 +57,7 @@ export function brainstormTool(ctx) {
                 kind: "work", title: `Brainstorm: ${topic}`,
                 description: `Give your expert view on ${topic} from your specialty in 5-10 bullet points; do not edit files or run commands.`,
                 createdBy: ctx.managerId, assigneeId: agent.id, parentId: ctx.requestTask.id,
-                projectPath: target.projectPath, readOnly: true,
+                projectPath: target.projectPath, readOnly: true, meeting: true,
             });
             session.participants.push({ agent, task, previous });
         }
@@ -88,7 +88,7 @@ export function brainstormTool(ctx) {
                 return;
             }
             const agents = await ctx.registry.list();
-            const plan = planOffice(agents);
+            const plan = planOffice(agents, ctx.layout?.(), ctx.spaceNames?.());
             const meeting = plan.spaces.find(s => s.id === "meeting");
             const pendingIds = new Set(pending.map(p => p.agent.id));
             const occupied = agents.filter(a => !pendingIds.has(a.id) && !finishedAgents.has(a.id) && plan.placements[a.id]?.space === meeting.id).length;
@@ -107,12 +107,12 @@ export function brainstormTool(ctx) {
             try {
                 for (const p of batch) {
                     const current = await ctx.registry.list();
-                    const seats = planOffice(current).placements;
+                    const seats = planOffice(current, ctx.layout?.(), ctx.spaceNames?.()).placements;
                     const taken = new Set(current.filter(a => a.id !== p.agent.id && seats[a.id]?.space === "meeting").map(a => seats[a.id].seat));
                     const free = Array.from({ length: meeting.seats }, (_, i) => i).find(i => !taken.has(i));
                     // Completed participants may lend their meeting desk to a later batch; the return swap restores them.
                     const lender = current.find(a => finishedAgents.has(a.id) && seats[a.id]?.space === "meeting");
-                    const out = await moveWorker(ctx, p.agent.id, "meeting", free ?? (lender && seats[lender.id].seat));
+                    const out = await seatWorker(ctx, p.agent.id, "meeting", free ?? (lender && seats[lender.id].seat));
                     if (out.startsWith("ERROR:"))
                         throw new Error(out);
                     moved.push(p);
@@ -133,7 +133,7 @@ export function brainstormTool(ctx) {
             finally {
                 for (const p of moved) {
                     if (await ctx.registry.get(p.agent.id))
-                        await moveWorker(ctx, p.agent.id, p.previous.space, p.previous.seat);
+                        await seatWorker(ctx, p.agent.id, p.previous.space, p.previous.seat);
                 }
             }
         }

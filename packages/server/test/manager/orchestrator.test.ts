@@ -94,7 +94,7 @@ describe("Orchestrator", () => {
     expect(workerReq.systemPrompt).toContain("Nova");
     const managerReq = ctx.fake.runs.find((r) => r.agent.role === "manager")!;
     expect(managerReq.prompt.map((p) => (p.type === "text" ? p.text : ""))[0]).toContain("## Roster");
-    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["add_room", "arrange_workers", "ask_user", "assign_session", "assign_task", "await_tasks", "brainstorm", "create_agent", "list_agents", "list_sessions", "list_spaces", "list_tasks", "move_worker", "rename_space", "resolve_task", "retry_task", "revive_agent", "update_agent"]);
+    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["add_room", "arrange_workers", "ask_user", "assign_session", "assign_task", "await_tasks", "brainstorm", "create_agent", "list_agents", "list_sessions", "list_spaces", "list_tasks", "move_room", "move_worker", "remove_room", "rename_space", "resolve_task", "retry_task", "revive_agent", "set_layout", "set_room_kind", "update_agent"]);
     expect(ctx.orch.running()).toBe(0);
     const log = (await ctx.tasks.get(child.id))!.log;
     expect(log.some((l) => l.type === "file_changed")).toBe(true);
@@ -466,7 +466,8 @@ it("persists room names per world, broadcasts updates, resolves renamed moves an
   });
   await ctx.reg.create({ name: "Nova", specialty: "backend" });
   const t = await ctx.orch.handleUserMessage({ agentId: await ctx.reg.managerId(), text: "organize" });
-  expect((await ctx.orch.awaitTask(t.id)).status).toBe("done");
+  const completed = await ctx.orch.awaitTask(t.id);
+  expect(completed.status, completed.error).toBe("done");
   expect(ctx.msgs).toContainEqual({ type: "spaceNames.updated", spaceNames: { office: "Leadership" } });
   const reload = await setup(async function* () {});
   expect((await reload.world.snapshot()).spaceNames).toEqual({ office: "Leadership" });

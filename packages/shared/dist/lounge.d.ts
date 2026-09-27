@@ -10,6 +10,8 @@
  *
  * `rpsFacing(a, b)` returns yaw angles so two players look at each other.
  */
+/** Lounge doorway toward the manager's office in the default plan (lounge (0,0) → office (-1,0)): -150°. */
+export declare const LOUNGE_DOOR_ANGLE: number;
 export type LoungeSpotKind = "sofa" | "armchair" | "counter" | "beanbag" | "standing";
 export interface LoungeSpot {
     /** Unique within one `LoungeLayout`; format: "kind-N" (e.g. "sofa-0"). */
@@ -81,7 +83,7 @@ export declare const RPS_PAIR_MAX_DIST = 1.5;
  * All positions are **local to the lounge room centre** so the caller can add
  * the room's world (x, z) to get world coordinates.
  */
-export declare function loungeSpots(capacityHint?: number, hexR?: number): LoungeLayout;
+export declare function loungeSpots(capacityHint?: number, hexR?: number, doorAngle?: number): LoungeLayout;
 /**
  * Pairs of lounging agents whose assigned spots are within `maxDist` of each
  * other (default RPS_PAIR_MAX_DIST). Waiting (overflow) spots never pair.

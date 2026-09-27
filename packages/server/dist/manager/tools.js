@@ -12,8 +12,9 @@ Rules:
 - assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.
 - When a task fails and a later task (by you or another worker) completes the same work, call resolve_task with the failing task id and the succeeding task id. This marks the failure as solved in the history without changing its status. If no retry is possible and the failure is acceptable, call resolve_task with just a note.
 - Use ask_user only when a decision truly needs the user.
-- The office is a honeycomb of rooms. list_spaces shows who sits where; move_worker / arrange_workers reseat workers (group a team in one pod, call people to the meeting room) when the user asks or when it clearly helps.
+- The office is a honeycomb of rooms. list_spaces shows who sits where and whose designated desk each seat is. Every worker has one designated desk (its workSeat, never shared): it sits there whenever it works and may wander while idle. move_worker / arrange_workers change designated desks (group a team in one pod) when the user asks or when it clearly helps; taking another worker's desk swaps the two. Designated desks exist only in work rooms (pods, Production Room, Research Room): moving a worker to the meeting room or lounge only seats it there for a while and keeps its designated desk. My Office is the user's own room and has no worker seats. The Production Room and Research Room hold the Producer and the Research team; set_layout / move_room / set_room_kind reshape rooms, but only when the user asks for a layout change.
 - Group agents by role and name their rooms with rename_space. Move collaborators next to each other while they work on the same task.
+- Production (video-making) and research are started ONLY when the user explicitly asks for them in their own message: never self-initiated, never suggested-and-started, and never as a side effect of other work — do not decide on your own to "also make a video" or "research this first" before other work. When the user does ask, route production requests to the Producer (specialty Producer, seated in the Production Room) and research requests to the Research team (specialty Researcher, seated in the Research Room). If that team does not exist, tell the user rather than improvising with another agent. Results come back through the normal assign_task + await_tasks flow and are reported like any other task.
 - Use brainstorm for design questions that need several experts; repeat the same topic after stillRunning until the summary is ready.
 - Claude Code session agents (provider claude-session) run on the model and effort of the session that serves them; you cannot set a model for them. The user usually keeps one Opus session and one Sonnet session open. Call list_sessions to see each session's model, capacity, load and bound agents, then route with assign_session before assign_task: hard, architectural or cross-cutting work goes to the strongest-model session (e.g. Opus: the agent then runs on Opus automatically); routine edits, tests and docs go to Sonnet sessions. Choosing the session IS the model choice for these agents. Balance load across online sessions with free slots, and never leave a task waiting on a full or offline session while another suitable session has a free slot (move the agent with assign_session, or "any").
 - Model choice per task for codex, copilot, antigravity and gemini agents: pick the best-fitting model from that provider's catalogue and pass it to assign_task as model (and effort); it applies to that task only. Default to the cheap tier (codex gpt-6-luna with effort medium; copilot auto; antigravity gemini-3.8-flash-medium; gemini flash). Step up to the strong tier (codex gpt-6-sol; copilot gpt-5.6-sol or claude-opus-5; antigravity gemini-3.8-flash-high or gemini-3.1-pro-high; gemini pro) only for genuinely hard tasks (tricky debugging, architecture, large refactors, subtle concurrency or security work), and say why in the task description.
@@ -277,7 +278,9 @@ export function managerTools(ctx) {
                 const next = await ctx.registry.update(cur.id, patch);
                 const problem = await ctx.checkProvider(next);
                 if (problem) {
-                    await ctx.registry.update(cur.id, cur);
+                    // Revert only the fields this patch changed: restoring the whole stale agent could put back a
+                    // desk (workSeat/placement) that changed hands meanwhile.
+                    await ctx.registry.update(cur.id, Object.fromEntries(Object.keys(patch).map((k) => [k, cur[k]])));
                     return `ERROR: ${problem}`;
                 }
                 ctx.emitAgent(next);
@@ -465,9 +468,9 @@ export function managerTools(ctx) {
         },
         {
             name: "add_room",
-            description: "Add a new pod, meeting room, or lounge to the office layout. Returns the new space id.",
+            description: "Add a new pod, meeting, lounge, production, or research room. Returns the new space id.",
             schema: {
-                kind: z.enum(["pod", "meeting", "lounge"]),
+                kind: z.enum(["pod", "meeting", "lounge", "production", "research"]),
                 name: z.string().max(40).optional().describe("Display name; omit for a default like 'Pod B'"),
             },
             handler: async (args) => {
@@ -477,6 +480,17 @@ export function managerTools(ctx) {
                 if (!result.ok)
                     return `ERROR: ${result.message}`;
                 return `Added ${args.kind} room (id: ${result.spaceId})`;
+            },
+        },
+        {
+            name: "remove_room",
+            description: "Remove an empty room by space id. The Manager's Office and My Office cannot be removed.",
+            schema: { space: z.string().min(1) },
+            handler: async (args) => {
+                if (!ctx.removeRoom)
+                    return "ERROR: room removal unavailable";
+                const result = await ctx.removeRoom(String(args.space));
+                return result.ok ? `Removed room ${args.space}` : `ERROR: ${result.message}`;
             },
         },
     ];

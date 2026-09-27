@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo, ProviderConfigInfo } from "@agenticview/shared";
-import { setCustomProviders } from "@agenticview/shared";
+import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, OfficeLayout, SocialHubState, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo, ProviderConfigInfo } from "@agenticview/shared";
+import { compareStandings, emptySocialHub, setCustomProviders } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
 export type Bubble = { text: string; until: number; /** Local playful bonk line (shown even in walk mode). */ bonk?: boolean; /** A friendly greeting reply (walk mode H), shown like a bonk line. */ greet?: boolean };
@@ -34,6 +34,8 @@ export const ERROR_WINDOW_MS = 10000;
 export interface Store {
   connected: boolean;
   world?: WorldInfo;
+  layout: OfficeLayout | null;
+  social: SocialHubState;
   agents: Record<string, Agent>;
   tasks: Record<string, Task>;
   providers: ProviderStatus[];
@@ -149,6 +151,8 @@ function managerFor(agents: Record<string, Agent>, task: Task): string | undefin
 const initial = () => ({
   connected: false,
   world: undefined as WorldInfo | undefined,
+  layout: null as OfficeLayout | null,
+  social: emptySocialHub(),
   agents: {} as Record<string, Agent>,
   tasks: {} as Record<string, Task>,
   providers: [] as ProviderStatus[],
@@ -189,6 +193,7 @@ export const useStore = create<Store>()((set, get) => ({
         for (const t of msg.tasks) tasks[t.id] = t;
         set({
           world: msg.world,
+          layout: msg.layout ?? msg.world.layout ?? null,
           agents,
           tasks,
           providers: msg.providers,
@@ -207,6 +212,9 @@ export const useStore = create<Store>()((set, get) => ({
       }
       case "spaceNames.updated":
         set({ spaceNames: msg.spaceNames });
+        return;
+      case "layout.updated":
+        set({ layout: msg.layout });
         return;
       case "providers.updated":
         set({ providers: msg.providers, autoProvider: msg.autoProvider, ...withProviderConfig(msg.providerConfig) });
@@ -293,12 +301,16 @@ export const useStore = create<Store>()((set, get) => ({
         set((s) => {
           const existing = s.games;
           const newRecent = [match, ...(existing?.recent ?? [])].slice(0, 50);
-          // Update leaderboard win/loss/draw counts in-memory
-          let leaderboard = existing?.leaderboard ?? [];
+          // Clone standings for every result and add newly seen players. The
+          // leaderboard reference is also the 3D board texture's refresh signal.
+          let leaderboard = [...(existing?.leaderboard ?? [])];
           const updatePlayer = (playerId: string, win: boolean, draw: boolean) => {
-            const idx = leaderboard.findIndex((p) => p.playerId === playerId);
-            if (idx < 0) return;
-            leaderboard = [...leaderboard];
+            let idx = leaderboard.findIndex((p) => p.playerId === playerId);
+            if (idx < 0) {
+              const name = playerId === "you" ? "You" : s.agents[playerId]?.name ?? playerId;
+              leaderboard.push({ playerId, name, wins: 0, losses: 0, draws: 0 });
+              idx = leaderboard.length - 1;
+            }
             const p = leaderboard[idx]!;
             leaderboard[idx] = {
               ...p,
@@ -310,6 +322,7 @@ export const useStore = create<Store>()((set, get) => ({
           const isDraw = match.winner === null;
           updatePlayer(match.players[0], match.winner === match.players[0], isDraw);
           updatePlayer(match.players[1], match.winner === match.players[1], isDraw);
+          leaderboard.sort(compareStandings);
           return {
             games: { leaderboard, recent: newRecent },
             gameAnimation: { match, at: now },

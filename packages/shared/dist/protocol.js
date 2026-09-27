@@ -6,6 +6,7 @@ import { AgentSessionSchema, MAX_SESSION_CAPACITY } from "./session.js";
 import { LimitInfoSchema } from "./limits.js";
 import { MoveSchema } from "./games.js";
 import { CustomProviderUpsertSchema, KEYED_PROVIDERS } from "./providers.js";
+import { OfficeLayoutSchema } from "./office.js";
 export const ProviderStatusSchema = z.object({
     provider: ProviderSchema,
     ok: z.boolean(),
@@ -18,6 +19,8 @@ export const WorldInfoSchema = z.object({
     name: z.string(),
     projectPath: z.string().nullable(),
     knownProjects: z.array(KnownProjectSchema),
+    /** The office floor plan; optional so older servers / payloads still parse. */
+    layout: OfficeLayoutSchema.optional(),
 });
 export const CreateAgentPayloadSchema = z.object({
     name: z.string().min(1).max(40),
@@ -34,7 +37,8 @@ export const CreateAgentPayloadSchema = z.object({
     appearance: AgentSchema.shape.appearance.optional(),
 });
 // Explicit optional overrides: partial() would still apply the defaults and wipe fields a patch omits.
-export const AgentPatchSchema = AgentSchema.partial().omit({ id: true, role: true, scope: true, stats: true, createdAt: true, updatedAt: true, originId: true, limit: true }).extend({
+// workSeat is not patchable: a `placement` patch is the user's desk move and the server sets the workSeat.
+export const AgentPatchSchema = AgentSchema.partial().omit({ id: true, role: true, scope: true, stats: true, createdAt: true, updatedAt: true, originId: true, limit: true, workSeat: true }).extend({
     description: z.string().max(2000).optional(),
     systemPrompt: z.string().max(20000).optional(),
 });

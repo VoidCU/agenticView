@@ -11,6 +11,24 @@ describe("office boards", () => {
     expect(podBoard("pod-a", [manager, moved, collision], []).workers.map(a => a.id)).toEqual([worker2.id]);
     expect(podBoard("pod-d", [worker], []).workers).toEqual([]);
   });
+  it.each([
+    ["production", "production-room"],
+    ["research", "research-room"],
+  ] as const)("selects workers and tasks seated in a %s room", (_kind, spaceId) => {
+    const roomWorker = { ...worker, placement: { space: spaceId, seat: 0 } };
+    const elsewhere = { ...worker2, placement: { space: "pod-a", seat: 0 } };
+    const layout = { version: 1 as const, rooms: [
+      { id: spaceId, kind: _kind, q: 1, r: 0 },
+      { id: "pod-a", kind: "pod" as const, q: 0, r: 1 },
+    ] };
+    const tasks = [
+      task({ id: "room-task", assigneeId: roomWorker.id }),
+      task({ id: "other-task", assigneeId: elsewhere.id }),
+    ];
+    const board = podBoard(spaceId, [roomWorker, elsewhere], tasks, layout);
+    expect(board.workers.map((a) => a.id)).toEqual([roomWorker.id]);
+    expect(board.columns.queued.map((t) => t.id)).toEqual(["room-task"]);
+  });
   it("groups assigned with queued, excludes cancelled and other pods, caps recent done", () => {
     const other = agent({ ...worker2, placement: { space: "pod-b", seat: 0 } });
     const tasks = [task({ id: "assigned", status: "assigned" }), task({ id: "cancelled", status: "cancelled" }), task({ id: "other", assigneeId: other.id }), ...Array.from({ length: 25 }, (_, i) => task({ id: `done-${i}`, status: "done", finishedAt: new Date(i * 1000).toISOString() }))];

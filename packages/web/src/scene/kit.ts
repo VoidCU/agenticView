@@ -2,11 +2,19 @@ import {
   AXIAL_DIRS,
   DOOR_ANGLES,
   HEX_R,
+  MYOFFICE_FOOTPRINT,
+  PRODUCTION_FOOTPRINT,
+  PRODUCTION_SCREEN,
+  RESEARCH_FOOTPRINT,
+  WALL_SCREEN,
   seatLocal,
+  userHome,
+  wallIsOpen,
   yawToward,
   managerHome,
   loungeSpots,
   type Space,
+  type WallScreenAnchor,
 } from "@agenticview/shared";
 
 /**
@@ -42,7 +50,13 @@ export type Mat =
   | "rugLounge2"
   | "whiteboard"
   | "lampGlow"
-  | "accent";
+  | "accent"
+  /** My Office warm rug. */
+  | "rugMine"
+  /** Studio acoustic fabric (production screen wall). */
+  | "acoustic"
+  /** Plain white matte fabric/paint, always tinted per instance (green screen, cork, globe...). */
+  | "fabric";
 
 export interface Item {
   prim: Prim;
@@ -149,6 +163,31 @@ export const PRIVACY_SCREEN = { w: 3.8, d: 0.06 } as const;
 export const WHITEBOARD_STAND = { w: 1.7, d: 0.1 } as const;
 /** Meeting-room TV stand: a 1.9 wide, 0.06 deep screen on two legs (at +-legX) with 0.6 deep feet. */
 export const TV_STAND = { w: 1.9, d: 0.06, legX: 0.7, footW: 0.08, footD: 0.6 } as const;
+/** Lounge scoreboard on its stand: board 1.75 x 1.15 (centre 1.15 up), posts at +-postX. */
+export const SCOREBOARD_STAND = { w: 1.75, d: 0.1, h: 1.15, y: 1.15, postX: 0.9 } as const;
+/** Production backdrop (green screen) on two posts. */
+export const BACKDROP_STAND = { w: 1.9, d: 0.1 } as const;
+/** Research reading table (shared RESEARCH_FOOTPRINT). */
+export const READING_TABLE = RESEARCH_FOOTPRINT.table;
+/** Production edit desk top (shared PRODUCTION_FOOTPRINT). */
+export const EDIT_DESK = { w: PRODUCTION_FOOTPRINT.desks[0].w, d: PRODUCTION_FOOTPRINT.desks[0].d } as const;
+/** My Office executive desk (shared MYOFFICE_FOOTPRINT). */
+export const MY_DESK = MYOFFICE_FOOTPRINT.desk;
+/** Research globe: base diameter and sphere diameter. */
+export const GLOBE = { base: 0.36, sphere: 0.55 } as const;
+/** Tripod camera: the collider is just the centre column / camera body, the legs splay under it. */
+export const TRIPOD = { r: 0.1 } as const;
+/** Small round side table next to the My Office sofa. */
+export const SIDE_TABLE_D = 0.5;
+/** Softbox light stand base. */
+export const SOFTBOX_BASE_D = 0.4;
+
+/**
+ * A wall screen's face as the kit draws it: the lit screen front sits `front` in front of the
+ * anchor's inner-face point (local +z faces into the room). Overlays go SCREEN_FACE_NUDGE past it.
+ */
+export const SCREEN_FACE = { front: 0.002 } as const;
+export const SCREEN_FACE_NUDGE = 0.003;
 
 // ---------- furniture (all built in a local frame: +z is "front") ----------
 
@@ -314,8 +353,115 @@ export function cornerFrame(angleDeg: number, at = 4.55): { x: number; z: number
   return { x, z, yaw: yawToward({ x, z }, { x: 0, z: 0 }) };
 }
 
-/** Whiteboard corner slot per room kind (meeting rooms put the TV at 240, so the board goes to 180). */
-export const WHITEBOARD_SLOT = { pod: { angleDeg: 240, at: 4.4 }, meeting: { angleDeg: 180, at: 4.4 } } as const;
+/**
+ * Whiteboard corner slot per room kind (meeting rooms put the TV at 240, so the board goes to 180;
+ * the production room keeps 240/300 for the ends of its screen wall; the research room has
+ * bookshelves round the west corners). Lounges and My Office have no whiteboard.
+ */
+export const WHITEBOARD_SLOT = {
+  pod: { angleDeg: 240, at: 4.4 },
+  meeting: { angleDeg: 180, at: 4.4 },
+  production: { angleDeg: 120, at: 4.4 },
+  research: { angleDeg: 300, at: 4.4 },
+} as const;
+
+/** Room kinds that carry a whiteboard (clickable board, visit target). */
+export function hasWhiteboard(kind: Space["kind"]): boolean {
+  return kind !== "lounge" && kind !== "myoffice";
+}
+
+/** Whiteboard corner slot of a room kind (office uses the pod slot). */
+export function whiteboardSlot(kind: Space["kind"]): { angleDeg: number; at: number } {
+  return kind === "meeting" || kind === "production" || kind === "research" ? WHITEBOARD_SLOT[kind] : WHITEBOARD_SLOT.pod;
+}
+
+/**
+ * A frame against the wall that runs from the corner at `fromDeg` toward the adjacent corner at
+ * `toDeg`: `along` from the corner, `inset` in from the wall's centre line, local +z facing into the
+ * room. Wall runs within 2.5 of a corner never reach the doorway (the middle 1.8 of the 7-long wall).
+ */
+export function wallRunFrame(fromDeg: number, toDeg: number, along: number, inset: number): { x: number; z: number; yaw: number } {
+  const a = { x: HEX_R * Math.cos(fromDeg * DEG), z: HEX_R * Math.sin(fromDeg * DEG) };
+  const b = { x: HEX_R * Math.cos(toDeg * DEG), z: HEX_R * Math.sin(toDeg * DEG) };
+  const len = Math.hypot(b.x - a.x, b.z - a.z);
+  const ux = (b.x - a.x) / len;
+  const uz = (b.z - a.z) / len;
+  const mx = (a.x + b.x) / 2;
+  const mz = (a.z + b.z) / 2;
+  const ml = Math.hypot(mx, mz);
+  const nx = -mx / ml;
+  const nz = -mz / ml;
+  return { x: a.x + ux * along + nx * inset, z: a.z + uz * along + nz * inset, yaw: Math.atan2(nx, nz) };
+}
+
+/** Local frame of a wall screen anchor (origin on the screen's inner face, +z into the room). */
+export function screenFrame(anchor: WallScreenAnchor): { x: number; z: number; yaw: number } {
+  return { x: anchor.x, z: anchor.z, yaw: anchor.yaw };
+}
+
+/** Bookshelf height in the research room (taller than the pod shelves). */
+export const RESEARCH_SHELF_TALL = 2.0;
+/** Wall-run shelves sit this far in from the wall centre line (half partition + half shelf depth + gap). */
+const SHELF_INSET = 0.05 + SHELF_SIZE.d / 2 + 0.02;
+
+/** Research bookshelves: the 180 corner plus four wall runs on the 150 and 210 walls, clear of their doorways. */
+export function researchShelfFrames(): { x: number; z: number; yaw: number }[] {
+  return [
+    cornerFrame(180, 4.55),
+    wallRunFrame(180, 120, 1.75, SHELF_INSET),
+    wallRunFrame(180, 240, 1.75, SHELF_INSET),
+    wallRunFrame(120, 180, 1.75, SHELF_INSET),
+    wallRunFrame(240, 180, 1.75, SHELF_INSET),
+  ];
+}
+
+/** Research corner props: pinboard, globe and plants. */
+export const RESEARCH_PROPS = {
+  pinboard: { angleDeg: 240, at: 4.4 },
+  globe: { angleDeg: 120, at: 4.6 },
+  plants: [
+    { angleDeg: 0, at: 4.7, size: 1.1 },
+    { angleDeg: 60, at: 4.8, size: 0.95 },
+  ],
+} as const;
+
+/** Production props: tripod camera aimed at the green-screen backdrop, a softbox light, gear rack, plants. */
+export const PRODUCTION_PROPS = {
+  tripod: { x: 1.7, z: 2.1 },
+  backdrop: { angleDeg: 180, at: 4.5 },
+  softbox: { angleDeg: 240, at: 4.6 },
+  rack: { angleDeg: 300, at: 4.55 },
+  plants: [
+    { angleDeg: 0, at: 4.7, size: 1.0 },
+    { angleDeg: 60, at: 4.8, size: 0.9 },
+  ],
+} as const;
+
+/** My Office props round the executive desk: couch corner, plants either side of the wall screen, lamp, credenza. */
+export const MYOFFICE_PROPS = {
+  sofa: { angleDeg: 120, at: 4.4, w: 1.9 },
+  armchair: { angleDeg: 0, at: 4.4 },
+  /** Side table beside the sofa, in the sofa's frame. */
+  sideTableX: 1.3,
+  plants: [
+    { angleDeg: 180, at: 4.7, size: 1.25 },
+    { angleDeg: 240, at: 4.7, size: 1.15 },
+  ],
+  /** Floor lamp beside the armchair, in its frame (away from the floor decal). */
+  lampX: -0.85,
+  credenza: { angleDeg: 300, at: 4.55 },
+} as const;
+
+/** The user's desk chair in My Office (local): behind userHome, facing the wall screen. */
+export function myOfficeChairFrame(): { x: number; z: number; yaw: number } {
+  const home = userHome({ x: 0, z: 0 });
+  return { x: home.x - Math.sin(home.yaw) * SEATED_CHAIR_BACK, z: home.z - Math.cos(home.yaw) * SEATED_CHAIR_BACK, yaw: home.yaw };
+}
+
+/** Lounge scoreboard stand (local to the lounge): on the 210 wall's run next to the 180 corner, clear of the doorway. */
+export function scoreboardFrame(): { x: number; z: number; yaw: number } {
+  return wallRunFrame(180, 240, 1.45, 0.2);
+}
 /** Board face inside the whiteboard frame: centre y, front-face z (box z 0.012 + half depth 0.005), size. */
 export const WHITEBOARD_FACE = { y: 1.12, z: 0.017, w: 1.6, h: 0.9 } as const;
 
@@ -458,16 +604,247 @@ function loungeRoom(k: Kit, _s: Space, _occ: RoomOccupancy) {
   floorLamp(corner(k, 120, 4.6));
   plant(corner(k, 0, 4.7), 1.2, 7);
   plant(corner(k, 60, 4.8), 0.8, 8);
+
+  // Scoreboard stand (LoungeScoreboard.tsx draws the live face on it). Every lounge wall can be a
+  // doorway (the lounge is the centre hex), so it stands on a wall run beside the 180 corner.
+  const sb = scoreboardFrame();
+  const b = k.frame(sb.x, sb.z, sb.yaw);
+  for (const x of [-SCOREBOARD_STAND.postX, SCOREBOARD_STAND.postX]) {
+    b.box("alu", [x, (SCOREBOARD_STAND.y + 0.5) / 2, -0.02], [0.04, SCOREBOARD_STAND.y + 0.5, 0.04]);
+    b.box("alu", [x, 0.02, -0.02], [0.06, 0.04, 0.1]);
+  }
+  b.box("bezel", [0, SCOREBOARD_STAND.y, -0.025], [SCOREBOARD_STAND.w + 0.05, SCOREBOARD_STAND.h + 0.05, 0.04]);
+}
+
+// ---------- My Office, Production Room, Research Room ----------
+
+/**
+ * A big wall screen on a screen wall (anchor from shared WALL_SCREEN / PRODUCTION_SCREEN): a backing
+ * panel set into the wall line, the bezel, and the lit screen whose front face is at local z
+ * SCREEN_FACE.front (the live canvas overlay sits SCREEN_FACE_NUDGE past it).
+ */
+function wallScreen(k: Kit, anchor: WallScreenAnchor, backing: Mat, backingW: number, screenColor: string) {
+  const f = k.frame(anchor.x, anchor.z, anchor.yaw);
+  const top = anchor.y + anchor.height / 2 + 0.35;
+  f.box(backing, [0, top / 2, -0.1], [backingW, top, 0.04]);
+  f.box("bezel", [0, anchor.y, -0.035], [anchor.width + 0.1, anchor.height + 0.1, 0.06]);
+  f.box("screen", [0, anchor.y, SCREEN_FACE.front - 0.002], [anchor.width, anchor.height, 0.004], { color: screenColor });
+  // A slim shelf under the screen with a soundbar.
+  f.box("walnut", [0, anchor.y - anchor.height / 2 - 0.12, 0.04], [anchor.width * 0.7, 0.03, 0.16]);
+  f.rbox("bezel", [0, anchor.y - anchor.height / 2 - 0.07, 0.04], [anchor.width * 0.5, 0.07, 0.09]);
+}
+
+function myOfficeRoom(k: Kit, s: Space) {
+  // Warm rug over the dark wood floor, under the desk and chair, with a thin brass edge.
+  const rug = k.frame(1.15 * Math.cos(-150 * DEG), 1.15 * Math.sin(-150 * DEG), MY_DESK.yaw);
+  rug.box("rugMine", [0, 0.006, 0], [3.6, 0.012, 2.9]);
+  rug.box("accent", [0, 0.004, 0], [3.7, 0.008, 3.0]);
+  wallScreen(k, WALL_SCREEN, "walnut", WALL_SCREEN.width + 0.9, "#1b2740");
+
+  // Executive desk: long side parallel to the screen wall, the user's side (+z) toward the room.
+  const dk = k.frame(MY_DESK.x, MY_DESK.z, MY_DESK.yaw);
+  dk.rbox("walnut", [0, 0.75, 0], [MY_DESK.w, 0.07, MY_DESK.d]);
+  dk.rbox("walnut", [-MY_DESK.w / 2 + 0.24, 0.37, 0], [0.42, 0.72, MY_DESK.d - 0.08]);
+  dk.box("deskLeg", [MY_DESK.w / 2 - 0.06, 0.37, 0], [0.05, 0.72, MY_DESK.d - 0.08]);
+  dk.box("walnut", [0.1, 0.45, -MY_DESK.d / 2 + 0.04], [MY_DESK.w - 0.5, 0.5, 0.03]);
+  // Laptop (lid toward the user, low so the wall screen stays in view), lamp, a book and a mug.
+  dk.box("alu", [0.15, 0.795, 0.12], [0.38, 0.02, 0.26]);
+  dk.box("alu", [0.15, 0.91, -0.02], [0.38, 0.24, 0.012], { rx: -0.22 });
+  dk.box("screen", [0.15, 0.91, -0.013], [0.34, 0.2, 0.004], { rx: -0.22, color: "#8fb8ff" });
+  dk.cyl("alu", [-0.7, 0.8, -0.2], 0.16, 0.04);
+  dk.cyl("alu", [-0.7, 0.99, -0.22], 0.025, 0.4);
+  dk.add("cone", "lampGlow", [-0.62, 1.21, -0.14], [0.24, 0.16, 0.24], { rx: 0.5 });
+  dk.box("book", [0.68, 0.8, 0.05], [0.26, 0.04, 0.2], { color: "#3f6f8f", yaw: 0.25 });
+  dk.cyl("pot", [-0.35, 0.83, 0.2], 0.08, 0.1, { color: "#e4b04a" });
+  const ch = myOfficeChairFrame();
+  chair(k.frame(ch.x, ch.z, ch.yaw), { id: `${s.id}#u`, pushable: true });
+
+  // Couch corner: sofa, armchair and a side table with a lamp.
+  const sf = corner(k, MYOFFICE_PROPS.sofa.angleDeg, MYOFFICE_PROPS.sofa.at);
+  sofa(sf, "sofa", MYOFFICE_PROPS.sofa.w);
+  sf.cyl("walnut", [MYOFFICE_PROPS.sideTableX, 0.5, 0], SIDE_TABLE_D, 0.04);
+  sf.cyl("deskLeg", [MYOFFICE_PROPS.sideTableX, 0.25, 0], 0.06, 0.5);
+  sf.cyl("deskLeg", [MYOFFICE_PROPS.sideTableX, 0.015, 0], 0.34, 0.03);
+  sf.add("cone", "lampGlow", [MYOFFICE_PROPS.sideTableX, 0.72, 0], [0.26, 0.2, 0.26]);
+  sf.cyl("alu", [MYOFFICE_PROPS.sideTableX, 0.58, 0], 0.03, 0.14);
+  const ac = corner(k, MYOFFICE_PROPS.armchair.angleDeg, MYOFFICE_PROPS.armchair.at);
+  armchair(ac, "sofa2");
+  floorLamp(ac.frame(MYOFFICE_PROPS.lampX, 0));
+  MYOFFICE_PROPS.plants.forEach((p, i) => plant(corner(k, p.angleDeg, p.at), p.size, 11 + i));
+  credenza(corner(k, MYOFFICE_PROPS.credenza.angleDeg, MYOFFICE_PROPS.credenza.at), 6);
+}
+
+/** An edit desk (1.6 x 0.8): main monitor exactly like a pod desk's, a second one angled on the outer side. */
+function editDesk(k: Kit, screen: string | undefined, outer: number) {
+  const w = EDIT_DESK.w;
+  const d = EDIT_DESK.d;
+  k.rbox("deskTop", [0, DESK_H - 0.025, 0], [w, 0.05, d]);
+  for (const x of [-w / 2 + 0.06, w / 2 - 0.06]) k.box("deskLeg", [x, (DESK_H - 0.05) / 2, 0], [0.05, DESK_H - 0.05, d - 0.1]);
+  k.box("deskLeg", [0, 0.5, -d / 2 + 0.08], [w - 0.12, 0.16, 0.02]);
+  // Main monitor (DeskMonitor overlays this face: local (0, 1.06, -0.163), tilt -0.08).
+  k.box("bezel", [0, 1.06, -0.18], [0.66, 0.4, 0.03], { rx: -0.08 });
+  k.box("screen", [0, 1.06, -0.163], [0.61, 0.35, 0.004], { rx: -0.08, color: screen });
+  k.box("alu", [0, 0.86, -0.21], [0.05, 0.22, 0.03]);
+  k.box("alu", [0, DESK_H + 0.008, -0.2], [0.24, 0.016, 0.16]);
+  // Second monitor, turned toward the editor: a colour-graded timeline.
+  const m = k.frame(outer * 0.56, -0.14, -outer * 0.45);
+  m.box("bezel", [0, 1.02, 0], [0.46, 0.3, 0.03], { rx: -0.08 });
+  m.box("screen", [0, 1.02, 0.017], [0.42, 0.26, 0.004], { rx: -0.08, color: screen ? "#e8a93a" : undefined });
+  m.box("alu", [0, 0.85, -0.02], [0.04, 0.2, 0.03]);
+  m.box("alu", [0, DESK_H + 0.008, -0.02], [0.18, 0.016, 0.12]);
+  // Keyboard, jog wheel and a pair of desk speakers.
+  k.box("keyboard", [-0.08, DESK_H + 0.01, 0.12], [0.44, 0.018, 0.14]);
+  k.cyl("chairBase", [0.3, DESK_H + 0.02, 0.14], 0.12, 0.03);
+  for (const x of [-0.62 * outer, 0.4 * outer]) k.rbox("bezel", [x, DESK_H + 0.11, -0.28], [0.12, 0.2, 0.14]);
+}
+
+function tripodCamera(k: Kit) {
+  for (let i = 0; i < 3; i++) {
+    const leg = k.frame(0, 0, (i * 120 + 30) * DEG);
+    leg.box("deskLeg", [0, 0.63, 0.18], [0.025, 1.3, 0.025], { rx: -0.28 });
+  }
+  k.cyl("deskLeg", [0, 1.28, 0], 0.05, 0.12);
+  k.rbox("bezel", [0, 1.42, 0], [0.18, 0.2, 0.38]);
+  k.add("cyl", "bezel", [0, 1.43, 0.25], [0.12, 0.14, 0.12], { rx: Math.PI / 2 });
+  k.add("cyl", "alu", [0, 1.43, 0.325], [0.1, 0.01, 0.1], { rx: Math.PI / 2 });
+  k.box("alu", [0, 1.56, -0.02], [0.05, 0.05, 0.2]);
+  k.box("screen", [0.06, 1.5, 0.12], [0.02, 0.02, 0.02], { color: "#ff3b30" });
+  // Flip-out viewfinder on the left side.
+  k.box("bezel", [-0.12, 1.45, -0.05], [0.02, 0.1, 0.14]);
+}
+
+function backdrop(k: Kit) {
+  for (const x of [-0.95, 0.95]) {
+    k.box("alu", [x, 1.15, 0], [0.04, 2.3, 0.04]);
+    k.box("alu", [x, 0.02, 0], [0.06, 0.04, 0.5]);
+  }
+  k.box("alu", [0, 2.3, 0], [1.96, 0.04, 0.04]);
+  k.box("fabric", [0, 1.2, 0.01], [1.8, 2.1, 0.03], { color: "#3fa45b" });
+  // The sweep: the green paper rolls out onto the floor.
+  k.box("fabric", [0, 0.008, 0.55], [1.8, 0.012, 1.0], { color: "#3fa45b" });
+}
+
+function softbox(k: Kit) {
+  k.cyl("chairBase", [0, 0.02, 0], SOFTBOX_BASE_D, 0.04);
+  k.cyl("alu", [0, 0.9, 0], 0.035, 1.76);
+  k.rbox("fabric", [0, 1.85, -0.02], [0.62, 0.62, 0.26], { color: "#2a2d33" });
+  k.box("lampGlow", [0, 1.85, 0.115], [0.54, 0.54, 0.004]);
+}
+
+function productionRoom(k: Kit, s: Space, occ: RoomOccupancy) {
+  wallScreen(k, PRODUCTION_SCREEN, "acoustic", PRODUCTION_SCREEN.width + 1.5, "#101722");
+  // Acoustic battens either side of the screen.
+  const sf = k.frame(PRODUCTION_SCREEN.x, PRODUCTION_SCREEN.z, PRODUCTION_SCREEN.yaw);
+  for (const side of [-1, 1]) for (let i = 0; i < 4; i++) sf.box("walnut", [side * (PRODUCTION_SCREEN.width / 2 + 0.12 + i * 0.16), 1.4, -0.07], [0.05, 2.5, 0.03]);
+  PRODUCTION_FOOTPRINT.desks.forEach((d, seat) => {
+    editDesk(k.frame(d.x, d.z, 0), occ.seats.get(seat), Math.sign(d.x) || 1);
+    const l = seatLocal("production", seat);
+    const id = `${s.id}#${seat}`;
+    // Seats look -z (yaw PI): the chair goes behind them, toward +z.
+    if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + 0.1, l.yaw), { id, pushable: true });
+    else if (occ.away?.has(seat)) chair(k.frame(l.x, l.z + SEATED_CHAIR_BACK + AWAY_CHAIR_ROLLBACK, l.yaw + AWAY_CHAIR_SWIVEL), { id, pushable: true });
+    else chair(k.frame(l.x, l.z + SEATED_CHAIR_BACK, l.yaw), { id, pushable: false });
+  });
+  const bd = cornerFrame(PRODUCTION_PROPS.backdrop.angleDeg, PRODUCTION_PROPS.backdrop.at);
+  const t = PRODUCTION_PROPS.tripod;
+  tripodCamera(k.frame(t.x, t.z, yawToward(t, bd)));
+  backdrop(corner(k, PRODUCTION_PROPS.backdrop.angleDeg, PRODUCTION_PROPS.backdrop.at));
+  softbox(corner(k, PRODUCTION_PROPS.softbox.angleDeg, PRODUCTION_PROPS.softbox.at));
+  credenza(corner(k, PRODUCTION_PROPS.rack.angleDeg, PRODUCTION_PROPS.rack.at), 1);
+  whiteboard(corner(k, WHITEBOARD_SLOT.production.angleDeg, WHITEBOARD_SLOT.production.at));
+  PRODUCTION_PROPS.plants.forEach((p, i) => plant(corner(k, p.angleDeg, p.at), p.size, 21 + i));
+}
+
+function globe(k: Kit) {
+  k.cyl("walnut", [0, 0.02, 0], GLOBE.base, 0.04);
+  k.cyl("alu", [0, 0.42, 0], 0.035, 0.8);
+  k.add("sphere", "fabric", [0, 1.08, 0], [GLOBE.sphere, GLOBE.sphere, GLOBE.sphere], { color: "#3d7fb8" });
+  // Continents: a few flattened patches on the sphere, and the brass meridian.
+  k.add("ico", "fabric", [0.13, 1.16, 0.2], [0.2, 0.22, 0.1], { yaw: 0.6, color: "#6fa864" });
+  k.add("ico", "fabric", [-0.18, 1.0, 0.17], [0.16, 0.2, 0.1], { yaw: -0.8, color: "#6fa864" });
+  k.add("cyl", "accent", [0, 1.08, 0], [0.62, 0.02, 0.62], { rx: Math.PI / 2 });
+}
+
+function pinboard(k: Kit) {
+  for (const x of [-0.85, 0.85]) {
+    k.box("alu", [x, 0.85, 0], [0.04, 1.7, 0.04]);
+    k.box("alu", [x, 0.02, 0], [0.06, 0.04, 0.5]);
+  }
+  k.box("walnut", [0, 1.12, -0.005], [1.66, 0.96, 0.03]);
+  k.box("fabric", [0, 1.12, 0.012], [1.56, 0.86, 0.01], { color: "#c39263" });
+  const notes = ["#fff3a8", "#ffd1dc", "#c8f0ff", "#d7f5c4", "#ffffff", "#fff3a8", "#ffe0b3"];
+  notes.forEach((c, i) => {
+    const x = -0.6 + (i % 4) * 0.4 + (i > 3 ? 0.2 : 0);
+    const y = 1.34 - Math.floor(i / 4) * 0.4;
+    k.box("book", [x, y, 0.02], [0.2, 0.16, 0.004], { color: c, rz: ((i * 37) % 7 - 3) * 0.03 });
+  });
+  // Red string between a few notes.
+  k.box("book", [-0.2, 1.2, 0.024], [0.62, 0.008, 0.003], { color: "#d9364a", rz: 0.5 });
+  k.box("book", [0.3, 1.22, 0.024], [0.5, 0.008, 0.003], { color: "#d9364a", rz: -0.35 });
+}
+
+function readingTable(k: Kit) {
+  const t = READING_TABLE;
+  k.rbox("walnut", [0, DESK_H - 0.03, 0], [t.w, 0.06, t.d]);
+  for (const x of [-t.w / 2 + 0.28, t.w / 2 - 0.28]) {
+    k.box("walnut", [x, (DESK_H - 0.06) / 2, 0], [0.08, DESK_H - 0.06, t.d - 0.3]);
+    k.box("walnut", [x, 0.03, 0], [0.12, 0.06, t.d - 0.2]);
+  }
+  k.box("walnut", [0, 0.2, 0], [t.w - 0.6, 0.06, 0.06]);
+  // Two green banker's lamps down the middle, open books at every place, a stack in the centre.
+  for (const x of [-0.45, 0.45]) {
+    k.cyl("alu", [x, DESK_H + 0.01, 0], 0.14, 0.02);
+    k.cyl("alu", [x, DESK_H + 0.12, 0], 0.02, 0.22);
+    k.rbox("fabric", [x, DESK_H + 0.25, 0], [0.34, 0.08, 0.14], { color: "#2f6b45" });
+    k.box("lampGlow", [x, DESK_H + 0.205, 0], [0.3, 0.004, 0.1]);
+  }
+  for (const p of RESEARCH_FOOTPRINT.seats) {
+    const z = Math.sign(p.z) * 0.3;
+    k.box("book", [p.x - 0.1, DESK_H + 0.012, z], [0.2, 0.014, 0.28], { color: "#efe7da", yaw: 0.05 });
+    k.box("book", [p.x + 0.1, DESK_H + 0.012, z], [0.2, 0.014, 0.28], { color: "#f6f0e4", yaw: -0.05 });
+  }
+  ["#3f6f8f", "#d9644a", "#e4b04a"].forEach((c, i) => k.box("book", [0, DESK_H + 0.03 + i * 0.045, 0.02], [0.26, 0.04, 0.19], { color: c, yaw: i * 0.3 }));
+}
+
+function researchRoom(k: Kit, s: Space, occ: RoomOccupancy) {
+  k.box("rugLounge", [0, 0.006, 0], [4.2, 0.012, 3.4]);
+  readingTable(k);
+  for (let seat = 0; seat < s.seats; seat++) {
+    const l = seatLocal("research", seat);
+    // Seats on the -z side look +z: their chairs go toward -z, and vice versa.
+    const back = l.z < 0 ? -1 : 1;
+    const id = `${s.id}#${seat}`;
+    if (!occ.seats.has(seat)) chair(k.frame(l.x, l.z + back * 0.1, l.yaw), { id, pushable: true });
+    else if (occ.away?.has(seat)) chair(k.frame(l.x, l.z + back * (SEATED_CHAIR_BACK + AWAY_CHAIR_ROLLBACK), l.yaw + AWAY_CHAIR_SWIVEL), { id, pushable: true });
+    else chair(k.frame(l.x, l.z + back * SEATED_CHAIR_BACK, l.yaw), { id, pushable: false });
+  }
+  researchShelfFrames().forEach((f, i) => bookshelf(k.frame(f.x, f.z, f.yaw), 5 + i, RESEARCH_SHELF_TALL));
+  pinboard(corner(k, RESEARCH_PROPS.pinboard.angleDeg, RESEARCH_PROPS.pinboard.at));
+  globe(corner(k, RESEARCH_PROPS.globe.angleDeg, RESEARCH_PROPS.globe.at));
+  whiteboard(corner(k, WHITEBOARD_SLOT.research.angleDeg, WHITEBOARD_SLOT.research.at));
+  RESEARCH_PROPS.plants.forEach((p, i) => plant(corner(k, p.angleDeg, p.at), p.size, 31 + i));
 }
 
 /** Every piece of furniture in one space, in world coordinates. */
 export function furnishSpace(kit: Kit, s: Space, occ: RoomOccupancy) {
   const k = kit.frame(s.x, s.z);
   const seed = Math.abs(s.q * 7 + s.r * 13);
-  if (s.kind === "pod") podRoom(k, s, occ, seed);
-  else if (s.kind === "office") officeRoom(k, s, occ);
-  else if (s.kind === "meeting") meetingRoom(k, s, occ);
-  else loungeRoom(k, s, occ);
+  switch (s.kind) {
+    case "pod":
+      return podRoom(k, s, occ, seed);
+    case "office":
+      return officeRoom(k, s, occ);
+    case "meeting":
+      return meetingRoom(k, s, occ);
+    case "myoffice":
+      return myOfficeRoom(k, s);
+    case "production":
+      return productionRoom(k, s, occ);
+    case "research":
+      return researchRoom(k, s, occ);
+    default:
+      return loungeRoom(k, s, occ);
+  }
 }
 
 // ---------- walls ----------
@@ -491,11 +868,21 @@ function post(kit: Kit, p: { x: number; z: number }, h = WALL_H + 0.04) {
 }
 
 /**
- * Walls of the honeycomb. Every wall shared by two rooms has a doorway in the middle; outer walls are
- * solid. Shared walls are built once.
+ * The room on the other side of wall `dir` of `s` and whether that wall has a doorway: shared walls
+ * get one unless either side hangs a screen on it (shared wallIsOpen); outer walls never do.
+ * Shared by the kit walls and the walk-mode solids so both always agree.
+ */
+export function wallSide(spaces: readonly Space[], s: Space, dir: number): { neighbor?: Space; open: boolean } {
+  const [dq, dr] = AXIAL_DIRS[dir]!;
+  const neighbor = spaces.find((o) => o.q === s.q + dq && o.r === s.r + dr);
+  return { neighbor, open: neighbor !== undefined && wallIsOpen(s, neighbor) };
+}
+
+/**
+ * Walls of the honeycomb. Every wall shared by two rooms has a doorway in the middle unless it carries
+ * a screen; outer walls are solid. Shared walls are built once.
  */
 export function buildWalls(kit: Kit, spaces: Space[]) {
-  const has = (q: number, r: number) => spaces.some((s) => s.q === q && s.r === r);
   const postsDone = new Set<string>();
   const addPost = (p: { x: number; z: number }) => {
     const key = `${p.x.toFixed(2)},${p.z.toFixed(2)}`;
@@ -507,15 +894,15 @@ export function buildWalls(kit: Kit, spaces: Space[]) {
     AXIAL_DIRS.forEach(([dq, dr], dir) => {
       const nq = s.q + dq;
       const nr = s.r + dr;
-      const shared = has(nq, nr);
+      const { neighbor, open } = wallSide(spaces, s, dir);
       // Build a shared wall from the room with the smaller (q, r) only.
-      if (shared && (nq < s.q || (nq === s.q && nr < s.r))) return;
+      if (neighbor && (nq < s.q || (nq === s.q && nr < s.r))) return;
       const n = DOOR_ANGLES[dir]!;
       const c1 = { x: s.x + HEX_R * Math.cos(n - 30 * DEG), z: s.z + HEX_R * Math.sin(n - 30 * DEG) };
       const c2 = { x: s.x + HEX_R * Math.cos(n + 30 * DEG), z: s.z + HEX_R * Math.sin(n + 30 * DEG) };
       addPost(c1);
       addPost(c2);
-      if (!shared) {
+      if (!open) {
         partition(kit, c1, c2);
         return;
       }

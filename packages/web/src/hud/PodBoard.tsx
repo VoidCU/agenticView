@@ -635,9 +635,11 @@ function PodKanban({
   onOpenInbox?: () => void;
   onCloseBoard?: () => void;
 }) {
+  const roomTaskLabel = space.kind === "production" ? "production" : space.kind === "research" ? "research" : null;
   const agents = useStore((s) => s.agents);
   const tasks = useStore((s) => s.tasks);
   const feed = useStore((s) => s.feed);
+  const layout = useStore((s) => s.layout);
   const [now, setNow] = useState(Date.now);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [filterAgents, setFilterAgents] = useState<Set<string>>(new Set());
@@ -647,7 +649,7 @@ function PodKanban({
     return () => clearInterval(id);
   }, []);
 
-  const board = podBoard(space.id, Object.values(agents), Object.values(tasks));
+  const board = podBoard(space.id, Object.values(agents), Object.values(tasks), layout);
 
   // Apply agent filter
   const filteredColumns = (() => {
@@ -688,7 +690,7 @@ function PodKanban({
       </div>
 
       {!board.workers.length ? (
-        <p className="board-empty">No workers seated in this pod yet.</p>
+        <p className="board-empty">{roomTaskLabel ? `No ${roomTaskLabel} tasks yet` : "No workers seated in this pod yet."}</p>
       ) : (
         <>
           <AgentFilterChips
@@ -699,6 +701,9 @@ function PodKanban({
           />
           {/* kanban-layout fills remaining whiteboard height; sheet overlays it */}
           <div className="kanban-layout">
+            {roomTaskLabel && BOARD_COLUMNS.every((col) => filteredColumns[col].length === 0) && (
+              <p className="board-empty">No {roomTaskLabel} tasks yet</p>
+            )}
             <div className="kanban-columns" data-testid="kanban-columns">
               {BOARD_COLUMNS.map((col) => (
                 <section
@@ -858,12 +863,16 @@ export function PodBoard({
 }) {
   const agents = useStore((s) => s.agents);
   const spaceNames = useStore((s) => s.spaceNames);
-  const pod = space.kind === "pod";
+  const pod = space.kind === "pod" || space.kind === "production" || space.kind === "research";
+  const roomBoard = space.kind === "production" || space.kind === "research";
   const manager = Object.values(agents).find((a) => a.role === "manager");
   const displayName = spaceNames[space.id]?.trim() || space.name;
 
+  // My Office and lounges have no whiteboard; meeting rooms (like the manager's office) open the Manager board.
+  if (space.kind === "myoffice" || space.kind === "lounge") return null;
+
   return (
-    <Modal title={pod ? `Pod board · ${displayName}` : "Manager board"} onClose={onClose} wide>
+    <Modal title={roomBoard ? `${displayName} board` : pod ? `Pod board · ${displayName}` : "Manager board"} onClose={onClose} wide>
       <div className="whiteboard-panel">
         {pod ? (
           <PodKanban space={space} onOpenInbox={onOpenInbox} onCloseBoard={onClose} />

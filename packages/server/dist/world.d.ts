@@ -1,4 +1,4 @@
-import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type ServerMessage, type Effort, type LimitsReport, type UsageReport, type GamesData, type CustomProviderUpsert, type KeyedProvider } from "@agenticview/shared";
+import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type ServerMessage, type Effort, type LimitsReport, type UsageReport, type GamesData, type OfficeLayout, type CustomProviderUpsert, type KeyedProvider } from "@agenticview/shared";
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { type SyncResult } from "./agents/subagents.js";
@@ -8,7 +8,7 @@ import { Orchestrator, type ResolvedSettings } from "./manager/orchestrator.js";
 import type { Runtime, BridgeTool } from "./runtimes/types.js";
 import type { ToolRegistry } from "./bridge/toolRegistry.js";
 import type { EventBus } from "./events/bus.js";
-import { type Agent, type Task } from "@agenticview/shared";
+import { type Agent, type Placement, type Task } from "@agenticview/shared";
 export interface WorldOptions {
     runtimes: Map<Provider, Runtime>;
     bus: EventBus;
@@ -62,7 +62,7 @@ export interface World {
      * Add a new room to the office layout.
      * Returns {ok:true, spaceId} on success or {ok:false, message} when the office is full.
      */
-    addRoom: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{
+    addRoom: (kind: "pod" | "meeting" | "lounge" | "production" | "research", name: string) => Promise<{
         ok: true;
         spaceId: string;
     } | {
@@ -78,6 +78,9 @@ export interface World {
         ok: false;
         message: string;
     }>;
+    layout: () => OfficeLayout;
+    updateLayout: (layout: OfficeLayout, names?: Record<string, string>) => Promise<OfficeLayout>;
+    editLayout: (edit: (current: OfficeLayout) => OfficeLayout) => Promise<OfficeLayout>;
     /** Store (or clear, with null/"") a built-in provider's API key in the global config. Never echoed to clients. */
     setProviderKey: (provider: KeyedProvider, apiKey: string | null) => Promise<void>;
     /** Save the provider order (Automatic, failover candidates, header chips). */
@@ -87,6 +90,11 @@ export interface World {
     removeCustomProvider: (id: string) => Promise<void>;
     /** Wire decoration of outgoing messages (fills agent.sessionModel for claude-session agents). */
     decorate: (m: ServerMessage) => ServerMessage;
+    /**
+     * The user dragged a worker to a desk: an owner action, so it becomes the worker's designated desk
+     * (move_worker semantics, including the designated-desk swap). Returns the tool message ("ERROR: ..." on refusal).
+     */
+    moveDesk: (agentId: string, desk: Placement) => Promise<string>;
 }
 export declare function globalConfigPath(): string;
 export declare function readGlobalConfig(): Promise<GlobalConfig>;

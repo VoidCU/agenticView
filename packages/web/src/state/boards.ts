@@ -1,4 +1,4 @@
-import { planOffice, type Agent, type Task } from "@agenticview/shared";
+import { planOffice, type Agent, type OfficeLayout, type Task } from "@agenticview/shared";
 import type { FeedItem } from "./store";
 
 export const BOARD_COLUMNS = ["queued", "running", "waiting", "done", "failed"] as const;
@@ -10,8 +10,8 @@ export function boardColumn(task: Task): BoardColumn | undefined {
   if (task.status === "failed" && task.resolution) return "done";
   return task.status === "assigned" ? "queued" : task.status === "cancelled" ? undefined : task.status;
 }
-export function podBoard(spaceId: string, agents: Agent[], tasks: Task[]) {
-  const { placements } = planOffice(agents);
+export function podBoard(spaceId: string, agents: Agent[], tasks: Task[], layout?: OfficeLayout | null) {
+  const { placements } = planOffice(agents, layout);
   const workers = agents.filter(a => a.role === "worker" && placements[a.id]?.space === spaceId)
     .sort((a, b) => placements[a.id]!.seat - placements[b.id]!.seat);
   const ids = new Set(workers.map(a => a.id));

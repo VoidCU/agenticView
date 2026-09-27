@@ -1,5 +1,6 @@
-import { assignLoungeSpots, loungeSpots, managerHome, rpsFacing, visitPose, yawToward, type Agent, type Match, type Space } from "@agenticview/shared";
-import type { OfficeLayout } from "./layout";
+import { AXIAL_DIRS, DOOR_ANGLES, LOUNGE_DOOR_ANGLE, assignLoungeSpots, loungeSpots, managerHome, rpsFacing, seatPose, visitPose, wallIsOpen, yawToward, type Agent, type Match, type Space, type Task } from "@agenticview/shared";
+import { hasWhiteboard } from "./kit";
+import { SEATED_LIFT, type OfficeLayout } from "./layout";
 import type { LoungeBreak } from "./breaks";
 import { agentRevivePhase, isFaintedCrash, limitWalk } from "./breaks";
 import { whiteboardPose } from "./Whiteboard";
@@ -9,6 +10,25 @@ export interface Target {
   z: number;
   yaw: number;
   yOffset?: number;
+}
+
+/**
+ * Workers with desk work in progress (a task assigned, running or waiting that is not a brainstorm
+ * meeting): they sit at their designated desk (workSeat).
+ */
+export function workingAgentIds(tasks: Iterable<Task>): Set<string> {
+  const out = new Set<string>();
+  for (const t of tasks) if (!t.meeting && (t.status === "assigned" || t.status === "running" || t.status === "waiting")) out.add(t.assigneeId);
+  return out;
+}
+
+/** Where a worker sits at its designated desk, or undefined when it has none (or the desk is gone). */
+export function workSeatTarget(agent: Agent, spaces: readonly Space[]): Target | undefined {
+  const w = agent.workSeat;
+  const s = w && spaces.find((x) => x.id === w.space);
+  if (!w || !s || w.seat < 0 || w.seat >= s.seats) return undefined;
+  const p = seatPose(s, w.seat);
+  return { x: p.x, z: p.z, yaw: p.yaw, yOffset: SEATED_LIFT };
 }
 
 /** How far in front of a whiteboard a visitor stands, and the sideways gap between visitors. */
@@ -62,7 +82,7 @@ export function visitTarget(agent: Agent, layout: Pick<OfficeLayout, "poses" | "
   }
   if (v.spaceId) {
     const space = layout.spaces.find((s) => s.id === v.spaceId);
-    if (space && space.kind !== "lounge") {
+    if (space && hasWhiteboard(space.kind)) {
       const b = whiteboardPose(space);
       const fx = Math.sin(b.yaw);
       const fz = Math.cos(b.yaw);
@@ -92,6 +112,22 @@ export function reportSpot(office: Space, slot = 0): Target {
   return { ...p, yaw: yawToward(p, home), yOffset: 0 };
 }
 
+/**
+ * The lounge doorway overflow agents queue outside: the one toward the manager's office when they share
+ * a doorway, else the lounge's first doorway, else the default (-150 degrees). Follows live re-layouts.
+ */
+export function loungeDoorAngle(spaces: readonly Space[], lounge: Space): number {
+  let first: number | undefined;
+  let toOffice: number | undefined;
+  AXIAL_DIRS.forEach(([dq, dr], dir) => {
+    const n = spaces.find((o) => o.q === lounge.q + dq && o.r === lounge.r + dr);
+    if (!n || !wallIsOpen(lounge, n)) return;
+    first ??= DOOR_ANGLES[dir]!;
+    if (n.kind === "office") toOffice = DOOR_ANGLES[dir]!;
+  });
+  return toOffice ?? first ?? LOUNGE_DOOR_ANGLE;
+}
+
 export interface TargetInputs {
   layout: OfficeLayout;
   list: readonly Agent[];
@@ -104,16 +140,19 @@ export interface TargetInputs {
   managerVisit?: string;
   activeRpsMatch?: { players: [string, string]; spotIds: [string, string] };
   gameAnimation?: { match: Match; at: number };
+  /** Workers with desk work in progress (workingAgentIds): they target their workSeat. */
+  working?: ReadonlySet<string>;
   now: number;
 }
 
 /**
  * Every agent's current walk target. Priority (later wins): resting pose < idle visit < lounge / crash faint
- * < limit report at the Manager's desk
+ * < working at the designated desk (workSeat) < limit report at the Manager's desk
  * < manager walks < RPS match < RPS result facing. Pure: the scene memoises it on its inputs.
  */
 export function computeTargets(inp: TargetInputs): { targets: Record<string, Target>; loungeAssign: Record<string, string> } {
   const { layout, list, lounge, loungeBreaks, managerId, managerVisit, activeRpsMatch, gameAnimation, now } = inp;
+  const working = inp.working ?? new Set<string>();
   const out: Record<string, Target> = {};
   for (const id in layout.poses) out[id] = layout.poses[id]!;
   let loungeAssign = inp.prevLoungeAssign;
@@ -121,7 +160,7 @@ export function computeTargets(inp: TargetInputs): { targets: Record<string, Tar
   // Idle visits (colleague desk / whiteboard). Slots per destination so visitors don't stack.
   const slots = new Map<string, number>();
   for (const a of list) {
-    if (a.role !== "worker" || !isVisiting(a, now) || a.lounging || loungeBreaks.has(a.id)) continue;
+    if (a.role !== "worker" || !isVisiting(a, now) || a.lounging || loungeBreaks.has(a.id) || working.has(a.id)) continue;
     const dest = a.visiting!.targetAgentId ? `a:${a.visiting!.targetAgentId}` : `s:${a.visiting!.spaceId}`;
     const slot = slots.get(dest) ?? 0;
     const t = visitTarget(a, layout, slot);
@@ -135,12 +174,12 @@ export function computeTargets(inp: TargetInputs): { targets: Record<string, Tar
     for (const [id] of loungeBreaks) loungeAgentIds.push(id);
     for (const a of list) {
       if (loungeBreaks.has(a.id)) continue;
-      if (a.lounging && a.role === "worker") { loungeAgentIds.push(a.id); continue; }
+      if (a.lounging && a.role === "worker" && !working.has(a.id)) { loungeAgentIds.push(a.id); continue; }
       // Crashes faint in the lounge; a limit walks to the Manager's desk (below).
       if (isFaintedCrash(a)) loungeAgentIds.push(a.id);
     }
     if (loungeAgentIds.length > 0) {
-      const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2));
+      const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2), undefined, loungeDoorAngle(layout.spaces, lounge));
       loungeAssign = assignLoungeSpots(loungeAgentIds, loungeLayout.spots, inp.prevLoungeAssign);
       for (const agentId of loungeAgentIds) {
         const spotId = loungeAssign[agentId];
@@ -151,6 +190,13 @@ export function computeTargets(inp: TargetInputs): { targets: Record<string, Tar
     } else {
       loungeAssign = {};
     }
+  }
+
+  // Working agents sit at their designated desk (the server moves them there too; this covers a stale copy).
+  for (const a of list) {
+    if (a.role !== "worker" || !working.has(a.id) || loungeBreaks.has(a.id) || isFaintedCrash(a)) continue;
+    const t = workSeatTarget(a, layout.spaces);
+    if (t) out[a.id] = t;
   }
 
   // Manager walks to a fainted agent while it is being revived.

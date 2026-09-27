@@ -87,9 +87,10 @@ test("RPS pauses an agent mid-walk facing the player, then it walks on", async (
   expect(b.walking).toBe(false);
 
   // A round comes in: he throws and reacts in speech bubbles.
-  await page.evaluate(() => (window as unknown as Win).__agenticviewTest!.store.setState({
-    lastGameRound: { matchId: "m_shot", round: 1, userMove: "rock", agentMove: "scissors", winner: "you", score: { you: 1, agent: 0 }, done: false },
-  }));
+  // game.round carries opponentId: the popup ignores rounds for any other agent.
+  await page.evaluate((id) => (window as unknown as Win).__agenticviewTest!.store.setState({
+    lastGameRound: { matchId: "m_shot", opponentId: id, round: 1, userMove: "rock", agentMove: "scissors", winner: "you", score: { you: 1, agent: 0 }, done: false },
+  }), rex.id);
   await expect.poll(() => page.evaluate((id) => (window as unknown as Win).__agenticviewTest!.store.getState().bubbles[id]?.text, rex.id)).toBe("No way!");
   await holdBubbles(page);
   await page.waitForTimeout(600);
@@ -125,7 +126,8 @@ test("a limited agent reports at the Manager's desk, then switches and walks bac
     const c = await pos(page, cody.id);
     const m = await pos(page, atlasId);
     return Boolean(c && m && !c.walking && Math.hypot(c.x - m.x, c.z - m.z) < 3.5);
-  }, { timeout: 30_000 }).toBe(true);
+    // Two doorways from the pods to the Manager's Office now that it is no longer the centre room.
+  }, { timeout: 60_000 }).toBe(true);
   await page.keyboard.press("1"); // focus the Manager's office
   await expect(page.locator(".bubble", { hasText: "Hit my Codex limit!" })).toBeVisible();
   await page.waitForTimeout(2500);
@@ -139,5 +141,5 @@ test("a limited agent reports at the Manager's desk, then switches and walks bac
   await expect.poll(async () => {
     const c = (await pos(page, cody.id))!;
     return Math.hypot(c.x - seat.x, c.z - seat.z) < 0.2;
-  }, { timeout: 30_000 }).toBe(true);
+  }, { timeout: 60_000 }).toBe(true);
 });

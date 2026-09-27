@@ -265,6 +265,7 @@ for (const vp of viewports) {
     });
 
     test(`Walk-mode whiteboard close-up, bonk and keyboard RPS — ${vp.name}`, async ({ page }) => {
+      test.setTimeout(240_000); // Atlas may first walk a round trip to a worker (two doorways each way).
       ensureScreenshotsDir();
       await page.addInitScript(() => localStorage.setItem("av:hud:show-tags", "true"));
       await page.goto(`/#token=${launchToken()}`);
@@ -272,7 +273,7 @@ for (const vp of viewports) {
       await seedTasks(page);
       type Probe = {
         store: { getState(): { agents: Record<string, { id: string; name: string }> } };
-        agentPos(id: string): { x: number; z: number } | undefined;
+        agentPos(id: string): { x: number; z: number; walking?: boolean } | undefined;
         boardPose(spaceId: string): { x: number; z: number; yaw: number; face: [number, number, number] } | undefined;
       };
       type Win = { __agenticviewTest?: Probe; __setWalking?: (v: boolean) => void; __teleportWalk?: (x: number, z: number, yaw?: number) => void };
@@ -293,7 +294,13 @@ for (const vp of viewports) {
         await page.screenshot({ path: `e2e/screenshots/walk-whiteboard-${room}-${label}-light-${vp.name}.png`, fullPage: false });
       }
 
-      // Bonk: stand 1.4 units from Atlas, look at it, press E.
+      // Bonk: stand 1.4 units from Atlas, look at it, press E. Atlas may still be walking back from
+      // visiting a worker (the Manager's Office is no longer the centre room, so visits take longer).
+      await expect.poll(() => page.evaluate(() => {
+        const w = window as unknown as Win;
+        const atlas = Object.values(w.__agenticviewTest!.store.getState().agents).find((a) => a.name === "Atlas")!;
+        return w.__agenticviewTest!.agentPos(atlas.id)?.walking;
+      }), { timeout: 150_000 }).toBe(false);
       await page.evaluate(() => {
         const w = window as unknown as Win;
         const atlas = Object.values(w.__agenticviewTest!.store.getState().agents).find((a) => a.name === "Atlas")!;

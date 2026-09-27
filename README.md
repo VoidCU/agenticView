@@ -2,7 +2,7 @@
 
 A gamified 3D office for your coding agents, packaged as a Claude Code plugin.
 
-Run one command inside any project and a browser tab opens onto an isometric office: a honeycomb of hexagonal rooms. Spherical robots are your agents. **Atlas**, the Manager, works from the office in the centre; workers sit at desks in the pods around it, next to a meeting room and a lounge. You talk to Atlas, Atlas splits the work, walks over to the right worker and hands it off, and the workers edit your real project files. Flip back to VS Code whenever you like to review the code.
+Run one command inside any project and a browser tab opens onto an isometric office: a honeycomb of hexagonal rooms. Spherical robots are your agents. A lounge sits in the centre; **Atlas**, the Manager, works from the office next to it, workers sit at desks in the pods around them, and there is a meeting room, your own **My Office**, a **Production Room** and a **Research Room**. You talk to Atlas, Atlas splits the work, walks over to the right worker and hands it off, and the workers edit your real project files. Flip back to VS Code whenever you like to review the code.
 
 - **Any provider.** Agents run on Claude (API key), on your own **Claude Code session** (Max/Pro plans, via `/agenticview-work`), on OpenAI **Codex**, on **GitHub Copilot** (the `copilot` CLI), on Google **Antigravity** (the `agy` CLI), or on Google **Gemini**. *Automatic* picks the first one that is available.
 - **Model and effort per agent.** Pick each agent's model from its provider's list (or type a custom id) and a reasoning effort from low to max where the model supports it.
@@ -117,8 +117,12 @@ Inside the office:
 - Type into the command bar at the bottom to give Atlas a task. Atlas walks through the doorways to the worker that gets it, and back again when the task is done.
 - Click any robot to open its chat panel. Paste an image to attach it. The ⋯ menu in the chat header edits, copies or deletes the agent.
 - Click the empty desk with the `+` pad to create a worker. Pick a name, a specialty, a provider, a model and effort level, which tools it may use, and how much it should ask before acting.
-- Click a room (or its name plate) to zoom to it; Esc or *Whole floor* zooms back out. More pods open in new rings as you add workers.
-- Drag a worker onto another room or desk to reseat it (dropping on an occupied desk swaps the two). Atlas can do the same: ask it to rearrange the team and it uses its `list_spaces`, `move_worker` and `arrange_workers` tools.
+- Click a room (or its name plate) to zoom to it; Esc or *Whole floor* zooms back out. More pods open as you add workers. Rearrange the rooms themselves in **Settings > Layout** (see [Office layout](#office-layout)).
+- Every worker has a **designated desk** of its own (never shared). It walks back to that desk whenever it gets work (brainstorm meetings excepted) and may wander while idle; an idle worker sitting at someone else's desk gets up when the owner starts working.
+- Drag a worker onto another room or desk to make that its designated desk (dropping on another worker's desk swaps the two designated desks), or use *Move to room* in the agent's ⋯ menu. Atlas can do the same: ask it to rearrange the team and it uses its `list_spaces`, `move_worker` and `arrange_workers` tools.
+- Each team room has a whiteboard: sticky notes in the overview, and in walk mode a readable list of the room's tasks with their status when you walk up to it. Click it (or aim the crosshair at it) to open the full board.
+- **My Office** is your room: an executive desk facing a big wall screen (a social hub that will show Instagram and Meta activity once connections exist), and where the *You* marker sits on the mini-map. Walk mode starts there, facing the screen; clicking the screen while walking opens **Settings > Connections**.
+- The **Production Room** (the Producer's edit desks) has a big screen that shows a *PRODUCTION* slate when idle and *ON AIR* with the task title while a worker seated there runs a task. The **Research Room** has a reading table for the Research team. Production and research boards list only their room's tasks. Atlas starts production or research work only when you ask for it yourself, never on its own initiative.
 - Workers earn XP for finished tasks. Levels only unlock cosmetic accents.
 - When a Claude worker in `ask` mode wants to run something risky, a bubble appears over its head with Allow and Deny.
 
@@ -133,7 +137,7 @@ Inside the office:
 | **antigravity** | The installed Antigravity CLI (`agy -p ... --output-format stream-json`) | Install `agy` and run it once to sign in with your Antigravity account. Found on `PATH` or at `%LOCALAPPDATA%\agy\bin\agy.exe`. |
 | **gemini** | The installed `gemini` CLI in headless streaming mode | `npm i -g @google/gemini-cli`, then sign in, set `GEMINI_API_KEY`, or store a key in **Settings > Providers**. |
 
-**Settings** has four tabs: *General* (default provider and model, workers at once, limit policy, notifications), *Providers* (provider order and failover, keys, custom providers; each provider's status and the reason when one is unavailable), *Office life* (lounge breaks and idle wandering) and *Usage*. The Usage tab shows plan windows as bars with the percentage left and the reset time (Codex reports its 5-hour and weekly windows after each run; Claude Code sessions report theirs through the [status line relay](#rate-limit-status-line-promax-plans)), limits other providers hit, and input/output tokens per provider and model and per agent for this session, today and the last 7 days, with totals. It refreshes on demand or every 30 seconds. Creating an agent on an unavailable provider is refused with that reason, except for *Claude Code session*, whose tasks simply wait until a worker session connects.
+**Settings** has six tabs: *General* (default provider and model, workers at once, limit policy, notifications), *Providers* (provider order and failover, keys, custom providers; each provider's status and the reason when one is unavailable), *Office life* (lounge breaks and idle wandering), *Layout* (the [floor plan editor](#office-layout)), *Connections* (Instagram and Meta for the My Office wall screen; not available yet, the buttons say *Coming soon*) and *Usage*. The Usage tab shows plan windows as bars with the percentage left and the reset time (Codex reports its 5-hour and weekly windows after each run; Claude Code sessions report theirs through the [status line relay](#rate-limit-status-line-promax-plans)), limits other providers hit, and input/output tokens per provider and model and per agent for this session, today and the last 7 days, with totals. It refreshes on demand or every 30 seconds. Creating an agent on an unavailable provider is refused with that reason, except for *Claude Code session*, whose tasks simply wait until a worker session connects.
 
 With the default provider on **Automatic**, agents without their own provider run on the first available provider in your provider order (default: claude, claude-session, codex, copilot, antigravity, gemini, then custom providers; change it in **Settings > Providers**). The settings panel shows the current choice, e.g. *Automatic (Codex)*.
 
@@ -223,7 +227,7 @@ The skill restores the original `statusLine` value from the backup (or removes `
 | Appear in | that project's office | every office (in the Lobby) and the Hub |
 | Can work in | that project only | any known project |
 
-`<project>/.agenticview/` also holds tasks, settings and the Claude Code session records. Every project keeps its own folder, and the office adds it to the project's `.gitignore` when it opens (creating the file if needed), together with the generated subagents:
+`<project>/.agenticview/` also holds tasks, settings, the Claude Code session records, the floor plan (`layout.json`) and custom room names (`office.json`). Every project keeps its own folder, and the office adds it to the project's `.gitignore` when it opens (creating the file if needed), together with the generated subagents:
 
 ```gitignore
 # AgenticView
@@ -235,7 +239,7 @@ Only missing lines are added, once, and your own lines and line endings are kept
 
 ## Security
 
-The server binds to `127.0.0.1` only. Every request and WebSocket connection needs the random token that is minted at launch and passed once in the URL. Agents only receive the tools you allowed on them. Custom tools handed to Codex, GitHub Copilot, Antigravity and Gemini go through a per-run bridge token that stops working when the run ends.
+The server binds to `127.0.0.1` only. Every request and WebSocket connection needs the random token that is minted at launch and passed once in the URL (this includes `GET` and `PUT /api/layout`). Only the Manager gets the room and layout tools; workers cannot change the floor plan. Agents only receive the tools you allowed on them. Custom tools handed to Codex, GitHub Copilot, Antigravity and Gemini go through a per-run bridge token that stops working when the run ends.
 
 ## FAQ
 
@@ -284,21 +288,18 @@ Project agents work only in their own project; global agents appear in every off
 
 ## Office layout
 
-The office is a honeycomb of flat-top hexagonal rooms arranged in concentric rings around the Manager's Office (ring 0).
+The office is a honeycomb of flat-top hexagonal rooms, up to **3 rings** around the centre hex (`MAX_RINGS`). The floor plan is data: `<project>/.agenticview/layout.json` lists every room's id, kind, hex (`q`, `r`) and optional name, and every change is validated, saved and broadcast to open tabs, which rebuild walls, furniture and colliders live (robots walk to their new seats).
 
-**Growth rules (ring-by-ring):**
-- Ring 1 has six hex slots: four pod positions, one meeting room, and one lounge. These are the first positions filled by `addRoom`.
-- Rings 2 and 3 each add a full shell of additional hex slots (12 and 18 respectively), available only as pod positions by default.
-- A new ring begins only after every hex slot in the current ring is occupied. `addRoom` enforces this: it always fills the lowest available hex in the current ring before advancing.
-- The office is capped at **3 rings** (constant `MAX_RINGS`). `addRoom` returns `{ok: false, message: 'The office is full (3 rings). Remove an empty room first.'}` once the cap is reached.
+**The default plan:** a lounge in the centre, the Manager's Office next to it, four pods, a meeting room, and on the west side **My Office** (your room: no worker seats), the **Production Room** (two edit desks) and the **Research Room** (a four-seat reading table). A wall that carries a big screen (My Office's social hub, the Production Room's screen) has no doorway; every other shared wall has one. Pods grow automatically when the desks run out.
 
-**`world.addRoom(kind, name)`** — adds a room to the next free hex (ring-by-ring order). Returns `{ok: true, spaceId}` or `{ok: false, message}`.
+**Rules every layout must pass:** exactly one Manager's Office and one My Office, no two rooms on one hex, every room within 3 rings and reachable from the Manager's Office through doorways, and no room with seated workers removed or shrunk below their seats. Changing a room's kind (for example a meeting room into a pod) reseats its workers on free pod desks; the change is refused when there are none.
 
-**`world.removeRoom(spaceId)`** — removes an empty room. Fails when agents are seated there or when the target is the Manager's Office. Returns `{ok: true}` or `{ok: false, message}`.
+**Editing the plan:**
+- **Settings > Layout** shows the hex grid. Choose a room, then another hex to move it there (onto another room: the two swap). Pick a *Room type* for an empty hex to add a room, change a room's type, or *Remove room*; rename rooms in *Room name* (clear it to restore the default). The editor works from the keyboard alone: arrow keys move between hexes, Enter or Space selects and places, Escape drops the selection. Problems show as you edit and *Save layout* stays disabled until the plan is valid; *Cancel layout changes* returns to the saved plan.
+- Atlas has manager-only tools for it, and uses them only when you ask for a layout change: `set_layout` (several moves at once), `move_room`, `set_room_kind` (add, change or remove the room on a hex), `add_room` (pod, meeting, lounge, production or research room on the next free hex that shares a doorway), `remove_room` (an empty room; never the Manager's Office or My Office) and `rename_space`.
+- `GET /api/layout` returns `{version, rooms, spaceNames}`; `PUT /api/layout` takes the same shape (`spaceNames` optional), answers `{layout, spaceNames}`, and `400` with the reasons for an invalid plan. Both need the office token.
 
-**Ring count** — `snapshot.ringCount` holds the current highest ring index in use (0–3). The 3D scene camera uses this to auto-fit the view.
-
-**Persistence** — explicit rooms are stored in `<project-root>/agenticview/rooms.json`. On the first `addRoom` call, existing auto-grown rooms (derived from the current worker count) are written as the initial state so no seats are lost.
+**Upgrading from 0.2.16 or earlier:** the first start migrates `rooms.json`, `office.json` and worker seats into `layout.json` once (logged as `layout migration: ...`). Rooms keep their ids, names and hexes where the new rooms do not need them, custom names of rooms that no longer exist are dropped, and seats that no longer exist move to free pod desks. `rooms.json` is left untouched; later starts read `layout.json` only.
 
 ## Development
 

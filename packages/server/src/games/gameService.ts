@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { randomInt as cryptoRandomInt } from "node:crypto";
 import { z } from "zod";
 import { newId, loungeAssignmentFor, loungeRpsPairs } from "@agenticview/shared";
-import { MoveSchema, MatchSchema } from "@agenticview/shared";
+import { MoveSchema, MatchSchema, compareStandings } from "@agenticview/shared";
 import type { Move, Match, GamesData, GameRoundResult, PlayerStats } from "@agenticview/shared";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import type { EventBus } from "../events/bus.js";
@@ -141,7 +141,7 @@ export class GameService {
       name: playerId === "you" ? "You" : (agentNameMap.get(playerId) ?? playerId),
       ...s,
     }));
-    leaderboard.sort((a, b) => b.wins - a.wins || a.losses - b.losses);
+    leaderboard.sort(compareStandings);
 
     return { leaderboard, recent: [...this.persisted.recent] };
   }

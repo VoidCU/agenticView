@@ -11,7 +11,10 @@
  * `rpsFacing(a, b)` returns yaw angles so two players look at each other.
  */
 
-import { HEX_APOTHEM, HEX_R, WALK_R } from "./office.js";
+import { DOOR_ANGLES, HEX_APOTHEM, HEX_R, WALK_R } from "./office.js";
+
+/** Lounge doorway toward the manager's office in the default plan (lounge (0,0) → office (-1,0)): -150°. */
+export const LOUNGE_DOOR_ANGLE = DOOR_ANGLES[3]!;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -118,7 +121,7 @@ function spot(
  * All positions are **local to the lounge room centre** so the caller can add
  * the room's world (x, z) to get world coordinates.
  */
-export function loungeSpots(capacityHint = 0, hexR = HEX_R): LoungeLayout {
+export function loungeSpots(capacityHint = 0, hexR = HEX_R, doorAngle = LOUNGE_DOOR_ANGLE): LoungeLayout {
   const s = hexR / 7; // scale factor (1.0 at default HEX_R=7)
   const apothem = (hexR * Math.sqrt(3)) / 2;
   const spots: LoungeSpot[] = [];
@@ -196,13 +199,12 @@ export function loungeSpots(capacityHint = 0, hexR = HEX_R): LoungeLayout {
   const baseCapacity = spots.length;
 
   // ── Waiting spots (overflow) outside the main doorway ─────────────────────
-  // The lounge hex is at axial (-1,0).  Its doorway toward hex (0,0) — the
-  // manager's office — is at DOOR_ANGLES[0] = 30° (local to the lounge room).
+  // `doorAngle` is the lounge's doorway toward the manager's office: in the default plan the lounge
+  // is the centre hex (0,0) and the office (-1,0), so DOOR_ANGLES[3] = -150° (LOUNGE_DOOR_ANGLE).
   // Waiting agents queue just outside, fanning outward from the doorway.
   const needed = Math.max(0, capacityHint - baseCapacity);
   if (needed > 0) {
     // Doorway local position (at the wall).
-    const doorAngle = Math.PI / 6; // 30°
     const doorX = HEX_APOTHEM * Math.cos(doorAngle) * s;
     const doorZ = HEX_APOTHEM * Math.sin(doorAngle) * s;    // Place waiting spots in a small arc just beyond the door.
     // Continue the standIdx so waiting spot IDs don't collide with the 3 regular standing spots.
@@ -230,7 +232,7 @@ export function loungeSpots(capacityHint = 0, hexR = HEX_R): LoungeLayout {
     ]);
   });
 
-  return { spots, furniture, gameSpots, tableR: 0.75 * s, doorAngle: 30 * D };
+  return { spots, furniture, gameSpots, tableR: 0.75 * s, doorAngle };
 }
 
 // ─── RPS pairing ──────────────────────────────────────────────────────────────

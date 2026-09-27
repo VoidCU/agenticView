@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { IdleBehaviourSchema, type Agent, type IdleBehaviour, type Placement } from "@agenticview/shared";
+import { IdleBehaviourSchema, freeDeskFor, type Agent, type IdleBehaviour, type Placement } from "@agenticview/shared";
 import type { AgentRegistry } from "../agents/registry.js";
 import type { EventBus } from "../events/bus.js";
 
@@ -15,7 +15,11 @@ import type { EventBus } from "../events/bus.js";
  *   clears itself after visitSeconds. The worker keeps its own placement meanwhile.
  * - lounge (35%): sets `lounging`, unless the lounge already holds half its spots (then it stays).
  * Workers already in the lounge re-roll too, so they drift back to desks. Busy workers are never touched
- * by a roll; a worker that gets work while lounging sits back down through the same free-seat choice.
+ * by a roll. Idle wandering only ever changes `placement`, never the designated desk (`workSeat`).
+ *
+ * Getting work (anything but a brainstorm meeting) walks the worker to its workSeat. An idle worker
+ * sitting there (a squatter) gets up first: to its own workSeat, else a free desk nobody owns, else any
+ * free desk, else the lounge.
  */
 
 export type IdleOutcome = "stay" | "visit" | "lounge";
@@ -130,8 +134,11 @@ export class IdleBehaviourService {
     this.visitTimers.clear();
   }
 
-  /** A worker got work: stop its idle cycle; if it was lounging or visiting it sits back down. */
-  async onBusy(agentId: string): Promise<void> {
+  /**
+   * A worker got work: stop its idle cycle. With `toDesk` (every task but a brainstorm meeting) it walks
+   * to its designated desk (workSeat); otherwise, if it was lounging or visiting, it sits back down.
+   */
+  async onBusy(agentId: string, opts: { toDesk?: boolean } = {}): Promise<void> {
     this.busy.add(agentId);
     this.clearTimer(this.timers.get(agentId));
     this.timers.delete(agentId);
@@ -140,9 +147,42 @@ export class IdleBehaviourService {
     await this.serialize(async () => {
       const a = await this.deps.registry.get(agentId);
       if (!a || a.role !== "worker") return;
-      if (a.lounging) await this.sitDown(a);
+      if (opts.toDesk && a.workSeat) await this.takeWorkSeat(a);
+      else if (a.lounging) await this.sitDown(a);
       else if (a.visiting) this.emit(await this.deps.registry.update(a.id, { visiting: undefined }));
     });
+  }
+
+  /** A busy worker starts (more) desk work: walk it to its workSeat. Idempotent. */
+  toWorkSeat(agentId: string): Promise<void> {
+    return this.serialize(async () => {
+      const a = await this.deps.registry.get(agentId);
+      if (a && a.role === "worker" && a.workSeat) await this.takeWorkSeat(a);
+    });
+  }
+
+  /**
+   * Sit `a` at its workSeat, displacing whoever else sits there (squatter rule). No-op when it is already
+   * seated there and neither lounging nor visiting. Returns the updated agent.
+   */
+  private async takeWorkSeat(a: Agent): Promise<Agent> {
+    const desk = a.workSeat!;
+    const key = seatKey(desk);
+    const { seats, placements } = await this.deps.desks();
+    const agents = await this.deps.registry.list();
+    const next: Record<string, Placement> = { ...placements, [a.id]: desk };
+    for (const s of agents) {
+      const p = placements[s.id];
+      if (s.id === a.id || s.role !== "worker" || !p || seatKey(p) !== key) continue;
+      const spot = freeDeskFor(s.id, seats, next, agents);
+      if (spot) next[s.id] = spot;
+      else delete next[s.id];
+      this.emit(await this.deps.registry.update(s.id, spot ? { placement: spot } : { placement: undefined, lounging: true, visiting: undefined }));
+    }
+    if (!a.lounging && !a.visiting && a.placement && seatKey(a.placement) === key) return a;
+    const moved = await this.deps.registry.update(a.id, { placement: { space: desk.space, seat: desk.seat }, lounging: undefined, visiting: undefined });
+    this.emit(moved);
+    return moved;
   }
 
   /** A worker finished its work: after the idle threshold it starts rolling. */

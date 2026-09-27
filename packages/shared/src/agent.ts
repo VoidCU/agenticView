@@ -97,8 +97,18 @@ export const AgentSchema = z.object({
   appearance: AppearanceSchema,
   stats: AgentStatsSchema,
   originId: z.string().optional(),
-  /** Which space and desk a worker sits at in the office. */
+  /**
+   * Where a worker sits right now. While it works this is its `workSeat`; while idle it may wander
+   * (another free desk, the lounge, visits) and this follows it.
+   */
   placement: PlacementSchema.optional(),
+  /**
+   * The worker's designated desk. Owned by the Manager (create_agent, move_worker, arrange_workers) and
+   * the user (dragging the agent in the office); nothing else changes it. Unique: two agents never share
+   * one. A working agent sits here (brainstorm meetings excepted). Absent on records from older offices
+   * until the workSeat migration fills it from `placement` on office start.
+   */
+  workSeat: PlacementSchema.optional(),
   /** claude-session agents: the Claude Code session that serves this agent (sticky; null = any free session). */
   session: AgentSessionSchema.nullable().optional(),
   /** Rate limit, quota or auth failure state for this agent. */

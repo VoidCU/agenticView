@@ -4,9 +4,12 @@
  * 2. Lounging seat mapping logic (breakSeat + server-lounge seat assignment)
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import { act, render, screen, within } from "@testing-library/react";
+import React from "react";
 import { useStore } from "../src/state/store";
+import { ScoreboardModal } from "../src/hud/ScoreboardModal";
 import { breakSeat } from "../src/scene/breaks";
-import { manager, worker, snapshot } from "./fixtures";
+import { manager, worker, worker2, snapshot } from "./fixtures";
 import type { Match, GamesData, ServerMessage } from "@agenticview/shared";
 
 /** Build a snapshot ServerMessage that includes games data. */
@@ -62,6 +65,18 @@ describe("store snapshot with games", () => {
 // ---- Store: game.result ----
 
 describe("store game.result", () => {
+  it("updates the open scoreboard popup immediately after a result", () => {
+    fresh().apply(snapshotWithGames([manager, worker], gamesData));
+    render(React.createElement(ScoreboardModal, { onClose: () => {}, onPlay: () => {} }));
+    const leaderboardTable = screen.getByRole("table", { name: "Leaderboard" });
+    const winnerRow = within(leaderboardTable).getAllByRole("row")[1]!;
+    expect(within(winnerRow).getByText("5")).toBeInTheDocument();
+
+    act(() => fresh().apply({ type: "game.result", match: makeMatch() }));
+
+    expect(within(within(leaderboardTable).getAllByRole("row")[1]!).getByText("6")).toBeInTheDocument();
+  });
+
   it("prepends the match to recent", () => {
     fresh().apply(snapshotWithGames([manager, worker], gamesData));
     const match = makeMatch();
@@ -88,6 +103,35 @@ describe("store game.result", () => {
     const loser  = board.find((p) => p.playerId === "w_00000002");
     expect(winner?.wins).toBe(6);   // was 5
     expect(loser?.losses).toBe(5);  // was 4
+  });
+
+  it("publishes new standings references for each result, including first-time players", () => {
+    fresh().apply(snapshot([manager, worker]));
+    const before = fresh().games;
+    const match = makeMatch({ players: ["you", worker.id], winner: "you", kind: "user" });
+    fresh().apply({ type: "game.result", match });
+    const after = fresh().games;
+    expect(after).not.toBe(before);
+    expect(after?.leaderboard).not.toBe(before?.leaderboard);
+    expect(after?.leaderboard.find((p) => p.playerId === "you")).toMatchObject({ name: "You", wins: 1 });
+    expect(after?.leaderboard.find((p) => p.playerId === worker.id)).toMatchObject({ name: worker.name, losses: 1 });
+  });
+
+  it("re-sorts standings when the second player overtakes the leader", () => {
+    const startingStandings = [
+      { playerId: worker.id, name: worker.name, wins: 2, losses: 0, draws: 0 },
+      { playerId: worker2.id, name: worker2.name, wins: 1, losses: 0, draws: 0 },
+    ];
+    fresh().apply(snapshotWithGames([manager, worker, worker2], { leaderboard: startingStandings, recent: [] }));
+    const before = fresh().games!.leaderboard;
+    const match = makeMatch({ players: [worker2.id, worker.id], winner: worker2.id });
+    fresh().apply({ type: "game.result", match });
+    fresh().apply({ type: "game.result", match: { ...match, id: "m_002" } });
+
+    const after = fresh().games!.leaderboard;
+    expect(after).not.toBe(before);
+    expect(after.map((player) => player.playerId)).toEqual([worker2.id, worker.id]);
+    expect(after[0]?.wins).toBe(3);
   });
 
   it("increments draws for both players on a draw", () => {

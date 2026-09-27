@@ -26,6 +26,7 @@ import { useHudPrefs } from "./state/hudPrefs";
 
 type Modal = "create" | "settings" | "sessions" | "inbox" | "scoreboard" | undefined;
 type Tab = "office" | "tasks" | "chat";
+const SETTINGS_TABS: readonly SettingsTab[] = ["general", "providers", "office", "layout", "connections", "usage"];
 
 /** Keyboard shortcuts hint overlay */
 function ShortcutsHint({ onClose }: { onClose: () => void }) {
@@ -151,6 +152,17 @@ export function App() {
     const handleOpenScoreboard = () => setModal("scoreboard");
     window.addEventListener("agenticview:open-scoreboard", handleOpenScoreboard);
     return () => window.removeEventListener("agenticview:open-scoreboard", handleOpenScoreboard);
+  }, []);
+
+  useEffect(() => {
+    const handleOpenSettings = (event: Event) => {
+      const requested = (event as CustomEvent<{ tab?: unknown }>).detail?.tab;
+      const tab = SETTINGS_TABS.find((candidate) => candidate === requested) ?? SETTINGS_TABS[0];
+      setSettingsTab(tab);
+      setModal("settings");
+    };
+    window.addEventListener("agenticview:open-settings", handleOpenSettings);
+    return () => window.removeEventListener("agenticview:open-settings", handleOpenSettings);
   }, []);
 
   useEffect(() => {
