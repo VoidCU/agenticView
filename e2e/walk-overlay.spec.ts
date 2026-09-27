@@ -75,3 +75,19 @@ test("a board opened from walk mode frees the mouse, works, and walking resumes 
   await page.keyboard.press("Escape");
   await expect(page.locator(".walk-crosshair")).toBeHidden();
 });
+
+test("walk mode hides the floating HTML labels (board pills, Manager board, pad label) and Esc brings them back", async ({ page }) => {
+  await page.goto(`/#token=${launchToken()}`);
+  await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+  const overlays = page.locator(".board-open, .pad-btn, .file-chips");
+  await expect(page.locator(".board-open").first()).toBeAttached();
+  await expect(page.locator(".pad-btn").first()).toBeAttached();
+  await page.evaluate(() => (window as unknown as Win).__setWalking?.(true));
+  await expect(page.locator(".walk-crosshair")).toBeVisible();
+  await expect(overlays).toHaveCount(0);
+  await expect(page.locator(".tag-name")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".walk-crosshair")).toBeHidden();
+  await expect(page.locator(".board-open").first()).toBeAttached();
+  await expect(page.locator(".pad-btn").first()).toBeAttached();
+});

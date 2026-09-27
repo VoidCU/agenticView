@@ -8,6 +8,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, useCursor } from "@react-three/drei";
+import { useWalk } from "../state/walk";
 import * as THREE from "three";
 import { HEX_APOTHEM, HEX_R, yawToward, type Space } from "@agenticview/shared";
 import type { PlayerStats } from "@agenticview/shared";
@@ -96,6 +97,7 @@ export function LoungeScoreboard({ lounge }: Props) {
   const theme = useSceneTheme();
   const isDark = theme === "dark";
   const [hovered, setHovered] = useState(false);
+  const walking = useWalk((s) => s.walking);
   useCursor(hovered);
 
   // Throttle: rebuild texture at most once per second.
@@ -147,7 +149,7 @@ export function LoungeScoreboard({ lounge }: Props) {
         <meshBasicMaterial map={texture} toneMapped={false} />
       </mesh>
       {/* Hover button */}
-      {hovered && (
+      {hovered && !walking && (
         <Html center position={[0, 1.9, 0]} distanceFactor={14} zIndexRange={[9, 0]}>
           <button
             type="button"

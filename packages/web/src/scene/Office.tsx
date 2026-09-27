@@ -909,7 +909,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
             onBodyClick={isLounging ? (agentId) => window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId } })) : undefined}
             fainted={isFainted}
           >
-            {a.role === "worker" && <FileChips agentId={a.id} />}
+            {a.role === "worker" && !walking && <FileChips agentId={a.id} />}
           </Robot>
         );
       })}
