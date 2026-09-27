@@ -30,7 +30,7 @@ import { useWalk } from "../state/walk";
 import { LoungeScoreboard } from "./LoungeScoreboard";
 import { buildColliders } from "./colliders";
 import { usePositions, type AgentActivity, type AgentPosition } from "../state/positions";
-import { computeTargets, nextVisitExpiry } from "./targets";
+import { computeTargets, nextVisitExpiry, workingAgentIds } from "./targets";
 import { ShadowScheduler, applyRenderTuning } from "./renderTuning";
 import { ingestMessage } from "../net/ws";
 
@@ -554,10 +554,9 @@ function useDragToReassign(layout: OfficeLayout) {
           const dest = { space: st.overSpace, seat: st.overSeat };
           const from = l.placements[id];
           if (!from || seatKey(from) !== seatKey(dest)) {
-            const send = useStore.getState().send;
-            const other = l.occupied.get(seatKey(dest));
-            send({ type: "agent.update", id, patch: { placement: dest } });
-            if (other && other !== id && from) send({ type: "agent.update", id: other, patch: { placement: from } });
+            // The drop desk becomes the worker's designated desk (workSeat). The server swaps designated
+            // desks with its owner and moves anyone idle sitting there, in one step.
+            useStore.getState().send({ type: "agent.update", id, patch: { placement: dest } });
           }
         }
         st.set({ heldId: undefined, active: false, overSpace: undefined, overSeat: undefined, droppedAt: st.active ? Date.now() : st.droppedAt });
@@ -790,16 +789,17 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
     return () => clearTimeout(t);
   }, [list, visitClock]);
 
+  const working = useMemo(() => workingAgentIds(Object.values(tasks)), [tasks]);
   const targets = useMemo(() => {
     const r = computeTargets({
       layout, list, lounge, loungeBreaks, prevLoungeAssign: prevLoungeAssign.current,
-      managerId: manager?.id, managerVisit: visiting, activeRpsMatch, gameAnimation, now: Date.now(),
+      managerId: manager?.id, managerVisit: visiting, activeRpsMatch, gameAnimation, working, now: Date.now(),
     });
     prevLoungeAssign.current = r.loungeAssign;
     return r.targets as Record<string, RobotTarget>;
     // visitClock: re-run when a visit expires.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout, manager, visiting, loungeBreaks, lounge, list, gameAnimation, activeRpsMatch, visitClock]);
+  }, [layout, manager, visiting, loungeBreaks, lounge, list, gameAnimation, activeRpsMatch, visitClock, working]);
   // Owners who stepped away leave their chair swivelled (plain string so furniture only rebuilds on change).
   // Target-based part updates immediately; the 4 Hz publisher below adds owners still walking back.
   const [liveAway, setLiveAway] = useState("");
