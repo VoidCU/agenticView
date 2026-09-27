@@ -37,7 +37,8 @@ async function handle(msg, world, opts, send) {
                 throw new Error(`Unknown provider ${msg.patch.provider}`);
             const { placement, ...patch } = msg.patch;
             // Dragging a worker to a desk is an owner action: that desk becomes its designated desk (workSeat),
-            // swapping designated desks with the owner of a taken one. Refusals surface as an error.
+            // swapping designated desks with the owner of a taken one. Refusals surface as an error. A drop in a
+            // room without work desks (meeting room, lounge) is a temporary seat and keeps the workSeat.
             if (placement) {
                 const cur = await registry.get(msg.id);
                 const same = cur?.workSeat && cur.workSeat.space === placement.space && cur.workSeat.seat === placement.seat && cur.placement?.space === placement.space && cur.placement?.seat === placement.seat;

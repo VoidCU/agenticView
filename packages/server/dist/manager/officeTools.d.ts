@@ -2,7 +2,7 @@ import { type OfficeLayout, type Agent, type Space } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry } from "../agents/registry.js";
 export interface OfficeToolContext {
-    registry: Pick<AgentRegistry, "list" | "update"> & Partial<Pick<AgentRegistry, "pinPlacements">>;
+    registry: Pick<AgentRegistry, "list" | "update"> & Partial<Pick<AgentRegistry, "pinPlacements" | "withDeskLock">>;
     emitAgent: (agent: Agent) => void;
     spaceNames?: () => Record<string, string>;
     renameSpace?: (id: string, name: string) => Promise<void>;
@@ -19,6 +19,12 @@ export declare function describeSpaces(ctx: OfficeToolContext): Promise<string>;
  * (the Manager's move_worker / arrange_workers, or the user dragging the agent) and the only way a
  * workSeat changes after create_agent.
  *
+ * The whole check-and-write runs under the registry's desk lock, so a user drag and a Manager move onto
+ * the same desk at the same moment are applied one after the other (the second sees the first's desk and
+ * swaps or is refused) and two agents never end up with the same designated desk.
+ *
+ * - A space without work desks (meeting room, lounge): only a temporary seat (seatWorker); the
+ *   designated desk does not change.
  * - No seat: the first desk of the space that is nobody's workSeat (a free one first).
  * - A seat that is another worker's workSeat: the two SWAP designated desks (the other worker gets the
  *   mover's old workSeat). The other worker's desk is released before the mover takes it, so two agents

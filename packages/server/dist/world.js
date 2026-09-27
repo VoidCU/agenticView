@@ -120,7 +120,7 @@ export async function createWorld(ref, opts) {
      * current seat; duplicates and seats that no longer exist move to a free desk) and after a layout change
      * that removed a room. Desks that change hands are released first, so none is ever shared.
      */
-    const syncWorkSeats = async (why, emit) => {
+    const syncWorkSeats = (why, emit) => registry.withDeskLock(async () => {
         const agents = await registry.list();
         const result = migrateWorkSeats(agents, buildSpacesFromLayout(layout, spaceNames));
         if (result.unseated.length)
@@ -137,7 +137,7 @@ export async function createWorld(ref, opts) {
                 opts.bus.emit({ type: "agent.updated", agent: a });
         }
         console.info(`[agenticview] workSeat migration (${why}): ${describeWorkSeatMoves(result.moves).join("; ")}`);
-    };
+    });
     await syncWorkSeats("office start", false);
     let layoutWrites = Promise.resolve();
     const serializeLayout = (fn) => {
@@ -184,8 +184,10 @@ export async function createWorld(ref, opts) {
             opts.bus.emit({ type: "spaceNames.updated", spaceNames: { ...spaceNames } });
         return layout;
     };
-    const updateLayout = (next, names) => serializeLayout(() => applyLayout(next, names));
-    const editLayout = (edit) => serializeLayout(() => applyLayout(edit(layout)));
+    // Lock order is always desk lock, then layout queue: a layout change can re-run the workSeat migration
+    // (desk lock) and creating a worker can grow the layout (layout queue) while holding the desk lock.
+    const updateLayout = (next, names) => registry.withDeskLock(() => serializeLayout(() => applyLayout(next, names)));
+    const editLayout = (edit) => registry.withDeskLock(() => serializeLayout(() => applyLayout(edit(layout))));
     registry.useLayout(() => layout, async (workerCount) => {
         await editLayout((current) => growLayout(current, workerCount));
     });

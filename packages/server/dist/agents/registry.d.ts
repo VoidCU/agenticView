@@ -39,7 +39,17 @@ export declare class AgentRegistry {
     private readonly project?;
     private layout?;
     private ensureDesk?;
-    private createWrites;
+    /**
+     * The desk lock: every operation that changes a workSeat (create, copy, an update carrying workSeat,
+     * move/swap, the workSeat migration) runs through this one queue, so the "is this desk free?" check and
+     * the write that takes it are atomic. It is reentrant for the holder's own async chain (a move that
+     * calls update, a create that grows the layout and re-runs the migration) via AsyncLocalStorage; the
+     * token must still be the active holder, so a stray continuation after release queues normally.
+     */
+    private deskQueue;
+    private deskHolder;
+    private readonly deskContext;
+    withDeskLock<T>(fn: () => Promise<T>): Promise<T>;
     useLayout(layout: () => OfficeLayout, ensureDesk: (workerCount: number) => Promise<void>): void;
     constructor(world: WorldRef);
     private storeFor;
@@ -49,10 +59,15 @@ export declare class AgentRegistry {
     create(input: CreateAgentInput): Promise<Agent>;
     private createUnqueued;
     update(id: string, patch: Partial<Agent>): Promise<Agent>;
-    /** The office-wide invariant: two agents never share a designated desk (workSeat). */
+    private updateUnlocked;
+    /**
+     * The office-wide invariants: two agents never share a designated desk (workSeat), and a designated desk
+     * is a work desk (a seat of a pod, the Production Room or the Research Room). Call under the desk lock.
+     */
     assertDeskFree(id: string, seat: Placement): Promise<void>;
     /** Clone a global agent into this project with fresh id and stats, remembering its origin. */
     copyToProject(id: string): Promise<Agent>;
+    private copyToProjectUnlocked;
     /**
      * Persist the resolved desk of every worker that has none yet (their auto-seat depends on who else
      * is seated, so it would shift when someone moves). Returns the agents that changed.

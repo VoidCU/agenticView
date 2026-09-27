@@ -48,6 +48,15 @@ export const SEATS_BY_KIND = {
     production: 2,
     research: 4,
 };
+/**
+ * Room kinds whose seats are work desks: pods, the Production Room's edit desks and the Research Room's
+ * reading table. Only these can hold a worker's designated desk (workSeat); a seat in the meeting room or
+ * the lounge is always temporary.
+ */
+export const DESK_KINDS = ["pod", "production", "research"];
+export function isDeskKind(kind) {
+    return DESK_KINDS.includes(kind);
+}
 /** Default display name of each kind (pods get "Pod <letter>" from their id, see defaultRoomName). */
 export const DEFAULT_ROOM_NAMES = {
     office: "Manager's Office",

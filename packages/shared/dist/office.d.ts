@@ -63,6 +63,13 @@ export interface SeatPose extends Point {
 export declare const AXIAL_DIRS: ReadonlyArray<readonly [number, number]>;
 export declare const DOOR_ANGLES: readonly number[];
 export declare const SEATS_BY_KIND: Record<SpaceKind, number>;
+/**
+ * Room kinds whose seats are work desks: pods, the Production Room's edit desks and the Research Room's
+ * reading table. Only these can hold a worker's designated desk (workSeat); a seat in the meeting room or
+ * the lounge is always temporary.
+ */
+export declare const DESK_KINDS: readonly SpaceKind[];
+export declare function isDeskKind(kind: SpaceKind): boolean;
 /** Default display name of each kind (pods get "Pod <letter>" from their id, see defaultRoomName). */
 export declare const DEFAULT_ROOM_NAMES: Record<SpaceKind, string>;
 export declare function axialToWorld(q: number, r: number, size?: number): Point;
