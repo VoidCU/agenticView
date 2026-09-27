@@ -13,8 +13,12 @@ export type FakeScript = (req: RunRequest) => AsyncIterable<FakeItem>;
 export declare class FakeRuntime implements Runtime {
     private readonly script;
     readonly provider: Provider;
+    /** Extra result fields for a finished run (demo mode reports estimated usage). */
+    private readonly extra?;
     readonly runs: RunRequest[];
-    constructor(script: FakeScript, provider?: Provider);
+    constructor(script: FakeScript, provider?: Provider, 
+    /** Extra result fields for a finished run (demo mode reports estimated usage). */
+    extra?: ((req: RunRequest, text: string) => Partial<RunResult>) | undefined);
     check(): Promise<ProviderStatus>;
     run(req: RunRequest, sink: EventSink, signal: AbortSignal): Promise<RunResult>;
 }

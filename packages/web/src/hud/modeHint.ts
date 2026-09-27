@@ -1,4 +1,4 @@
-import type { PermissionMode, Provider } from "@agenticview/shared";
+import { findCustomProvider, type PermissionMode, type Provider } from "@agenticview/shared";
 
 /** What a permission mode really does on each provider. Shown next to the radio so the promise matches the behaviour. */
 export function modeHint(provider: Provider, mode: PermissionMode): string {
@@ -28,4 +28,8 @@ export function modeHint(provider: Provider, mode: PermissionMode): string {
       if (mode === "auto-edit") return "Gemini auto-approves file edits; other tools follow its default policy.";
       return "Gemini runs in yolo mode: everything is approved automatically.";
   }
+  // Custom providers run on the Codex CLI (OpenAI-compatible) or the Agent SDK (Anthropic-compatible).
+  const engine = findCustomProvider(provider)?.engine;
+  if (engine === "anthropic") return modeHint("claude", mode);
+  return modeHint("codex", mode);
 }

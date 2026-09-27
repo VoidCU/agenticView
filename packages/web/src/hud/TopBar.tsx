@@ -1,5 +1,6 @@
 import { useStore } from "../state/store";
-import { GearIcon, PlusIcon, ProviderChip } from "./ui";
+import { GearIcon, PlusIcon } from "./ui";
+import { ProviderChips } from "./ProviderChips";
 import { useHudPrefs } from "../state/hudPrefs";
 
 function Mark() {
@@ -18,6 +19,8 @@ function Mark() {
 
 interface Props {
   onSettings: () => void;
+  /** Open Settings on the Providers tab (from the "+N more" provider dropdown). */
+  onProviderSettings?: () => void;
   onCreate: () => void;
   onSessions?: () => void;
   onInbox?: () => void;
@@ -30,11 +33,10 @@ interface Props {
   chatCollapsed?: boolean;
 }
 
-export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, timelineActive, onWalk, walkActive, onToggleTags, onToggleChat, chatCollapsed }: Props) {
+export function TopBar({ onSettings, onProviderSettings, onCreate, onSessions, onInbox, onTimeline, timelineActive, onWalk, walkActive, onToggleTags, onToggleChat, chatCollapsed }: Props) {
   const sessions = useStore((s) => s.sessions);
   const online = sessions.filter((s) => s.online).length;
   const world = useStore((s) => s.world);
-  const providers = useStore((s) => s.providers);
   const connected = useStore((s) => s.connected);
   const questions = useStore((s) => s.questions);
   const permissions = useStore((s) => s.permissions);
@@ -59,11 +61,7 @@ export function TopBar({ onSettings, onCreate, onSessions, onInbox, onTimeline, 
           </span>
         </div>
       </div>
-      <div className="topbar-mid" aria-label="Providers">
-        {providers.map((p) => (
-          <span key={p.provider} className="provider-compact" title={`${p.provider}: ${p.ok ? "Ready" : p.reason ?? "Unavailable"}`}><ProviderChip status={p} compact />{p.limit?.limited && <span className="provider-limited">limited</span>}</span>
-        ))}
-      </div>
+      <ProviderChips onSettings={onProviderSettings ?? onSettings} />
       <div className="topbar-right">
         {onToggleTags && <button type="button" data-testid="tags-toggle" className="btn btn-ghost btn-sm topbar-compact" onClick={onToggleTags} aria-pressed={showTags} title="Toggle robot name tags">Tags {showTags ? "On" : "Off"}</button>}
         {onToggleChat && <button type="button" data-testid="chat-toggle" className="btn btn-ghost btn-sm topbar-compact" onClick={onToggleChat} aria-expanded={!chatCollapsed} title="Toggle chat panel">Chat {chatCollapsed ? "Show" : "Hide"}</button>}

@@ -47,7 +47,7 @@ export const ProviderLimitsEntrySchema = z.object({
     models: z.record(z.string(), ProviderModelLimitsSchema),
 });
 export const LimitsReportSchema = z.object({
-    providers: z.record(ProviderSchema, ProviderLimitsEntrySchema),
+    providers: z.record(z.string(), ProviderLimitsEntrySchema),
     updatedAt: z.string(),
 });
 export const TokenUsageBucketSchema = z.object({
@@ -63,7 +63,9 @@ export const UsageAggregateSchema = z.object({
 });
 export const UsageReportSchema = z.object({
     agents: z.record(z.string(), UsageAggregateSchema),
-    providers: z.record(ProviderSchema, UsageAggregateSchema),
+    providers: z.record(z.string(), UsageAggregateSchema),
+    /** Per provider + model (runs record the model they used, "default" when none was set). */
+    models: z.array(z.object({ provider: ProviderSchema, model: z.string(), usage: UsageAggregateSchema })).optional(),
     updatedAt: z.string(),
 });
 export const SwitchAgentPayloadSchema = z.object({

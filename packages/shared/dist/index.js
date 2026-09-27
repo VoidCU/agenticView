@@ -11,4 +11,5 @@ export * from "./session.js";
 export * from "./limits.js";
 export * from "./games.js";
 export * from "./lounge.js";
+export * from "./providers.js";
 //# sourceMappingURL=index.js.map

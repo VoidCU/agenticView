@@ -14,6 +14,8 @@ export class FakeRuntime implements Runtime {
   constructor(
     private readonly script: FakeScript,
     readonly provider: Provider = "claude",
+    /** Extra result fields for a finished run (demo mode reports estimated usage). */
+    private readonly extra?: (req: RunRequest, text: string) => Partial<RunResult>,
   ) {}
 
   async check(): Promise<ProviderStatus> {
@@ -54,7 +56,7 @@ export class FakeRuntime implements Runtime {
           sink(value);
         }
       }
-      return { text, stopReason: "done", sessionId: req.sessionId ?? `fake-${req.runId}` };
+      return { text, stopReason: "done", sessionId: req.sessionId ?? `fake-${req.runId}`, ...(this.extra?.(req, text) ?? {}) };
     } catch (e) {
       if (signal.aborted) return { text, stopReason: "aborted" };
       return { text, stopReason: "error", error: (e as Error).message };

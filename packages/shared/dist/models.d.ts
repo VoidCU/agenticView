@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Provider } from "./agent.js";
+import { type BuiltinProvider, type Provider } from "./agent.js";
 /**
  * Reasoning effort, the union of what the providers accept:
  * - Claude Agent SDK `Options.effort`: low | medium | high | xhigh | max
@@ -40,7 +40,9 @@ export interface ProviderModelCatalogue {
  * (~/.codex/models_cache.json, codex-cli 0.156). Gemini ids/aliases come from the Gemini
  * CLI's config/models.js (0.26); the CLI has no thinking/effort flag.
  */
-export declare const MODEL_CATALOGUE: Record<Provider, ProviderModelCatalogue>;
+export declare const MODEL_CATALOGUE: Record<BuiltinProvider, ProviderModelCatalogue>;
+/** Catalogue for any provider: built-ins from MODEL_CATALOGUE, custom ones from their configured model list. */
+export declare function catalogueFor(provider: Provider): ProviderModelCatalogue;
 export declare function findModel(provider: Provider, model: string | null | undefined): ModelOption | undefined;
 /**
  * Effort levels selectable for a provider + model. Unknown (custom) models get the provider's

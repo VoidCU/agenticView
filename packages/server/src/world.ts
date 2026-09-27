@@ -26,6 +26,15 @@ import {
   planOfficeWithSpaces,
   planOffice,
   loungeSpots,
+  customRef,
+  orderedProviders,
+  toCustomInfo,
+  isBuiltinProvider,
+  isCustomProvider,
+  CustomProviderConfigSchema,
+  type CustomProviderUpsert,
+  type KeyedProvider,
+  type ProviderConfigInfo,
 } from "@agenticview/shared";
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime, type RecentWork } from "./runtimes/session.js";
@@ -95,6 +104,13 @@ export interface World {
    * Remove an empty room from the office layout. Refuses if any agents are seated there.
    */
   removeRoom: (spaceId: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  /** Store (or clear, with null/"") a built-in provider's API key in the global config. Never echoed to clients. */
+  setProviderKey: (provider: KeyedProvider, apiKey: string | null) => Promise<void>;
+  /** Save the provider order (Automatic, failover candidates, header chips). */
+  setProviderOrder: (order: string[]) => Promise<void>;
+  /** Add or edit a custom provider; `apiKey` undefined keeps the stored key, null/"" clears it. */
+  upsertCustomProvider: (entry: CustomProviderUpsert) => Promise<void>;
+  removeCustomProvider: (id: string) => Promise<void>;
   /** Wire decoration of outgoing messages (fills agent.sessionModel for claude-session agents). */
   decorate: (m: ServerMessage) => ServerMessage;
 }
@@ -199,6 +215,19 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   let globalConfig = await readGlobalConfig();
   if (ref.kind === "project") globalConfig = await rememberProject(ref.projectPath);
 
+  // Provider config applied to the runtime map (keys, custom endpoints). Re-applied whenever the saved
+  // config changes, including from another office (info() re-reads it), so no restart is needed.
+  let appliedSig = "";
+  const providerSig = (cfg: GlobalConfig) => JSON.stringify([cfg.providers, cfg.providerOrder]);
+  const applyConfig = async (cfg: GlobalConfig): Promise<void> => {
+    const sig = providerSig(cfg);
+    if (sig === appliedSig) return;
+    appliedSig = sig;
+    const { applyProviderConfig } = await import("./runtimes/index.js");
+    applyProviderConfig(opts.runtimes, cfg);
+  };
+  await applyConfig(globalConfig);
+
   const settingsFile = join(root, "settings.json");
   let projectSettings: ProjectSettings =
     ref.kind === "project"
@@ -215,7 +244,9 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       copilot: globalConfig.providers.copilot.model,
       antigravity: globalConfig.providers.antigravity.model,
       gemini: globalConfig.providers.gemini.model,
+      ...Object.fromEntries(globalConfig.providers.custom.map((c) => [customRef(c.id), c.defaultModel ?? undefined])),
     },
+    providerOrder: orderedProviders(globalConfig.providerOrder, [...PROVIDER_ORDER, ...globalConfig.providers.custom.map((c) => customRef(c.id))]),
   });
 
   const officeFile = join(root, "office.json");
@@ -275,6 +306,10 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   const info = async (): Promise<WorldInfo> => {
     const cfg = await readGlobalConfig();
     globalConfig = cfg;
+    if (providerSig(cfg) !== appliedSig) {
+      await applyConfig(cfg);
+      void emitProvidersFn();
+    }
     return {
       kind: ref.kind,
       name: ref.kind === "project" ? basename(ref.projectPath) || ref.projectPath : "Hub",
@@ -535,7 +570,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
 
   const providerStatuses = async (): Promise<ProviderStatus[]> => {
     const out: ProviderStatus[] = [];
-    for (const p of PROVIDER_ORDER) {
+    for (const p of settings().providerOrder ?? PROVIDER_ORDER) {
       const rt = opts.runtimes.get(p);
       const base = rt ? await rt.check() : { provider: p, ok: false, reason: "not configured" };
       const lim = usageTracker.getProviderLimit(p);
@@ -547,8 +582,30 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     return out;
   };
 
+  /** Provider config for the web: custom providers without keys, the resolved order, which keys are set. */
+  const providerConfig = (): ProviderConfigInfo => ({
+    customProviders: globalConfig.providers.custom.map(toCustomInfo),
+    providerOrder: [...(settings().providerOrder ?? PROVIDER_ORDER)],
+    providerKeys: {
+      claude: Boolean(globalConfig.providers.claude.apiKey),
+      codex: Boolean(globalConfig.providers.codex.apiKey),
+      gemini: Boolean(globalConfig.providers.gemini.apiKey),
+    },
+  });
+
+  /** Write the global config through `fn`, rebuild the affected runtimes, and push the change to clients. */
+  const mutateConfig = async (fn: (cfg: GlobalConfig) => void): Promise<void> => {
+    const cfg = await readGlobalConfig();
+    fn(cfg);
+    await writeJsonFile(globalConfigPath(), cfg);
+    globalConfig = cfg;
+    await applyConfig(cfg);
+    await emitProvidersFn();
+    opts.bus.emit({ type: "snapshot", ...(await snapshot()) });
+  };
+
   emitProvidersFn = async () => {
-    opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider() });
+    opts.bus.emit({ type: "providers.updated", providers: await providerStatuses(), autoProvider: await orchestrator.autoProvider(), providerConfig: providerConfig() });
   };
 
   // Snapshot helper (defined here so addRoom/removeRoom can broadcast it before the return object).
@@ -565,6 +622,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       tasks: (await tasks.list()).map(toWire),
       providers: await providerStatuses(),
       autoProvider: await orchestrator.autoProvider(),
+      providerConfig: providerConfig(),
       settings: projectSettings,
       sessions: await sessions(),
       ringCount: rc,
@@ -713,6 +771,29 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       return projectSettings;
     },
     addRoom: addRoomFn,
+    setProviderKey: (provider, apiKey) =>
+      mutateConfig((cfg) => {
+        const key = apiKey?.trim();
+        if (key) cfg.providers[provider].apiKey = key;
+        else delete cfg.providers[provider].apiKey;
+      }),
+    setProviderOrder: (order) =>
+      mutateConfig((cfg) => {
+        cfg.providerOrder = [...new Set(order.filter((p) => isBuiltinProvider(p) || isCustomProvider(p)))];
+      }),
+    upsertCustomProvider: (entry) =>
+      mutateConfig((cfg) => {
+        const prev = cfg.providers.custom.find((c) => c.id === entry.id);
+        const { apiKey, ...rest } = entry;
+        const key = apiKey === undefined ? prev?.apiKey : apiKey?.trim() || undefined;
+        const next = CustomProviderConfigSchema.parse({ ...rest, ...(key ? { apiKey: key } : {}) });
+        cfg.providers.custom = prev ? cfg.providers.custom.map((c) => (c.id === entry.id ? next : c)) : [...cfg.providers.custom, next];
+      }),
+    removeCustomProvider: (id) =>
+      mutateConfig((cfg) => {
+        cfg.providers.custom = cfg.providers.custom.filter((c) => c.id !== id);
+        cfg.providerOrder = cfg.providerOrder.filter((p) => p !== customRef(id));
+      }),
     removeRoom: removeRoomFn,
     decorate,
     snapshot,

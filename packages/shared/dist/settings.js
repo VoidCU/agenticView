@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ProviderSchema } from "./agent.js";
+import { CustomProviderConfigSchema } from "./providers.js";
 /** Default provider order for automatic failover when a run fails or crashes. */
 export const DEFAULT_FAILOVER_ORDER = ["codex", "copilot", "antigravity", "claude-session"];
 /** Default model per provider used when the failover policy switches an agent. */
@@ -57,8 +58,33 @@ export const GlobalConfigSchema = z.object({
     defaultModel: z.string().nullable().default(null),
     maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
     providers: z
-        .object({ claude: ProviderConfigSchema, codex: ProviderConfigSchema, copilot: ProviderConfigSchema, antigravity: ProviderConfigSchema, gemini: ProviderConfigSchema })
+        .object({
+        claude: ProviderConfigSchema,
+        codex: ProviderConfigSchema,
+        copilot: ProviderConfigSchema,
+        antigravity: ProviderConfigSchema,
+        gemini: ProviderConfigSchema,
+        /** User-added OpenAI-/Anthropic-compatible endpoints (provider id `custom:<id>`). Invalid entries are dropped. */
+        custom: z
+            .array(z.unknown())
+            .default([])
+            .transform((list) => {
+            const out = [];
+            for (const raw of list) {
+                const r = CustomProviderConfigSchema.safeParse(raw);
+                if (r.success && !out.some((c) => c.id === r.data.id))
+                    out.push(r.data);
+            }
+            return out;
+        }),
+    })
         .prefault({}),
+    /**
+     * The user's provider order (built-in and custom ids): Automatic picks the first available one, failover
+     * tries them in this order, and the header shows chips in this order. Unlisted providers follow in their
+     * default position. Empty = the default order.
+     */
+    providerOrder: z.array(z.string()).default([]),
     knownProjects: z.array(KnownProjectSchema).default([]),
 });
 //# sourceMappingURL=settings.js.map

@@ -84,19 +84,20 @@ export function mapCodexEvent(ev, started) {
 }
 export class CodexRuntime {
     opts;
-    provider = "codex";
+    provider;
     sdk;
     which;
     constructor(opts) {
         this.opts = opts;
         this.sdk = opts.sdk;
         this.which = opts.which ?? defaultWhich;
+        this.provider = opts.custom?.provider ?? "codex";
     }
     async check() {
         const bin = await this.which("codex");
         if (!bin)
-            return { provider: "codex", ok: false, reason: CODEX_MISSING_REASON };
-        return { provider: "codex", ok: true, version: bin };
+            return { provider: this.provider, ok: false, reason: this.opts.custom ? `${this.opts.custom.name} runs through the Codex CLI: ${CODEX_MISSING_REASON}` : CODEX_MISSING_REASON };
+        return { provider: this.provider, ok: true, version: this.opts.custom ? `codex via ${this.opts.custom.baseUrl}` : bin };
     }
     async loadSdk() {
         if (!this.sdk)
@@ -110,13 +111,7 @@ export class CodexRuntime {
             if (signal.aborted)
                 return { text, stopReason: "aborted" };
             const sdk = await this.loadSdk();
-            const env = {};
-            for (const [k, v] of Object.entries(process.env))
-                if (typeof v === "string")
-                    env[k] = v;
-            if (this.opts.apiKey && !env.CODEX_API_KEY)
-                env.CODEX_API_KEY = this.opts.apiKey;
-            const config = { approval_policy: "never" };
+            const { env, config } = codexEnvAndConfig(process.env, this.opts);
             if (req.bridgeTools.length > 0) {
                 config.mcp_servers = {
                     agenticview: {
@@ -131,6 +126,8 @@ export class CodexRuntime {
             }
             const codex = new sdk.Codex({ env, config: config });
             const threadOpts = codexThreadOptions(req, process.platform);
+            if (this.opts.custom && !threadOpts.model && this.opts.custom.defaultModel)
+                threadOpts.model = this.opts.custom.defaultModel;
             const thread = req.sessionId ? codex.resumeThread(req.sessionId, threadOpts) : codex.startThread(threadOpts);
             const input = [];
             const textParts = req.prompt.filter((p) => p.type === "text").map((p) => (p.type === "text" ? p.text : ""));
@@ -169,6 +166,9 @@ export class CodexRuntime {
                         rateLimits = ev.rate_limits ?? ev;
                     }
                     for (const mapped of mapCodexEvent(ev, started)) {
+                        // Codex has no metadata for a custom endpoint's models and says so on every run; not an error for the user.
+                        if (this.opts.custom && mapped.type === "status" && /^error: Model metadata for/.test(mapped.text))
+                            continue;
                         if (mapped.type === "text")
                             text += (text ? "\n\n" : "") + mapped.text;
                         sink(mapped);
@@ -200,5 +200,40 @@ export function codexThreadOptions(req, platform) {
     if (req.effort)
         opts.modelReasoningEffort = req.effort;
     return opts;
+}
+/** Env var a custom endpoint's key is passed in (model_providers.<id>.env_key); only ever in the child env. */
+export const CUSTOM_KEY_ENV = "AGENTICVIEW_CUSTOM_KEY";
+/** Codex config-table id for a custom provider ("custom:my-llm" -> "agenticview_my_llm"). */
+export function codexProviderId(provider) {
+    return `agenticview_${provider.replace(/^custom:/, "").replace(/[^a-z0-9]/gi, "_")}`;
+}
+/**
+ * Child env and `--config` overrides for one Codex run. For a custom OpenAI-compatible endpoint the
+ * overrides define `model_providers.<id>` (Responses API; codex 0.156 dropped the chat wire API) and select
+ * it with `model_provider`, so the user's ~/.codex config and login stay untouched. Keys go to the child
+ * env only, never into this process's env.
+ */
+export function codexEnvAndConfig(base, opts) {
+    const env = {};
+    for (const [k, v] of Object.entries(base))
+        if (typeof v === "string")
+            env[k] = v;
+    const config = { approval_policy: "never" };
+    const custom = opts.custom;
+    if (custom) {
+        const id = codexProviderId(custom.provider);
+        const entry = { name: custom.name, base_url: custom.baseUrl, wire_api: "responses" };
+        delete env[CUSTOM_KEY_ENV];
+        if (custom.apiKey) {
+            env[CUSTOM_KEY_ENV] = custom.apiKey;
+            entry.env_key = CUSTOM_KEY_ENV;
+        }
+        config.model_provider = id;
+        config.model_providers = { [id]: entry };
+    }
+    else if (opts.apiKey && !env.CODEX_API_KEY) {
+        env.CODEX_API_KEY = opts.apiKey;
+    }
+    return { env, config };
 }
 //# sourceMappingURL=codex.js.map

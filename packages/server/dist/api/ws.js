@@ -1,5 +1,5 @@
 import { WebSocketServer } from "ws";
-import { ClientMessageSchema, defaultAgent } from "@agenticview/shared";
+import { ClientMessageSchema, defaultAgent, isKnownProvider } from "@agenticview/shared";
 import { tokenOf } from "./auth.js";
 import { stat } from "node:fs/promises";
 export async function assertDirectory(path) {
@@ -33,6 +33,8 @@ async function handle(msg, world, opts, send) {
             return;
         }
         case "agent.update": {
+            if (msg.patch.provider && !isKnownProvider(msg.patch.provider))
+                throw new Error(`Unknown provider ${msg.patch.provider}`);
             // Reseating someone must not reshuffle workers who were only auto-seated: pin them first.
             if (msg.patch.placement)
                 for (const pinned of await registry.pinPlacements())
@@ -51,6 +53,8 @@ async function handle(msg, world, opts, send) {
             bus.emit({ type: "agent.removed", id: msg.id });
             return;
         case "agent.switch":
+            if (msg.provider && !isKnownProvider(msg.provider))
+                throw new Error(`Unknown provider ${msg.provider}`);
             await world.switchAgent(msg.id, { provider: msg.provider, model: msg.model, effort: msg.effort });
             return;
         case "provider.switchAll":
@@ -71,6 +75,18 @@ async function handle(msg, world, opts, send) {
         case "settings.update":
             await world.updateSettings(msg.settings);
             bus.emit({ type: "snapshot", ...(await world.snapshot()) });
+            return;
+        case "provider.setKey":
+            await world.setProviderKey(msg.provider, msg.apiKey);
+            return;
+        case "provider.order":
+            await world.setProviderOrder(msg.order);
+            return;
+        case "customProvider.upsert":
+            await world.upsertCustomProvider(msg.provider);
+            return;
+        case "customProvider.remove":
+            await world.removeCustomProvider(msg.id);
             return;
         case "session.rename": {
             const rt = world.sessionRuntime;

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { isBuiltinProvider } from "./agent.js";
+import { findCustomProvider } from "./providers.js";
 /**
  * Reasoning effort, the union of what the providers accept:
  * - Claude Agent SDK `Options.effort`: low | medium | high | xhigh | max
@@ -132,17 +134,28 @@ export const MODEL_CATALOGUE = {
         ],
     },
 };
+/** Catalogue for any provider: built-ins from MODEL_CATALOGUE, custom ones from their configured model list. */
+export function catalogueFor(provider) {
+    if (isBuiltinProvider(provider))
+        return MODEL_CATALOGUE[provider];
+    const custom = findCustomProvider(provider);
+    return {
+        defaultEfforts: [],
+        allowCustom: true,
+        models: (custom?.models ?? []).map((m) => ({ id: m.id, label: m.label || m.id, efforts: [] })),
+    };
+}
 export function findModel(provider, model) {
     if (!model)
         return undefined;
-    return MODEL_CATALOGUE[provider].models.find((m) => m.id === model);
+    return catalogueFor(provider).models.find((m) => m.id === model);
 }
 /**
  * Effort levels selectable for a provider + model. Unknown (custom) models get the provider's
  * default set, since the SDK/CLI falls back or rejects on its own.
  */
 export function effortsFor(provider, model) {
-    const cat = MODEL_CATALOGUE[provider];
+    const cat = catalogueFor(provider);
     if (!model)
         return cat.defaultEfforts;
     return findModel(provider, model)?.efforts ?? cat.defaultEfforts;

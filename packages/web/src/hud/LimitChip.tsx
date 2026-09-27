@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { EFFORT_LABELS, PROVIDER_LABELS, type Provider } from "@agenticview/shared";
+import { EFFORT_LABELS, allProviders, providerLabelOf, type Provider } from "@agenticview/shared";
 import type { LimitInfo } from "@agenticview/shared";
 import { apiFetch } from "../net/ws";
 import { Modal } from "./ui";
@@ -67,7 +67,7 @@ interface SwitchAgentModalProps {
 }
 
 export function SwitchAgentModal({ agentId, agentName, currentProvider, currentModel, onClose }: SwitchAgentModalProps) {
-  const providers = Object.keys(PROVIDER_LABELS) as Provider[];
+  const providers = allProviders();
   const [provider, setProvider] = useState<Provider | "">(currentProvider ?? "");
   const [model, setModel] = useState(currentModel ?? "");
   const [busy, setBusy] = useState(false);
@@ -103,7 +103,7 @@ export function SwitchAgentModal({ agentId, agentName, currentProvider, currentM
             <select value={provider} onChange={(e) => setProvider(e.target.value as Provider | "")}>
               <option value="">Keep current ({currentProvider ?? "auto"})</option>
               {providers.map((p) => (
-                <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+                <option key={p} value={p}>{providerLabelOf(p)}</option>
               ))}
             </select>
           </label>
@@ -139,7 +139,7 @@ interface SwitchProviderModalProps {
 }
 
 export function SwitchProviderModal({ fromProvider, onClose }: SwitchProviderModalProps) {
-  const providers = (Object.keys(PROVIDER_LABELS) as Provider[]).filter((p) => p !== fromProvider);
+  const providers = allProviders().filter((p) => p !== fromProvider);
   const [toProvider, setToProvider] = useState<Provider>(providers[0] ?? "claude");
   const [toModel, setToModel] = useState("");
   const [busy, setBusy] = useState(false);
@@ -167,15 +167,15 @@ export function SwitchProviderModal({ fromProvider, onClose }: SwitchProviderMod
   };
 
   return (
-    <Modal title={`Switch all ${PROVIDER_LABELS[fromProvider]} agents`} onClose={onClose}>
+    <Modal title={`Switch all ${providerLabelOf(fromProvider)} agents`} onClose={onClose}>
       <div className="form">
-        <p className="hint">Move every agent currently on <strong>{PROVIDER_LABELS[fromProvider]}</strong> to a new provider.</p>
+        <p className="hint">Move every agent currently on <strong>{providerLabelOf(fromProvider)}</strong> to a new provider.</p>
         <div className="form-grid">
           <label className="field">
             <span>New provider</span>
             <select value={toProvider} onChange={(e) => setToProvider(e.target.value as Provider)}>
               {providers.map((p) => (
-                <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+                <option key={p} value={p}>{providerLabelOf(p)}</option>
               ))}
             </select>
           </label>

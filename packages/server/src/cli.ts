@@ -16,6 +16,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import type { Provider } from "@agenticview/shared";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = resolve(here, "../../..");
@@ -118,14 +119,28 @@ async function demoRuntimes() {
     }
     yield { type: "text" as const, text: `${req.agent.name} (demo mode): received "${user.slice(0, 120)}". Set ANTHROPIC_API_KEY and start without AGENTICVIEW_FAKE to run real agents.` };
   };
-  return new Map<"claude" | "claude-session" | "codex" | "copilot" | "antigravity" | "gemini", InstanceType<typeof FakeRuntime>>([
-    ["claude", new FakeRuntime(script as never, "claude")],
-    ["claude-session", new FakeRuntime(script as never, "claude-session")],
-    ["codex", new FakeRuntime(script as never, "codex")],
-    ["copilot", new FakeRuntime(script as never, "copilot")],
-    ["antigravity", new FakeRuntime(script as never, "antigravity")],
-    ["gemini", new FakeRuntime(script as never, "gemini")],
-  ]);
+  // Rough token estimate (4 chars per token) so the Usage tab has numbers in demo mode.
+  const usage = (req: { systemPrompt: string; prompt: { type: string; text?: string }[] }, text: string) => ({
+    usage: {
+      inputTokens: Math.ceil((req.systemPrompt.length + req.prompt.reduce((n, p) => n + (p.text?.length ?? 0), 0)) / 4),
+      outputTokens: Math.ceil(text.length / 4),
+    },
+  });
+  const map = new Map<Provider, InstanceType<typeof FakeRuntime>>();
+  for (const p of ["claude", "claude-session", "copilot", "antigravity", "gemini"] as const) map.set(p, new FakeRuntime(script as never, p, usage as never));
+  // Demo Codex also reports plan windows, so the Usage tab's 5-hour / weekly bars have something to show.
+  const hour = 3_600_000;
+  const codexDemo = (req: Parameters<typeof usage>[0], text: string) => ({
+    ...usage(req, text),
+    rateLimits: {
+      primary: { used_percent: 28, window_minutes: 300, resets_at: Math.floor((Date.now() + 2.5 * hour) / 1000) },
+      secondary: { used_percent: 83, window_minutes: 10080, resets_at: Math.floor((Date.now() + 70 * hour) / 1000) },
+    },
+  });
+  map.set("codex", new FakeRuntime(script as never, "codex", codexDemo as never));
+  const { setCustomRuntimeFactory } = await import("./runtimes/index.js");
+  setCustomRuntimeFactory(map as never, (p) => new FakeRuntime(script as never, p, usage as never));
+  return map;
 }
 
 /** Hub: open a project world in its own detached process and return its URL once it is healthy. */

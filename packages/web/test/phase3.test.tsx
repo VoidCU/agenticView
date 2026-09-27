@@ -236,7 +236,7 @@ describe("SettingsModal: limit policy and lounge breaks", () => {
 
   it("shows loungeBreaks checkbox checked by default", () => {
     useStore.getState().apply(snapshot([manager], []));
-    render(<SettingsModal onClose={vi.fn()} />);
+    render(<SettingsModal onClose={vi.fn()} initialTab="office" />);
 
     const checkbox = screen.getByRole("checkbox", { name: /lounge breaks/i });
     expect(checkbox).toBeChecked();
@@ -265,7 +265,7 @@ describe("SettingsModal: limit policy and lounge breaks", () => {
     useStore.getState().apply(snapshot([manager], []));
     useStore.setState({ send });
 
-    render(<SettingsModal onClose={vi.fn()} />);
+    render(<SettingsModal onClose={vi.fn()} initialTab="office" />);
 
     const checkbox = screen.getByRole("checkbox", { name: /lounge breaks/i });
     await userEvent.click(checkbox);

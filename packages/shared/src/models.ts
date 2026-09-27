@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { Provider } from "./agent.js";
+import { isBuiltinProvider, type BuiltinProvider, type Provider } from "./agent.js";
+import { findCustomProvider } from "./providers.js";
 
 /**
  * Reasoning effort, the union of what the providers accept:
@@ -52,7 +53,7 @@ export interface ProviderModelCatalogue {
  * (~/.codex/models_cache.json, codex-cli 0.156). Gemini ids/aliases come from the Gemini
  * CLI's config/models.js (0.26); the CLI has no thinking/effort flag.
  */
-export const MODEL_CATALOGUE: Record<Provider, ProviderModelCatalogue> = {
+export const MODEL_CATALOGUE: Record<BuiltinProvider, ProviderModelCatalogue> = {
   claude: {
     defaultEfforts: CLAUDE_EFFORTS,
     allowCustom: true,
@@ -155,9 +156,20 @@ export const MODEL_CATALOGUE: Record<Provider, ProviderModelCatalogue> = {
   },
 };
 
+/** Catalogue for any provider: built-ins from MODEL_CATALOGUE, custom ones from their configured model list. */
+export function catalogueFor(provider: Provider): ProviderModelCatalogue {
+  if (isBuiltinProvider(provider)) return MODEL_CATALOGUE[provider];
+  const custom = findCustomProvider(provider);
+  return {
+    defaultEfforts: [],
+    allowCustom: true,
+    models: (custom?.models ?? []).map((m) => ({ id: m.id, label: m.label || m.id, efforts: [] })),
+  };
+}
+
 export function findModel(provider: Provider, model: string | null | undefined): ModelOption | undefined {
   if (!model) return undefined;
-  return MODEL_CATALOGUE[provider].models.find((m) => m.id === model);
+  return catalogueFor(provider).models.find((m) => m.id === model);
 }
 
 /**
@@ -165,7 +177,7 @@ export function findModel(provider: Provider, model: string | null | undefined):
  * default set, since the SDK/CLI falls back or rejects on its own.
  */
 export function effortsFor(provider: Provider, model: string | null | undefined): readonly Effort[] {
-  const cat = MODEL_CATALOGUE[provider];
+  const cat = catalogueFor(provider);
   if (!model) return cat.defaultEfforts;
   return findModel(provider, model)?.efforts ?? cat.defaultEfforts;
 }

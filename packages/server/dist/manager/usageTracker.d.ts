@@ -46,6 +46,8 @@ export declare class UsageTracker {
     recordSuccess(agent: Agent, provider: Provider, model: string): void;
     getProviderLimit(provider: Provider): LimitInfo;
     clearProviderLimit(provider: Provider): void;
+    /** Built-in and registered custom providers, plus any provider that appears in recorded runs (e.g. a removed custom one). */
+    private knownProviders;
     getLimitsReport(): LimitsReport;
     getModelLimits(provider: Provider, model: string): ProviderModelLimits;
     getUsageReport(): UsageReport;

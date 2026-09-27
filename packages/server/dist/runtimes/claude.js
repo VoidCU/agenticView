@@ -118,17 +118,25 @@ async function imageBlock(path) {
     return { type: "image", source: { type: "base64", media_type: MEDIA[extname(path).toLowerCase()] ?? "image/png", data } };
 }
 export class ClaudeRuntime {
-    provider = "claude";
+    provider;
     sdk;
     apiKey;
+    custom;
     constructor(opts = {}) {
         this.sdk = opts.sdk;
         this.apiKey = opts.apiKey;
+        this.custom = opts.custom;
+        this.provider = opts.custom?.provider ?? "claude";
     }
     hasCredential() {
         return Boolean(this.apiKey) || CLAUDE_CREDENTIAL_ENV.some((k) => Boolean(process.env[k]));
     }
     async check() {
+        if (this.custom) {
+            if (!this.custom.apiKey)
+                return { provider: this.provider, ok: false, reason: `Set an API key for ${this.custom.name} in Settings > Providers.` };
+            return { provider: this.provider, ok: true, version: `agent-sdk via ${this.custom.baseUrl}` };
+        }
         if (this.hasCredential())
             return { provider: "claude", ok: true, version: "agent-sdk" };
         return { provider: "claude", ok: false, reason: CLAUDE_MISSING_KEY_REASON };
@@ -159,9 +167,12 @@ export class ClaudeRuntime {
             if (req.sessionId)
                 options.resume = req.sessionId;
             Object.assign(options, claudeModelOptions(req));
+            if (this.custom && !options.model && this.custom.defaultModel)
+                options.model = this.custom.defaultModel;
             // The configured key goes to the SDK subprocess only, never into this process's env (other providers' CLIs inherit that).
-            if (this.apiKey && !process.env.ANTHROPIC_API_KEY)
-                options.env = { ...process.env, ANTHROPIC_API_KEY: this.apiKey };
+            const env = claudeChildEnv(process.env, { apiKey: this.apiKey, custom: this.custom });
+            if (env)
+                options.env = env;
             if (req.bridgeTools.length > 0) {
                 const tools = req.bridgeTools.map((t) => sdk.tool(t.name, t.description, t.schema, async (args) => {
                     try {
@@ -228,5 +239,28 @@ export function claudeModelOptions(req) {
     if (req.effort)
         out.effort = req.effort;
     return out;
+}
+/** Env vars that would route a custom-endpoint run somewhere else (cloud providers, another base URL or token). */
+const CLAUDE_ROUTING_ENV = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS"];
+/**
+ * Env for the Agent SDK subprocess, or undefined to inherit ours unchanged. A custom Anthropic-compatible
+ * endpoint gets ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY (and no routing env that would override them); the
+ * built-in provider gets its stored key only when the environment has none. Never mutates `base`.
+ */
+export function claudeChildEnv(base, opts) {
+    if (opts.custom) {
+        const env = { ...base };
+        for (const k of CLAUDE_ROUTING_ENV)
+            delete env[k];
+        env.ANTHROPIC_BASE_URL = opts.custom.baseUrl;
+        if (opts.custom.apiKey)
+            env.ANTHROPIC_API_KEY = opts.custom.apiKey;
+        else
+            delete env.ANTHROPIC_API_KEY;
+        return env;
+    }
+    if (opts.apiKey && !base.ANTHROPIC_API_KEY)
+        return { ...base, ANTHROPIC_API_KEY: opts.apiKey };
+    return undefined;
 }
 //# sourceMappingURL=claude.js.map

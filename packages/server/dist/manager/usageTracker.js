@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { PROVIDER_ORDER, } from "@agenticview/shared";
+import { allProviders, } from "@agenticview/shared";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { classifyError, isLimitActive, parseResetAt } from "../runtimes/errors.js";
 import { z } from "zod";
@@ -256,10 +256,18 @@ export class UsageTracker {
         this.providerLimits.delete(provider);
         void this.persist();
     }
+    /** Built-in and registered custom providers, plus any provider that appears in recorded runs (e.g. a removed custom one). */
+    knownProviders() {
+        const out = allProviders();
+        for (const r of this.runs)
+            if (!out.includes(r.provider))
+                out.push(r.provider);
+        return out;
+    }
     getLimitsReport() {
         const now = new Date().toISOString();
         const providers = {};
-        for (const p of PROVIDER_ORDER) {
+        for (const p of this.knownProviders()) {
             const limit = this.getProviderLimit(p);
             const models = {};
             for (const [, modelLimit] of this.rateLimits.entries()) {
@@ -336,13 +344,22 @@ export class UsageTracker {
             agents[id] = calcAggregate(rList);
         }
         const providers = {};
-        for (const p of PROVIDER_ORDER) {
+        for (const p of this.knownProviders()) {
             const pRuns = this.runs.filter((r) => r.provider === p);
             providers[p] = calcAggregate(pRuns);
         }
+        const modelMap = new Map();
+        for (const r of this.runs) {
+            const key = `${r.provider}0000${r.model}`;
+            const arr = modelMap.get(key) ?? [];
+            arr.push(r);
+            modelMap.set(key, arr);
+        }
+        const models = [...modelMap.values()].map((rs) => ({ provider: rs[0].provider, model: rs[0].model, usage: calcAggregate(rs) }));
         return {
             agents,
             providers,
+            models,
             updatedAt: new Date().toISOString(),
         };
     }

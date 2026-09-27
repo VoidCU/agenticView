@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import {
-  PROVIDER_ORDER,
+  allProviders,
   type Agent,
   type ErrorClassification,
   type LimitInfo,
@@ -335,11 +335,18 @@ export class UsageTracker {
     void this.persist();
   }
 
+  /** Built-in and registered custom providers, plus any provider that appears in recorded runs (e.g. a removed custom one). */
+  private knownProviders(): Provider[] {
+    const out = allProviders();
+    for (const r of this.runs) if (!out.includes(r.provider)) out.push(r.provider);
+    return out;
+  }
+
   getLimitsReport(): LimitsReport {
     const now = new Date().toISOString();
     const providers: Record<Provider, ProviderLimitsEntry> = {} as Record<Provider, ProviderLimitsEntry>;
 
-    for (const p of PROVIDER_ORDER) {
+    for (const p of this.knownProviders()) {
       const limit = this.getProviderLimit(p);
       const models: Record<string, ProviderModelLimits> = {};
 
@@ -426,14 +433,24 @@ export class UsageTracker {
     }
 
     const providers: Record<Provider, UsageAggregate> = {} as Record<Provider, UsageAggregate>;
-    for (const p of PROVIDER_ORDER) {
+    for (const p of this.knownProviders()) {
       const pRuns = this.runs.filter((r) => r.provider === p);
       providers[p] = calcAggregate(pRuns);
     }
 
+    const modelMap = new Map<string, RunUsageRecord[]>();
+    for (const r of this.runs) {
+      const key = `${r.provider}0000${r.model}`;
+      const arr = modelMap.get(key) ?? [];
+      arr.push(r);
+      modelMap.set(key, arr);
+    }
+    const models = [...modelMap.values()].map((rs) => ({ provider: rs[0]!.provider, model: rs[0]!.model, usage: calcAggregate(rs) }));
+
     return {
       agents,
       providers,
+      models,
       updatedAt: new Date().toISOString(),
     };
   }

@@ -118,14 +118,29 @@ async function demoRuntimes() {
         }
         yield { type: "text", text: `${req.agent.name} (demo mode): received "${user.slice(0, 120)}". Set ANTHROPIC_API_KEY and start without AGENTICVIEW_FAKE to run real agents.` };
     };
-    return new Map([
-        ["claude", new FakeRuntime(script, "claude")],
-        ["claude-session", new FakeRuntime(script, "claude-session")],
-        ["codex", new FakeRuntime(script, "codex")],
-        ["copilot", new FakeRuntime(script, "copilot")],
-        ["antigravity", new FakeRuntime(script, "antigravity")],
-        ["gemini", new FakeRuntime(script, "gemini")],
-    ]);
+    // Rough token estimate (4 chars per token) so the Usage tab has numbers in demo mode.
+    const usage = (req, text) => ({
+        usage: {
+            inputTokens: Math.ceil((req.systemPrompt.length + req.prompt.reduce((n, p) => n + (p.text?.length ?? 0), 0)) / 4),
+            outputTokens: Math.ceil(text.length / 4),
+        },
+    });
+    const map = new Map();
+    for (const p of ["claude", "claude-session", "copilot", "antigravity", "gemini"])
+        map.set(p, new FakeRuntime(script, p, usage));
+    // Demo Codex also reports plan windows, so the Usage tab's 5-hour / weekly bars have something to show.
+    const hour = 3_600_000;
+    const codexDemo = (req, text) => ({
+        ...usage(req, text),
+        rateLimits: {
+            primary: { used_percent: 28, window_minutes: 300, resets_at: Math.floor((Date.now() + 2.5 * hour) / 1000) },
+            secondary: { used_percent: 83, window_minutes: 10080, resets_at: Math.floor((Date.now() + 70 * hour) / 1000) },
+        },
+    });
+    map.set("codex", new FakeRuntime(script, "codex", codexDemo));
+    const { setCustomRuntimeFactory } = await import("./runtimes/index.js");
+    setCustomRuntimeFactory(map, (p) => new FakeRuntime(script, p, usage));
+    return map;
 }
 /** Hub: open a project world in its own detached process and return its URL once it is healthy. */
 async function openProjectDetached(projectPath) {

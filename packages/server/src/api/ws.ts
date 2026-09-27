@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { ClientMessageSchema, defaultAgent, type ClientMessage, type ServerMessage, type GameRoundResult } from "@agenticview/shared";
+import { ClientMessageSchema, defaultAgent, isKnownProvider, type ClientMessage, type ServerMessage, type GameRoundResult } from "@agenticview/shared";
 import type { World } from "../world.js";
 import { tokenOf } from "./auth.js";
 import { stat } from "node:fs/promises";
@@ -40,6 +40,7 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
       return;
     }
     case "agent.update": {
+      if (msg.patch.provider && !isKnownProvider(msg.patch.provider)) throw new Error(`Unknown provider ${msg.patch.provider}`);
       // Reseating someone must not reshuffle workers who were only auto-seated: pin them first.
       if (msg.patch.placement) for (const pinned of await registry.pinPlacements()) bus.emit({ type: "agent.updated", agent: pinned });
       const agent = await registry.update(msg.id, msg.patch);
@@ -56,6 +57,7 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
       bus.emit({ type: "agent.removed", id: msg.id });
       return;
     case "agent.switch":
+      if (msg.provider && !isKnownProvider(msg.provider)) throw new Error(`Unknown provider ${msg.provider}`);
       await world.switchAgent(msg.id, { provider: msg.provider, model: msg.model, effort: msg.effort });
       return;
     case "provider.switchAll":
@@ -76,6 +78,18 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
     case "settings.update":
       await world.updateSettings(msg.settings);
       bus.emit({ type: "snapshot", ...(await world.snapshot()) });
+      return;
+    case "provider.setKey":
+      await world.setProviderKey(msg.provider, msg.apiKey);
+      return;
+    case "provider.order":
+      await world.setProviderOrder(msg.order);
+      return;
+    case "customProvider.upsert":
+      await world.upsertCustomProvider(msg.provider);
+      return;
+    case "customProvider.remove":
+      await world.removeCustomProvider(msg.id);
       return;
     case "session.rename": {
       const rt = world.sessionRuntime;

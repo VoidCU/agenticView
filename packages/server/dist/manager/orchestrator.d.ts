@@ -9,6 +9,8 @@ export interface ResolvedSettings extends ProjectSettings {
     globalDefaultProvider: Provider | null;
     globalDefaultModel: string | null;
     providerModels: Partial<Record<Provider, string | undefined>>;
+    /** The user's provider order over every provider in effect (Automatic, limit summary). Default PROVIDER_ORDER. */
+    providerOrder?: readonly Provider[];
 }
 import type { UsageTracker } from "./usageTracker.js";
 export interface WorldDeps {
@@ -80,7 +82,9 @@ export declare class Orchestrator {
     };
     /** True when no explicit provider applies to this agent, so "Automatic" decides. */
     private isAutomatic;
-    /** "Automatic": the first provider in PROVIDER_ORDER whose check() is ok, or null when none is. */
+    /** Provider order in effect: the user's order, else PROVIDER_ORDER; then any other registered runtime. */
+    providerOrder(): Provider[];
+    /** "Automatic": the first provider in the provider order whose check() is ok, or null when none is. */
     autoProvider(): Promise<Provider | null>;
     /** resolveProvider(), consulting the live provider checks when the agent is on Automatic. */
     resolveProviderLive(agent: Agent): Promise<{

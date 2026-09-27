@@ -21,7 +21,7 @@ describe("Settings: Office life", () => {
     const send = vi.fn();
     useStore.setState({ send });
     const onClose = vi.fn();
-    render(<SettingsModal onClose={onClose} />);
+    render(<SettingsModal onClose={onClose} initialTab="office" />);
     expect(screen.getByRole("group", { name: "Office life" })).toBeInTheDocument();
     expect(screen.getByLabelText("Stay at desk percent")).toHaveValue(40);
     expect(screen.getByLabelText("Visit a colleague or board percent")).toHaveValue(25);
@@ -34,8 +34,7 @@ describe("Settings: Office life", () => {
     await setValue("Idle lounge minutes", "5");
     await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
-    expect(send).toHaveBeenCalledTimes(1);
-    const msg = send.mock.calls[0]![0];
+    const msg = send.mock.calls.map((c) => c[0]).find((m) => m.type === "settings.update");
     expect(msg.type).toBe("settings.update");
     expect(msg.settings.idleLoungeMinutes).toBe(5);
     expect(msg.settings.idleBehaviour).toMatchObject({ stayChance: 0.5, visitChance: 0.3, loungeChance: 0.2, minRollSeconds: 120, maxRollSeconds: 240 });
@@ -44,7 +43,7 @@ describe("Settings: Office life", () => {
 
   it("keeps the saved roll window and reads existing chances", () => {
     useStore.setState({ settings: { ...useStore.getState().settings!, idleBehaviour: { stayChance: 0.1, visitChance: 0.6, loungeChance: 0.3, minRollSeconds: 30, maxRollSeconds: 60, visitSeconds: 20 } } });
-    render(<SettingsModal onClose={vi.fn()} />);
+    render(<SettingsModal onClose={vi.fn()} initialTab="office" />);
     expect(screen.getByLabelText("Stay at desk percent")).toHaveValue(10);
     expect(screen.getByLabelText("Visit a colleague or board percent")).toHaveValue(60);
   });
@@ -52,7 +51,7 @@ describe("Settings: Office life", () => {
   it("blocks saving until the three chances add up to 100", async () => {
     const send = vi.fn();
     useStore.setState({ send });
-    render(<SettingsModal onClose={vi.fn()} />);
+    render(<SettingsModal onClose={vi.fn()} initialTab="office" />);
     await setValue("Go to the lounge percent", "50");
     expect(screen.getByRole("alert")).toHaveTextContent("add up to 100 (now 115)");
     expect(screen.getByRole("button", { name: "Save settings" })).toBeDisabled();

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { EFFORT_LABELS, MODEL_CATALOGUE, PALETTE, effortsFor, findModel, type Agent, type ClientMessage, type Effort, type PermissionMode, type Provider, type Scope, type ToolAllowance } from "@agenticview/shared";
+import { EFFORT_LABELS, catalogueFor, PALETTE, effortsFor, findModel, type Agent, type ClientMessage, type Effort, type PermissionMode, type Provider, type Scope, type ToolAllowance } from "@agenticview/shared";
 import { useStore } from "../state/store";
-import { Modal, automaticLabel, defaultProviderOf, providerLabel } from "./ui";
+import { Modal, automaticLabel, defaultProviderOf, providerLabel, ProviderOptions } from "./ui";
 import { modeHint } from "./modeHint";
 import { ENTER_HINT, NewSessionLink } from "./sessions";
 
@@ -59,7 +59,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
 
   const defaultProvider = defaultProviderOf(settings?.defaultProvider, autoProvider);
   const effectiveProvider: Provider = provider || defaultProvider;
-  const catalogue = MODEL_CATALOGUE[effectiveProvider];
+  const catalogue = catalogueFor(effectiveProvider);
   /** Claude Code session agents run on the model and effort of the session that serves them. */
   const isSession = effectiveProvider === "claude-session";
   const modelChoice = customModel ? CUSTOM : model;
@@ -81,7 +81,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
     const nextProvider: Provider = p || defaultProvider;
     // A model id rarely means anything on another provider: keep it only if the new catalogue has it.
     if (!customModel && model && !findModel(nextProvider, model)) setModel("");
-    if (customModel && !MODEL_CATALOGUE[nextProvider].allowCustom) {
+    if (customModel && !catalogueFor(nextProvider).allowCustom) {
       setCustomModel(false);
       setModel("");
     }
@@ -204,12 +204,7 @@ export function CreateAgentModal({ onClose, edit }: Props) {
             <span>Provider</span>
             <select value={provider} onChange={(e) => changeProvider(e.target.value as Provider | "")} aria-label="Provider">
               <option value="">{settings?.defaultProvider ? `Default (${providerLabel(defaultProvider)})` : automaticLabel(autoProvider)}</option>
-              {providers.map((p) => (
-                <option key={p.provider} value={p.provider} disabled={!p.ok && p.provider !== "claude-session"} title={p.ok ? undefined : p.reason ?? "Unavailable"}>
-                  {providerLabel(p.provider)}
-                  {p.ok ? "" : p.provider === "claude-session" ? " (no worker yet)" : " (unavailable)"}
-                </option>
-              ))}
+              <ProviderOptions providers={providers} />
             </select>
           </label>
           {!isSession && (

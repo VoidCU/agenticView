@@ -56,6 +56,8 @@ export interface ManagerToolContext {
 }
 /** One session as list_sessions reports it. */
 export declare function sessionLine(s: WorkerSessionInfo, agents: Agent[]): Record<string, unknown>;
+/** ", or a custom provider: custom:x (Label: m1, m2)" for the custom providers configured on this machine. */
+export declare function customHint(): string;
 /** Validate a per-task model tier for a provider. */
 export declare function validateTier(provider: Provider, agent: Agent, model: string | undefined, effort: Effort | undefined): {
     ok: true;

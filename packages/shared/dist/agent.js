@@ -3,7 +3,22 @@ import { newId } from "./ids.js";
 import { EffortSchema } from "./models.js";
 import { AgentSessionSchema } from "./session.js";
 import { LimitInfoSchema } from "./limit-info.js";
-export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "copilot", "antigravity", "gemini"]);
+export const BUILTIN_PROVIDERS = ["claude", "claude-session", "codex", "copilot", "antigravity", "gemini"];
+export const BuiltinProviderSchema = z.enum(BUILTIN_PROVIDERS);
+/** Prefix of a user-configured provider id ("custom:<slug>"); the slug is the entry's id in config.providers.custom. */
+export const CUSTOM_PROVIDER_PREFIX = "custom:";
+export const CUSTOM_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const CustomProviderRefSchema = z
+    .string()
+    .regex(/^custom:[a-z0-9][a-z0-9-]{0,31}$/, "custom provider ids look like custom:<slug>");
+/** A built-in provider, or a user-configured OpenAI-/Anthropic-compatible endpoint ("custom:<slug>"). */
+export const ProviderSchema = z.union([BuiltinProviderSchema, CustomProviderRefSchema]);
+export function isCustomProvider(p) {
+    return typeof p === "string" && p.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+export function isBuiltinProvider(p) {
+    return typeof p === "string" && BUILTIN_PROVIDERS.includes(p);
+}
 export const RoleSchema = z.enum(["manager", "worker"]);
 export const ScopeSchema = z.enum(["project", "global"]);
 export const PermissionModeSchema = z.enum(["ask", "auto-edit", "auto"]);

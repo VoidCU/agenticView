@@ -223,7 +223,7 @@ describe("SettingsModal with limited provider", () => {
         { provider: "gemini", ok: false, reason: "not installed" },
       ],
     });
-    render(<SettingsModal onClose={vi.fn()} />);
+    render(<SettingsModal onClose={vi.fn()} initialTab="providers" />);
     expect(screen.getByText(/quota hit/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /switch all claude agents/i })).toBeInTheDocument();
   });
@@ -244,7 +244,7 @@ describe("SettingsModal with limited provider", () => {
     });
     useStore.getState().apply(snapshot([manager, worker], []));
     render(<SettingsModal onClose={vi.fn()} />);
-    const usageTab = screen.getByRole("button", { name: /usage/i });
+    const usageTab = screen.getByRole("tab", { name: /usage/i });
     await userEvent.click(usageTab);
     await waitFor(() => expect(screen.getByText(/no token usage/i)).toBeInTheDocument());
   });

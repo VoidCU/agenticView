@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { PROVIDER_LABELS } from "@agenticview/shared";
-import type { LimitsReport, ProviderModelLimits, UsageReport, WindowLimit } from "@agenticview/shared";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { providerLabelOf } from "@agenticview/shared";
+import type { LimitsReport, ProviderModelLimits, TokenUsageBucket, UsageAggregate, UsageReport, WindowLimit } from "@agenticview/shared";
 import { apiFetch } from "../net/ws";
-import { timeAgo } from "./ui";
+import { useStore } from "../state/store";
 
 /**
  * Formats a future ISO timestamp as a relative "in Xh Ym" string for times within 24 h,
@@ -91,180 +91,241 @@ export function ClaudeModelLimits({
   );
 }
 
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
+const PERIODS = [
+  { key: "session", label: "Session" },
+  { key: "today", label: "Today" },
+  { key: "last7Days", label: "7 days" },
+] as const;
+
+const NUM = new Intl.NumberFormat();
+/** "12,345" (locale thousands separators). */
+export function fmtNum(n: number): string {
+  return NUM.format(Math.round(n));
 }
 
-function WindowBar({ w, label }: { w: WindowLimit; label: string }) {
+/** Providers whose plan windows (5h / weekly) can be reported: Codex per turn, Claude Code sessions via the statusline. */
+const WINDOW_PROVIDERS = ["codex", "claude-session"] as const;
+
+/** A labelled plan-window bar: "% left", reset time, colour by headroom. */
+export function PlanWindow({ w, label, limited }: { w: WindowLimit; label: string; limited?: boolean }) {
   if (w.status === "not reported") {
     return (
-      <div className="usage-window">
-        <span className="usage-window-label">{label}</span>
-        <span className="usage-window-val muted">not reported</span>
+      <div className="plan-window plan-window-nr">
+        <span className="plan-window-label">{label}</span>
+        <span className="plan-window-na">not reported</span>
       </div>
     );
   }
   const pct = w.percentLeft;
-  const danger = pct < 10;
-  const warn = pct < 25;
+  const tone = limited || pct <= 0 ? "danger" : pct < 10 ? "danger" : pct < 25 ? "warn" : "ok";
+  const reset = w.resetAt ? formatResetAt(w.resetAt) : "";
   return (
-    <div className="usage-window">
-      <span className="usage-window-label">{label}</span>
-      <div className="usage-bar-wrap">
-        <div
-          className={`usage-bar ${danger ? "usage-bar-danger" : warn ? "usage-bar-warn" : ""}`}
-          style={{ width: `${Math.max(1, pct)}%` }}
-          role="progressbar"
-          aria-valuenow={pct}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label={`${label}: ${pct}% left`}
-        />
+    <div className={`plan-window plan-${tone}`}>
+      <span className="plan-window-label">{label}</span>
+      <div
+        className="plan-bar"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`${label}: ${pct}% left${reset ? `, resets ${reset}` : ""}`}
+      >
+        <div className="plan-bar-fill" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
       </div>
-      <span className="usage-window-val">{pct}% left</span>
-      {w.resetAt && <span className="usage-window-reset muted">resets {timeAgo(w.resetAt)}</span>}
+      <span className="plan-window-pct">{pct}% left</span>
+      <span className="plan-window-reset">{reset ? `resets ${reset}` : ""}</span>
     </div>
   );
 }
 
-function LimitsSection({ limits }: { limits: LimitsReport }) {
+function PlanLimits({ limits }: { limits: LimitsReport }) {
   useTick(30_000);
-  const entries = Object.entries(limits.providers);
-  if (entries.length === 0) return <p className="empty">No provider limit data available.</p>;
+  const limitedOthers = Object.entries(limits.providers).filter(([p, e]) => !(WINDOW_PROVIDERS as readonly string[]).includes(p) && e.limit.limited);
   return (
-    <div className="usage-limits">
-      {entries.map(([provider, entry]) => {
-        const isClaudeSession = provider === "claude-session";
-        const modelEntries = Object.entries(entry.models);
-        const allNotReported =
-          modelEntries.length === 0 ||
-          modelEntries.every(
-            ([, ml]) =>
-              ml.fiveHour.status === "not reported" && ml.weekly.status === "not reported",
-          );
+    <section className="settings-section usage-plan" aria-labelledby="usage-plan-head">
+      <header>
+        <h3 id="usage-plan-head">Plan limits</h3>
+        <p className="section-desc">
+          Rolling 5-hour and weekly windows, as the provider reports them. Other providers only show a limit when a run hits one.
+        </p>
+      </header>
+      {WINDOW_PROVIDERS.map((p) => {
+        const entry = limits.providers[p];
+        const models = Object.entries(entry?.models ?? {});
+        const limited = entry?.limit.limited;
         return (
-          <details key={provider} className="usage-provider-group" open>
-            <summary className="usage-provider-summary">
-              <span className="usage-provider-name">{PROVIDER_LABELS[provider as keyof typeof PROVIDER_LABELS] ?? provider}</span>
-              {entry.limit.limited && (
-                <span className={`usage-limited-badge usage-limited-${entry.limit.errorType ?? "crash"}`}>
-                  {entry.limit.errorType ?? "limited"}
-                  {entry.limit.resetAt && ` · resets ${timeAgo(entry.limit.resetAt)}`}
+          <div key={p} className="plan-provider">
+            <div className="plan-provider-head">
+              <h4>{providerLabelOf(p)}</h4>
+              {limited && (
+                <span className={`usage-limited-badge usage-limited-${entry!.limit.errorType ?? "crash"}`}>
+                  {entry!.limit.errorType ?? "limited"}
+                  {entry!.limit.resetAt && ` · resets ${formatResetAt(entry!.limit.resetAt)}`}
                 </span>
               )}
-            </summary>
-            {isClaudeSession ? (
-              allNotReported ? (
-                <p className="empty usage-no-models claude-statusline-hint">
-                  not reported — run <code>/agenticview-statusline</code> in your Claude Code session to enable reporting
-                </p>
-              ) : (
-                <div className="usage-claude-session-models">
-                  {modelEntries.map(([model, ml]) => (
-                    <ClaudeModelLimits key={model} model={model} ml={ml} isLimited={entry.limit.limited} />
-                  ))}
-                </div>
-              )
+            </div>
+            {models.length === 0 ? (
+              <p className="plan-empty">
+                {p === "claude-session" ? (
+                  <>
+                    Not reported yet: run <code>/agenticview-statusline</code> in your Claude Code session to report its plan windows.
+                  </>
+                ) : (
+                  "Not reported yet: Codex reports its windows after its next run."
+                )}
+              </p>
             ) : (
-              modelEntries.length === 0 ? (
-                <p className="empty usage-no-models">No model data yet.</p>
-              ) : (
-                modelEntries.map(([model, ml]) => (
-                  <div key={model} className="usage-model-row">
-                    <span className="usage-model-name">{model}</span>
-                    <WindowBar w={ml.fiveHour} label="5h" />
-                    <WindowBar w={ml.weekly} label="7d" />
-                  </div>
-                ))
-              )
+              models.map(([model, ml]) => (
+                <div key={model} className="plan-model">
+                  <span className="plan-model-name">{model}</span>
+                  <PlanWindow w={ml.fiveHour} label="5 hours" limited={limited} />
+                  <PlanWindow w={ml.weekly} label="Weekly" limited={limited} />
+                </div>
+              ))
             )}
-          </details>
+          </div>
         );
       })}
-    </div>
+      {limitedOthers.length > 0 && (
+        <ul className="plan-others">
+          {limitedOthers.map(([p, e]) => (
+            <li key={p}>
+              <strong>{providerLabelOf(p)}</strong>{" "}
+              <span className={`usage-limited-badge usage-limited-${e.limit.errorType ?? "crash"}`}>
+                {e.limit.errorType ?? "limited"}
+                {e.limit.resetAt && ` · resets ${formatResetAt(e.limit.resetAt)}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
-function UsageSection({ usage }: { usage: UsageReport }) {
-  const periods: Array<{ key: keyof typeof usage.agents[string]; label: string }> = [
-    { key: "session", label: "Session" },
-    { key: "today", label: "Today" },
-    { key: "last7Days", label: "7 days" },
-  ];
+interface UsageRow {
+  key: string;
+  name: string;
+  sub?: string;
+  agg: UsageAggregate;
+}
 
+function sumRows(rows: UsageRow[]): UsageAggregate {
+  const zero = () => ({ inputTokens: 0, outputTokens: 0, totalTokens: 0, runs: 0 });
+  const out: UsageAggregate = { session: zero(), today: zero(), last7Days: zero() };
+  for (const r of rows) {
+    for (const { key } of PERIODS) {
+      out[key].inputTokens += r.agg[key].inputTokens;
+      out[key].outputTokens += r.agg[key].outputTokens;
+      out[key].totalTokens += r.agg[key].totalTokens;
+      out[key].runs += r.agg[key].runs;
+    }
+  }
+  return out;
+}
+
+/** In/out tokens for Session / Today / 7 days, right-aligned, with a totals row. */
+export function UsageTable({ title, rows, nameHead }: { title: string; rows: UsageRow[]; nameHead: string }) {
+  const total = sumRows(rows);
+  const cell = (b: TokenUsageBucket, k: "inputTokens" | "outputTokens") => (
+    <td className="num" title={`${fmtNum(b.inputTokens + b.outputTokens)} tokens in ${fmtNum(b.runs)} run${b.runs === 1 ? "" : "s"}`}>
+      {b.runs === 0 ? <span className="num-zero">–</span> : fmtNum(b[k])}
+    </td>
+  );
   return (
-    <div className="usage-tokens">
-      <h3 className="usage-sub-head">By provider</h3>
-      <table className="usage-table" aria-label="Provider token usage">
+    <div className="usage-table-wrap">
+      <table className="usage-grid" aria-label={title}>
         <thead>
           <tr>
-            <th>Provider</th>
-            {periods.map((p) => (
-              <th key={p.key}>{p.label}</th>
+            <th scope="col" rowSpan={2} className="usage-name-col">
+              {nameHead}
+            </th>
+            {PERIODS.map((p) => (
+              <th key={p.key} scope="colgroup" colSpan={2} className="usage-period">
+                {p.label}
+              </th>
+            ))}
+          </tr>
+          <tr>
+            {PERIODS.map((p) => (
+              <Fragment key={p.key}>
+                <th scope="col" className="num">
+                  In
+                </th>
+                <th scope="col" className="num">
+                  Out
+                </th>
+              </Fragment>
             ))}
           </tr>
         </thead>
         <tbody>
-          {Object.entries(usage.providers).map(([provider, agg]) => (
-            <tr key={provider}>
-              <td>{PROVIDER_LABELS[provider as keyof typeof PROVIDER_LABELS] ?? provider}</td>
-              {periods.map((p) => (
-                <td key={p.key} className="usage-num" title={`${agg[p.key].totalTokens} tokens, ${agg[p.key].runs} runs`}>
-                  {fmtTokens(agg[p.key].totalTokens)}
-                  <span className="usage-runs"> ({agg[p.key].runs})</span>
-                </td>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              <th scope="row" className="usage-name">
+                <span>{r.name}</span>
+                {r.sub && <span className="usage-sub">{r.sub}</span>}
+              </th>
+              {PERIODS.map((p) => (
+                <Fragment key={p.key}>
+                  {cell(r.agg[p.key], "inputTokens")}
+                  {cell(r.agg[p.key], "outputTokens")}
+                </Fragment>
               ))}
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr>
+            <th scope="row">Total</th>
+            {PERIODS.map((p) => (
+              <Fragment key={p.key}>
+                <td className="num">{fmtNum(total[p.key].inputTokens)}</td>
+                <td className="num">{fmtNum(total[p.key].outputTokens)}</td>
+              </Fragment>
+            ))}
+          </tr>
+        </tfoot>
       </table>
-
-      {Object.keys(usage.agents).length > 0 && (
-        <>
-          <h3 className="usage-sub-head">By agent</h3>
-          <table className="usage-table" aria-label="Agent token usage">
-            <thead>
-              <tr>
-                <th>Agent</th>
-                {periods.map((p) => (
-                  <th key={p.key}>{p.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(usage.agents).map(([agentId, agg]) => (
-                <tr key={agentId}>
-                  <td className="usage-agent-id" title={agentId}>{agentId}</td>
-                  {periods.map((p) => (
-                    <td key={p.key} className="usage-num" title={`${agg[p.key].totalTokens} tokens, ${agg[p.key].runs} runs`}>
-                      {fmtTokens(agg[p.key].totalTokens)}
-                      <span className="usage-runs"> ({agg[p.key].runs})</span>
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
     </div>
   );
 }
 
+const hasRuns = (agg: UsageAggregate) => agg.last7Days.runs > 0 || agg.session.runs > 0;
+
+/** Rows for the per-agent and per-provider/model tables (only entries with runs in the last 7 days). */
+export function usageRows(usage: UsageReport, agentName: (id: string) => string | undefined): { agents: UsageRow[]; models: UsageRow[] } {
+  const agents = Object.entries(usage.agents)
+    .filter(([, agg]) => hasRuns(agg))
+    .map(([id, agg]) => ({ key: id, name: agentName(id) ?? id, sub: agentName(id) ? undefined : "removed agent", agg }))
+    .sort((a, b) => b.agg.last7Days.totalTokens - a.agg.last7Days.totalTokens);
+  const models: UsageRow[] = usage.models
+    ? usage.models
+        .filter((m) => hasRuns(m.usage))
+        .map((m) => ({ key: `${m.provider}|${m.model}`, name: providerLabelOf(m.provider), sub: m.model === "default" ? "provider default" : m.model, agg: m.usage }))
+    : Object.entries(usage.providers)
+        .filter(([, agg]) => hasRuns(agg))
+        .map(([p, agg]) => ({ key: p, name: providerLabelOf(p), agg }));
+  models.sort((a, b) => b.agg.last7Days.totalTokens - a.agg.last7Days.totalTokens);
+  return { agents, models };
+}
+
+type AutoRefresh = "off" | "30s";
+
 export function UsagePanel() {
+  const agents = useStore((s) => s.agents);
   const [limits, setLimits] = useState<LimitsReport | null>(null);
   const [usage, setUsage] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [auto, setAuto] = useState<AutoRefresh>("off");
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       const [limRes, useRes] = await Promise.all([apiFetch("/api/limits"), apiFetch("/api/usage")]);
-      if (!limRes.ok || !useRes.ok) throw new Error("Failed to load data");
+      if (!limRes.ok || !useRes.ok) throw new Error("Could not load usage data from the office server.");
       const [lim, use] = await Promise.all([limRes.json() as Promise<LimitsReport>, useRes.json() as Promise<UsageReport>]);
       setLimits(lim);
       setUsage(use);
@@ -278,26 +339,48 @@ export function UsagePanel() {
   useEffect(() => {
     void load();
   }, []);
+  useEffect(() => {
+    if (auto === "off") return;
+    const t = setInterval(() => void load(), 30_000);
+    return () => clearInterval(t);
+  }, [auto]);
 
-  if (loading) return <p className="empty">Loading usage data…</p>;
-  if (error) return (
-    <div>
-      <p className="form-error">{error}</p>
-      <button type="button" className="btn btn-ghost btn-xs" onClick={() => void load()}>Retry</button>
-    </div>
-  );
+  const rows = usage ? usageRows(usage, (id) => agents[id]?.name) : { agents: [], models: [] };
+  const empty = rows.agents.length === 0 && rows.models.length === 0;
 
   return (
     <div className="usage-panel">
-      {limits && <LimitsSection limits={limits} />}
-      {usage && (Object.keys(usage.providers).length > 0 || Object.keys(usage.agents).length > 0) ? (
-        <UsageSection usage={usage} />
-      ) : (
-        <p className="empty">No token usage recorded yet.</p>
+      <div className="usage-toolbar">
+        <span className="usage-updated" aria-live="polite">
+          {loading ? "Loading…" : usage ? `Updated ${new Date(usage.updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}
+        </span>
+        <label className="usage-auto">
+          <span>Auto-refresh</span>
+          <select value={auto} onChange={(e) => setAuto(e.target.value as AutoRefresh)} aria-label="Auto-refresh">
+            <option value="off">Off</option>
+            <option value="30s">Every 30 s</option>
+          </select>
+        </label>
+        <button type="button" className="btn btn-ghost btn-sm usage-refresh" onClick={() => void load()} disabled={loading}>
+          Refresh
+        </button>
+      </div>
+      {error && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
       )}
-      <button type="button" className="btn btn-ghost btn-xs usage-refresh" onClick={() => void load()}>
-        Refresh
-      </button>
+      {limits && <PlanLimits limits={limits} />}
+      <section className="settings-section" aria-labelledby="usage-tokens-head">
+        <header>
+          <h3 id="usage-tokens-head">Tokens</h3>
+          <p className="section-desc">Input and output tokens per run as the provider reports them. Session = since this office started.</p>
+        </header>
+        {usage && empty && <p className="empty-note">No token usage recorded yet. Numbers appear after an agent finishes its first run.</p>}
+        {!usage && !loading && !error && <p className="empty-note">No usage data.</p>}
+        {rows.models.length > 0 && <UsageTable title="Token usage by provider and model" nameHead="Provider / model" rows={rows.models} />}
+        {rows.agents.length > 0 && <UsageTable title="Token usage by agent" nameHead="Agent" rows={rows.agents} />}
+      </section>
     </div>
   );
 }
