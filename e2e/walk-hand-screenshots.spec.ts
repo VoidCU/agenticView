@@ -44,6 +44,16 @@ async function holdBubbles(page: import("@playwright/test").Page) {
   });
 }
 
+/** The reaction bubble must be fully inside the viewport (it used to float above the top edge up close). */
+async function expectInView(page: import("@playwright/test").Page, testId: string) {
+  const vp = page.viewportSize()!;
+  const b = (await page.getByTestId(testId).boundingBox())!;
+  expect(b.y).toBeGreaterThanOrEqual(0);
+  expect(b.x).toBeGreaterThanOrEqual(0);
+  expect(b.y + b.height).toBeLessThanOrEqual(vp.height);
+  expect(b.x + b.width).toBeLessThanOrEqual(vp.width);
+}
+
 test("walk mode: hand mid-slap, greeting, board with a free mouse", async ({ page }) => {
   if (!existsSync(SHOTS)) mkdirSync(SHOTS, { recursive: true });
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -57,12 +67,12 @@ test("walk mode: hand mid-slap, greeting, board with a free mouse", async ({ pag
 
   await page.evaluate(() => (window as unknown as Win).__setWalking?.(true));
   await expect.poll(() => page.evaluate(() => typeof (window as unknown as Win).__teleportWalk)).toBe("function");
-  // Face Atlas from 1.8 units: aim at the robot to interact, then tilt up so its speech bubble is in the shot.
+  // Stand right next to Atlas (1.5 units), at eye height, looking at the robot.
   const face = (pitch = -0.12) => page.evaluate((pt) => {
     const w = window as unknown as Win;
     const atlas = Object.values(w.__agenticviewTest!.store.getState().agents).find((a) => a.name === "Atlas")!;
     const p = w.__agenticviewTest!.agentPos(atlas.id)!;
-    const x = p.x + 1.3, z = p.z + 1.3;
+    const x = p.x + 1.05, z = p.z + 1.05;
     w.__teleportWalk!(x, z, Math.atan2(-(p.x - x), -(p.z - z)), pt);
   }, pitch);
   await face();
@@ -74,9 +84,9 @@ test("walk mode: hand mid-slap, greeting, board with a free mouse", async ({ pag
   await page.keyboard.press("e");
   await expect(page.getByTestId("bonk-bubble")).toBeVisible({ timeout: 3_000 });
   await holdBubbles(page);
-  await face(0.12);
   await page.waitForTimeout(250);
   await expect(page.getByTestId("bonk-bubble")).toBeVisible();
+  await expectInView(page, "bonk-bubble");
   await page.screenshot({ path: `${SHOTS}/walk-hand-slap-light-1440x900.png` });
   await pinHand(page, null, null);
 
@@ -88,8 +98,8 @@ test("walk mode: hand mid-slap, greeting, board with a free mouse", async ({ pag
   await expect(page.getByTestId("greet-bubble")).toBeVisible({ timeout: 3_000 });
   await expect(page.getByTestId("greet-bubble")).toHaveText(/^(Hi!|Hey boss!|All good here\.|Hi! Busy, sorry\.|Hey — deep in a task\.|Hi boss, shipping!)$/);
   await holdBubbles(page);
-  await face(0.12);
   await page.waitForTimeout(250);
+  await expectInView(page, "greet-bubble");
   await page.screenshot({ path: `${SHOTS}/walk-greet-light-1440x900.png` });
   await pinHand(page, null, null);
 

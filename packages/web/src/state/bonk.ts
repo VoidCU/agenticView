@@ -123,3 +123,24 @@ export function interactionNod(b: BonkState | undefined, now: number): number {
 export function resetBonks() {
   lastBonk.clear();
 }
+
+// ---- Reaction bubble placement in walk mode ----
+
+/** Walk mode: within this distance the reaction bubble is pulled down into view. */
+export const WALK_BUBBLE_NEAR = 2.5;
+/** ...to this angle above the centre of the view (radians, ~7 degrees): the upper part of the view. */
+export const WALK_BUBBLE_ABOVE = 0.12;
+/** Walk mode: bubbles use this Html distanceFactor (overview: 10), so a close-up one is not screen-sized. */
+export const WALK_BUBBLE_DISTANCE_FACTOR = 5;
+
+/**
+ * Local height (above the robot's root) of the slap / greeting bubble. Normally just over the head;
+ * in walk mode, standing next to the robot, the head is above the top of the view at eye height, so the
+ * bubble comes down to a little above the centre of the view (`camPitch`: radians, + looking up) and
+ * stays on screen.
+ */
+export function bubbleAnchorY(headY: number, rootY: number, camY: number, camPitch: number, dist: number, walking: boolean): number {
+  if (!walking || !(dist < WALK_BUBBLE_NEAR)) return headY;
+  const d = Math.max(0.4, dist);
+  return Math.min(headY, camY + d * Math.tan(Math.max(-1.2, Math.min(1.2, camPitch + WALK_BUBBLE_ABOVE))) - rootY);
+}

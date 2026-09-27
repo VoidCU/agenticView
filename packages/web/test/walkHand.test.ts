@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import * as THREE from "three";
 import { SLAP_HIT_MS, SLAP_MS, WAVE_MS, handPose, handState, triggerHand, type HandPose } from "../src/scene/handGesture";
 import { updateWalkHand } from "../src/scene/WalkHand";
+import { WALK_BUBBLE_NEAR, bubbleAnchorY } from "../src/state/bonk";
 import { BONK_COOLDOWN_MS, GREET_BUSY_LINES, GREET_LINES, GREET_NOD_MS, GREET_RANGE, bonk, bonkState, greet, greetNod, interactionNod, interactionWobble, resetBonks } from "../src/state/bonk";
 import { useStore } from "../src/state/store";
 import { walkInteraction } from "../src/scene/WalkMode";
@@ -113,5 +114,23 @@ describe("say hi (H)", () => {
     root.position.set(0, 0, -(GREET_RANGE + 0.5));
     root.updateMatrixWorld(true);
     expect(walkInteraction([{ distance: 3, object: body }], { x: 0, z: 0 }, tmp, "greet")).toBeUndefined();
+  });
+});
+
+describe("slap / greeting bubble placement in walk mode", () => {
+  const HEAD = 2.35 * 0.72 + 0.1;
+  it("sits over the head in the overview and when far", () => {
+    expect(bubbleAnchorY(HEAD, 0, 30, -0.8, 1.5, false)).toBe(HEAD);
+    expect(bubbleAnchorY(HEAD, 0, 1.7, 0, WALK_BUBBLE_NEAR + 0.5, true)).toBe(HEAD);
+  });
+  it("comes down into the upper part of the view when you stand next to the robot, whatever the pitch", () => {
+    const vHalfFov = (38 / 2) * (Math.PI / 180);
+    for (const pitch of [-0.3, -0.12, 0, 0.1])
+      for (const [rootY, d] of [[0, 1.0], [0.51, 1.3], [0.51, 1.9], [0, 2.4]] as const) {
+        const y = bubbleAnchorY(HEAD, rootY, 1.7, pitch, d, true);
+        const aboveCentre = Math.atan2(rootY + y - 1.7, d) - pitch;
+        expect(aboveCentre).toBeLessThan(vHalfFov * 0.5); // well inside the top edge
+        expect(y).toBeLessThanOrEqual(HEAD);
+      }
   });
 });
