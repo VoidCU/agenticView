@@ -16,6 +16,10 @@ import type { PlayerStats } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { PALETTES, useSceneTheme } from "./theme";
 
+/** Stable content key used to rebuild the canvas texture when standings change. */
+export function scoreboardTextureKey(leaderboard: PlayerStats[]): string {
+  return JSON.stringify(leaderboard.map(({ playerId, name, wins, losses, draws }) => [playerId, name, wins, losses, draws]));
+}
 
 function buildScoreboardTexture(leaderboard: PlayerStats[], isDark: boolean): THREE.CanvasTexture {
   const W = 512;
@@ -104,6 +108,7 @@ export function LoungeScoreboard({ lounge }: Props) {
   const texRef = useRef<THREE.CanvasTexture | null>(null);
   const lastBuildRef = useRef(0);
   const leaderboard = games?.leaderboard ?? [];
+  const textureKey = scoreboardTextureKey(leaderboard);
 
   const texture = useMemo(() => {
     const t = buildScoreboardTexture(leaderboard, isDark);
@@ -111,7 +116,7 @@ export function LoungeScoreboard({ lounge }: Props) {
     lastBuildRef.current = Date.now();
     return t;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leaderboard, isDark]);
+  }, [textureKey, isDark]);
 
   // Throttle rebuild when games.leaderboard updates rapidly (≤1/s guard).
   useFrame(() => {
