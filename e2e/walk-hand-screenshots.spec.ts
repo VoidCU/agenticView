@@ -140,8 +140,14 @@ test("walk mode: hand mid-slap, greeting, board with a free mouse", async ({ pag
   }, [mx, my] as const);
   await page.screenshot({ path: `${SHOTS}/walk-board-free-mouse-light-1440x900.png` });
   await page.evaluate(() => document.getElementById("e2e-cursor")?.remove());
+  // The free mouse works: Details expands the row; the title area opens the request's timeline in the
+  // same dialog, and Esc steps back to the board before a second Esc closes it.
+  await board.getByRole("button", { name: "Show details: design the settings page" }).first().click();
+  await expect(board.getByRole("button", { name: "Hide details: design the settings page" }).first()).toHaveAttribute("aria-expanded", "true");
   await row.click();
-  await expect(row).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("dialog", { name: "Workflow · design the settings page" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(board).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(board).toBeHidden();
   await expect(page.locator(".walk-crosshair")).toBeVisible();
