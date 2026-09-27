@@ -47,6 +47,12 @@ export function customRuntime(c: CustomProviderConfig, opts: Pick<RuntimeFactory
     : new CodexRuntime({ bridgeEntry: opts.bridgeEntry, bridgeUrl: opts.bridgeUrl, which: opts.which, custom: endpoint });
 }
 
+// Demo mode (AGENTICVIEW_FAKE): custom providers get scripted runtimes instead of real engines.
+const customFactories = new WeakMap<Map<Provider, Runtime>, (provider: Provider) => Runtime>();
+export function setCustomRuntimeFactory(map: Map<Provider, Runtime>, make: (provider: Provider) => Runtime): void {
+  customFactories.set(map, make);
+}
+
 // Factory options per runtime map, so a settings change can rebuild the keyed/custom runtimes in place.
 const factoryOptions = new WeakMap<Map<Provider, Runtime>, RuntimeFactoryOptions>();
 
@@ -57,6 +63,12 @@ const factoryOptions = new WeakMap<Map<Provider, Runtime>, RuntimeFactoryOptions
  */
 export function applyProviderConfig(map: Map<Provider, Runtime>, cfg: GlobalConfig, overrides?: RuntimeFactoryOptions): void {
   setCustomProviders(cfg.providers.custom);
+  const demo = customFactories.get(map);
+  if (demo) {
+    for (const p of [...map.keys()]) if (isCustomProvider(p)) map.delete(p);
+    for (const c of cfg.providers.custom) map.set(customRef(c.id), demo(customRef(c.id)));
+    return;
+  }
   const opts = overrides ?? factoryOptions.get(map);
   if (!opts) return; // a hand-built map (tests): only the registry changes
   const which = opts.which ?? defaultWhich;
