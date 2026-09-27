@@ -11,7 +11,7 @@ Release notes for tagged versions are generated on GitHub. This file collects wh
 - **Manager layout tools:** `set_layout`, `move_room`, `set_room_kind` and `remove_room`; `add_room` now also adds production and research rooms. Manager only, and used only when you ask for a layout change.
 - **Connections** (Settings > Connections): placeholders for Instagram and Meta, the future feed of the My Office wall screen (*Coming soon*). Clicking the wall screen in walk mode opens this tab.
 - *Move to room* in an agent's menu.
-- **Designated desks.** Every worker owns one desk (its `workSeat`, never shared) and sits there whenever it works, except in brainstorm meetings. Idle workers still wander; one sitting at another worker's desk gets up when the owner starts work. Dragging a worker, `move_worker` and `arrange_workers` change designated desks (taking another worker's desk swaps the two), and `list_spaces` shows whose desk each seat is.
+- **Designated desks.** Every worker owns one desk (its `workSeat`, never shared) and sits there whenever it works, except in brainstorm meetings. Idle workers still wander; one sitting at another worker's desk gets up when the owner starts work. Dragging a worker, `move_worker` and `arrange_workers` change designated desks (taking another worker's desk swaps the two), and `list_spaces` shows whose desk each seat is. Designated desks exist only in work rooms (pods, Production Room, Research Room): a move to the meeting room or lounge is a temporary seat, and desk changes are serialized so simultaneous moves can never share a desk.
 
 ### Changed
 - The default plan puts the lounge in the centre with the Manager's Office beside it, and My Office, Production and Research on the west side.
