@@ -8,6 +8,7 @@ import { PermissionActions } from "../hud/PermissionToast";
 import { LimitChip, SwitchAgentModal } from "../hud/LimitChip";
 import { levelAccents } from "./accents";
 import { dragPoint, livePositions, useDrag } from "./motion";
+import { stepPath, useEngage, yawToViewer } from "./engage";
 import { agentActivityText } from "./selectors";
 import { useWalk } from "../state/walk";
 import { useHudPrefs } from "../state/hudPrefs";
@@ -121,6 +122,8 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   // re-renders when the visible activity text changes, not on every run.event / task update.
   const activity = useStore((s) => agentActivityText(agent, s.tasks, s.feed[agent.id]));
   const held = useDrag((s) => s.heldId === agent.id && s.active);
+  // Playing RPS with the user: stop, face the player, pump a fist (resumes on close).
+  const engaged = useEngage((s) => s.agentId === agent.id);
   // Hide tags/bubbles in walk mode or when showTags is disabled.
   const walking = useWalk((s) => s.walking);
   const showTags = useHudPrefs((s) => s.showTags);
@@ -190,66 +193,18 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
       st.lift += (0.7 - st.lift) * Math.min(1, dt * 10);
     } else {
       st.lift += (0 - st.lift) * Math.min(1, dt * 10);
-      if (!(Math.abs(target.x - st.tx) < 5e-4 && Math.abs(target.z - st.tz) < 5e-4)) {
-        st.tx = target.x;
-        st.tz = target.z;
-        if (Math.hypot(target.x - st.x, target.z - st.z) < 0.05) {
-          st.path = [];
-          onArrive?.(agent.id);
-        } else {
-          // Recalculate path from current position.
-          // Preserve vx/vz so we don't jitter — velocity blends naturally.
-          st.path = route(spaces, { x: st.x, z: st.z }, target).slice(1);
-        }
-      }
-      // Walk along path using velocity-blended stepping.
-      let heading: number | undefined;
-      if (st.path.length) {
-        const next = st.path[0]!;
-        const dx = next.x - st.x;
-        const dz = next.z - st.z;
-        const d = Math.hypot(dx, dz);
-        if (d > 1e-4) {
-          heading = Math.atan2(dx, dz);
-          // Blend velocity toward the direction of the next waypoint.
-          const targetVx = (dx / d) * WALK_SPEED;
-          const targetVz = (dz / d) * WALK_SPEED;
-          const blend = Math.min(1, dt * 10);
-          st.vx += (targetVx - st.vx) * blend;
-          st.vz += (targetVz - st.vz) * blend;
-        }
-        const step = WALK_SPEED * dt;
-        let budget = step;
-        while (budget > 0 && st.path.length) {
-          const wp = st.path[0]!;
-          const wdx = wp.x - st.x;
-          const wdz = wp.z - st.z;
-          const wd = Math.hypot(wdx, wdz);
-          if (wd <= budget) {
-            st.x = wp.x;
-            st.z = wp.z;
-            budget -= wd;
-            st.path.shift();
-            if (!st.path.length) onArrive?.(agent.id);
-          } else {
-            st.x += (wdx / wd) * budget;
-            st.z += (wdz / wd) * budget;
-            budget = 0;
-          }
-        }
-      } else {
-        // No path: decelerate velocity to zero.
-        st.vx *= Math.max(0, 1 - dt * 12);
-        st.vz *= Math.max(0, 1 - dt * 12);
-      }
-      const isWalking = st.path.length > 0;
+      // Walk along the path (paused in place while the user plays RPS with this agent).
+      const stepped = stepPath(st, target, { dt, speed: WALK_SPEED, engaged, route: (from, to) => route(spaces, from, to).slice(1), onArrive: () => onArrive?.(agent.id) });
+      const heading = stepped.heading;
+      const isWalking = stepped.walking;
       st.walk += ((isWalking ? 1 : 0) - st.walk) * Math.min(1, dt * 8);
       // Smoothly rotate to face direction of travel; snap to target.yaw at rest. A bonked idle robot
-      // looks at you for a moment; a busy one only glances during the wobble, then turns back to work.
+      // looks at you for a moment; a busy one only glances during the wobble. An engaged robot (RPS
+      // with the user) faces the player in walk mode, or the camera in the overview.
       const desired = isWalking && heading !== undefined
         ? heading
-        : faceViewer || bonkLooking(bonkState(agent.id), Date.now())
-          ? Math.atan2(camera.position.x - st.x, camera.position.z - st.z)
+        : engaged || faceViewer || bonkLooking(bonkState(agent.id), Date.now())
+          ? yawToViewer(st.x, st.z, camera.position.x, camera.position.z)
           : target.yaw;
       st.yaw += angleDiff(desired, st.yaw) * Math.min(1, dt * TURN_RATE);
     }
@@ -258,9 +213,9 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     if (lp) {
       lp.x = st.x;
       lp.z = st.z;
-      lp.walking = st.path.length > 0;
+      lp.walking = st.path.length > 0 && !engaged;
       lp.waiting = status === "waiting";
-    } else livePositions.set(agent.id, { x: st.x, z: st.z, walking: st.path.length > 0, waiting: status === "waiting" });
+    } else livePositions.set(agent.id, { x: st.x, z: st.z, walking: st.path.length > 0 && !engaged, waiting: status === "waiting" });
     // Hop onto the seat only once arrived; walk on the floor.
     const seatGoal = !held && st.path.length === 0 && Math.abs(target.x - st.x) + Math.abs(target.z - st.z) < 0.1 ? (target.yOffset ?? 0) : 0;
     st.seat += (seatGoal - st.seat) * Math.min(1, dt * 8);
@@ -284,7 +239,8 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     if (armL.current && armR.current) {
       const idleWave = held ? Math.sin(t * 10) * 0.5 - 1.8 : 0;
       armL.current.rotation.x = -s * 0.7 * w + idleWave;
-      armR.current.rotation.x = s * 0.7 * w + idleWave;
+      // Engaged in RPS: the right fist pumps "rock, paper, scissors" (shoulder raised, bobbing).
+      armR.current.rotation.x = engaged ? -1.1 + Math.sin(t * 9) * 0.35 : s * 0.7 * w + idleWave;
     }
     // Last slap / greeting: the wobble after a slap, the nod after a greeting (0 when idle).
     const lastHit = bonkState(agent.id);
@@ -308,7 +264,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
 
     // Idle animation: gentle breathing bob and occasional look-around
     const idle = Math.max(0, 1 - w);
-    const idleLook = idle > 0.6 && !faceViewer ? Math.sin(t * 0.5 + seed) * Math.sin(t * 0.18 + seed * 2) * 0.15 : 0;
+    const idleLook = idle > 0.6 && !faceViewer && !engaged ? Math.sin(t * 0.5 + seed) * Math.sin(t * 0.18 + seed * 2) * 0.15 : 0;
     if (yawG.current) yawG.current.rotation.y = st.yaw + idleLook;
 
     const b = body.current;

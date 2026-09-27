@@ -21,6 +21,7 @@ import { useWalkOverlay } from "./state/pointerLock";
 import { useMapOpen } from "./state/map";
 import { ScoreboardModal } from "./hud/ScoreboardModal";
 import { PlayRpsModal } from "./hud/PlayRpsModal";
+import { challengeRps } from "./state/rps";
 import { useHudPrefs } from "./state/hudPrefs";
 
 type Modal = "create" | "settings" | "sessions" | "inbox" | "scoreboard" | undefined;
@@ -154,7 +155,8 @@ export function App() {
   useEffect(() => {
     const handlePlayRps = (e: Event) => {
       const agentId = (e as CustomEvent<{ agentId: string }>).detail?.agentId;
-      if (agentId) {
+      // A busy agent declines with a bubble ("After I ship this!") instead of opening the popup.
+      if (agentId && challengeRps(agentId)) {
         setPlayAgentId(agentId);
         setModal(undefined);
       }
@@ -291,7 +293,7 @@ export function App() {
       {modal === "scoreboard" && (
         <ScoreboardModal
           onClose={() => setModal(undefined)}
-          onPlay={(agentId) => { setModal(undefined); setPlayAgentId(agentId); }}
+          onPlay={(agentId) => { setModal(undefined); if (challengeRps(agentId)) setPlayAgentId(agentId); }}
         />
       )}
       {playAgentId && (
