@@ -16,5 +16,8 @@ describe("modeHint", () => {
     expect(modeHint("antigravity", "ask")).toMatch(/read-only/i);
     expect(modeHint("antigravity", "auto-edit")).toMatch(/shell commands are blocked/i);
     expect(modeHint("antigravity", "auto")).toMatch(/never asks/i);
+    expect(modeHint("copilot", "ask")).toMatch(/read-only/i);
+    expect(modeHint("copilot", "auto-edit")).toMatch(/shell commands are denied/i);
+    expect(modeHint("copilot", "auto")).toMatch(/never asks/i);
   });
 });

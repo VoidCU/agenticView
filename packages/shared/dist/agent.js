@@ -3,7 +3,7 @@ import { newId } from "./ids.js";
 import { EffortSchema } from "./models.js";
 import { AgentSessionSchema } from "./session.js";
 import { LimitInfoSchema } from "./limit-info.js";
-export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "antigravity", "gemini"]);
+export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "copilot", "antigravity", "gemini"]);
 export const RoleSchema = z.enum(["manager", "worker"]);
 export const ScopeSchema = z.enum(["project", "global"]);
 export const PermissionModeSchema = z.enum(["ask", "auto-edit", "auto"]);
@@ -109,11 +109,12 @@ export function defaultAgent(init) {
     return agent;
 }
 /** Automatic provider resolution order: the first provider whose check() is ok wins. */
-export const PROVIDER_ORDER = ["claude", "claude-session", "codex", "antigravity", "gemini"];
+export const PROVIDER_ORDER = ["claude", "claude-session", "codex", "copilot", "antigravity", "gemini"];
 export const PROVIDER_LABELS = {
     claude: "Claude",
     "claude-session": "Claude Code session",
     codex: "Codex",
+    copilot: "GitHub Copilot",
     antigravity: "Antigravity",
     gemini: "Gemini",
 };

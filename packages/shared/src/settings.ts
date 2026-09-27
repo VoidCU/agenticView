@@ -2,11 +2,12 @@ import { z } from "zod";
 import { ProviderSchema } from "./agent.js";
 
 /** Default provider order for automatic failover when a run fails or crashes. */
-export const DEFAULT_FAILOVER_ORDER = ["codex", "antigravity", "claude-session"] as const;
+export const DEFAULT_FAILOVER_ORDER = ["codex", "copilot", "antigravity", "claude-session"] as const;
 
 /** Default model per provider used when the failover policy switches an agent. */
 export const FAILOVER_PROVIDER_MODELS: Partial<Record<z.infer<typeof ProviderSchema>, string>> = {
   codex: "gpt-6-luna",
+  copilot: "auto",
   antigravity: "gemini-3.8-flash-high",
   "claude-session": "sonnet",
 };
@@ -66,7 +67,7 @@ export const GlobalConfigSchema = z.object({
   defaultModel: z.string().nullable().default(null),
   maxConcurrentRuns: z.number().int().min(1).max(10).default(3),
   providers: z
-    .object({ claude: ProviderConfigSchema, codex: ProviderConfigSchema, antigravity: ProviderConfigSchema, gemini: ProviderConfigSchema })
+    .object({ claude: ProviderConfigSchema, codex: ProviderConfigSchema, copilot: ProviderConfigSchema, antigravity: ProviderConfigSchema, gemini: ProviderConfigSchema })
     .prefault({}),
   knownProjects: z.array(KnownProjectSchema).default([]),
 });

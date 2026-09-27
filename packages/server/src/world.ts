@@ -42,6 +42,7 @@ import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.j
 import { isTerminal, type Agent, type Task } from "@agenticview/shared";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
 import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
+import { cleanupCopilotTemp } from "./runtimes/copilot.js";
 import { GameService } from "./games/gameService.js";
 import { IdleBehaviourService } from "./games/idleBehaviour.js";
 
@@ -211,6 +212,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     providerModels: {
       claude: globalConfig.providers.claude.model,
       codex: globalConfig.providers.codex.model,
+      copilot: globalConfig.providers.copilot.model,
       antigravity: globalConfig.providers.antigravity.model,
       gemini: globalConfig.providers.gemini.model,
     },
@@ -267,6 +269,8 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     await cleanupGeminiSettings(ref.projectPath);
     await cleanupAntigravityPlugins(ref.projectPath);
   }
+  // Copilot's per-run files live in the OS temp dir, shared by every office (only day-old ones go).
+  await cleanupCopilotTemp();
 
   const info = async (): Promise<WorldInfo> => {
     const cfg = await readGlobalConfig();

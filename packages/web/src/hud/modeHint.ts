@@ -15,6 +15,10 @@ export function modeHint(provider: Provider, mode: PermissionMode): string {
       if (mode === "ask") return "Codex cannot prompt: runs in a read-only sandbox (no edits, no commands).";
       if (mode === "auto-edit") return "Codex writes inside the workspace sandbox without asking. On Windows the sandbox cannot write, so it runs with full access.";
       return "Codex runs with full access and never asks.";
+    case "copilot":
+      if (mode === "ask") return "GitHub Copilot cannot prompt: runs read-only, with file edits and shell commands denied.";
+      if (mode === "auto-edit") return "GitHub Copilot edits files without asking; shell commands are denied.";
+      return "GitHub Copilot never asks: everything the agent's tool allowances permit is approved.";
     case "antigravity":
       if (mode === "ask") return "Antigravity cannot prompt: runs read-only, with file edits and shell commands blocked.";
       if (mode === "auto-edit") return "Antigravity edits files without asking; shell commands are blocked.";

@@ -92,6 +92,20 @@ describe("GeminiRuntime", () => {
     expect(seen!.cwd.toLowerCase()).toBe(cwd.toLowerCase());
   });
 
+  it("trusts the workspace for the session so headless runs pass Gemini's folder-trust gate", async () => {
+    let env: Record<string, string> | undefined;
+    let argv: string[] = [];
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      env = opts.env as Record<string, string>;
+      argv = args;
+      return nodeSpawn(process.execPath, [fixture, ...args], opts as never);
+    }) as never;
+    await new GeminiRuntime({ bridgeEntry: "x", bridgeUrl: () => "u", spawn, which: async () => "gemini" }).run(req(), () => {}, new AbortController().signal);
+    expect(env!.GEMINI_CLI_TRUST_WORKSPACE).toBe("true");
+    // Env var, not --skip-trust: older CLIs reject unknown flags.
+    expect(argv).not.toContain("--skip-trust");
+  });
+
   it("reports a non-zero exit with stderr and maps exit 53 to max_turns", async () => {
     const res = await rt("fail").run(req(), () => {}, new AbortController().signal);
     expect(res.stopReason).toBe("error");

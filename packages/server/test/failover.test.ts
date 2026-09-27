@@ -200,10 +200,10 @@ describe("crash error classification triggers revive", () => {
 // ── failoverOrder in settings schema ──────────────────────────────────────────
 
 describe("ProjectSettingsSchema includes failoverOrder", () => {
-  it("defaults to ['codex', 'antigravity', 'claude-session']", async () => {
+  it("defaults to ['codex', 'copilot', 'antigravity', 'claude-session']", async () => {
     const { ProjectSettingsSchema } = await import("@agenticview/shared");
     const s = ProjectSettingsSchema.parse({});
-    expect(s.failoverOrder).toEqual(["codex", "antigravity", "claude-session"]);
+    expect(s.failoverOrder).toEqual(["codex", "copilot", "antigravity", "claude-session"]);
   });
 
   it("accepts a custom order", async () => {

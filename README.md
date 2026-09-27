@@ -4,7 +4,7 @@ A gamified 3D office for your coding agents, packaged as a Claude Code plugin.
 
 Run one command inside any project and a browser tab opens onto an isometric office: a honeycomb of hexagonal rooms. Spherical robots are your agents. **Atlas**, the Manager, works from the office in the centre; workers sit at desks in the pods around it, next to a meeting room and a lounge. You talk to Atlas, Atlas splits the work, walks over to the right worker and hands it off, and the workers edit your real project files. Flip back to VS Code whenever you like to review the code.
 
-- **Any provider.** Agents run on Claude (API key), on your own **Claude Code session** (Max/Pro plans, via `/agenticview-work`), on OpenAI **Codex**, on Google **Antigravity** (the `agy` CLI), or on Google **Gemini**. *Automatic* picks the first one that is available.
+- **Any provider.** Agents run on Claude (API key), on your own **Claude Code session** (Max/Pro plans, via `/agenticview-work`), on OpenAI **Codex**, on **GitHub Copilot** (the `copilot` CLI), on Google **Antigravity** (the `agy` CLI), or on Google **Gemini**. *Automatic* picks the first one that is available.
 - **Model and effort per agent.** Pick each agent's model from its provider's list (or type a custom id) and a reasoning effort from low to max where the model supports it.
 - **Two scopes.** *Project* agents live inside a project and only work there. *Global* agents live in your home folder, show up in every office, can be copied into a project, or can be sent to work on any project you have opened before.
 - **A Manager with an accurate map.** Every Manager turn starts with a freshly generated roster and open-task list, so it always knows who exists, who is busy, and what is in flight.
@@ -47,6 +47,7 @@ Pick one:
   ```
 
 - **Codex:** `npm i -g @openai/codex`, then `codex login`.
+- **GitHub Copilot:** `npm i -g @github/copilot`, then `copilot login`. Runs on your GitHub Copilot subscription; no API key is needed.
 - **Gemini:** `npm i -g @google/gemini-cli`, then `gemini` once to sign in (or set `GEMINI_API_KEY`).
 - **Antigravity:** install the Antigravity CLI (`agy`), then run `agy` once to sign in with your Antigravity account. No API key is needed.
 
@@ -128,30 +129,33 @@ Inside the office:
 | **claude** | Claude Agent SDK (Claude Code as a library) | `ANTHROPIC_API_KEY` in your environment, or a cloud provider env such as `CLAUDE_CODE_USE_BEDROCK`. The Agent SDK does not reuse the Claude Code login. You can also put the key in `~/.agenticview/config.json` under `providers.claude.apiKey`. |
 | **claude-session** ("Claude Code session") | Your own Claude Code session running `/agenticview-work` pulls tasks from the office queue over the plugin's `agenticview-worker` MCP server and runs each in the agent's own background subagent (`.claude/agents/agenticview-<name>.md`). AgenticView never spawns `claude` for it. | A Claude Code login (Max/Pro works). Run `/agenticview-work` in a session for the project; it shows as available while at least one session is polling. Tasks wait in the queue until a session picks them up. |
 | **codex** | `@openai/codex-sdk` driving the installed `codex` CLI | `npm i -g @openai/codex`, then sign in (`codex login`) or set `CODEX_API_KEY`. |
+| **copilot** ("GitHub Copilot") | The installed GitHub Copilot CLI (`copilot -p ... --output-format json`) | `npm i -g @github/copilot`, then `copilot login`. Uses your GitHub Copilot subscription (premium requests / AI credits); no API key. |
 | **antigravity** | The installed Antigravity CLI (`agy -p ... --output-format stream-json`) | Install `agy` and run it once to sign in with your Antigravity account. Found on `PATH` or at `%LOCALAPPDATA%\agy\bin\agy.exe`. |
 | **gemini** | The installed `gemini` CLI in headless streaming mode | `npm i -g @google/gemini-cli`, then sign in or set `GEMINI_API_KEY`. |
 
 The settings panel in the office shows each provider's status and the reason when one is unavailable. Creating an agent on an unavailable provider is refused with that reason, except for *Claude Code session*, whose tasks simply wait until a worker session connects.
 
-With the default provider on **Automatic**, agents without their own provider run on the first available provider in the order claude, claude-session, codex, antigravity, gemini. The settings panel shows the current choice, e.g. *Automatic (Codex)*.
+With the default provider on **Automatic**, agents without their own provider run on the first available provider in the order claude, claude-session, codex, copilot, antigravity, gemini. The settings panel shows the current choice, e.g. *Automatic (Codex)*.
 
-Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; Antigravity offers the models `agy models` lists (effort low, medium, high or max for models whose id does not already end in -high/-medium/-low); Gemini offers its model aliases and has no effort control. A *Claude Code session* agent's model is written into its subagent file, so it really runs on that model; without one it inherits the session's model. The effort is a hint for how thorough to be. *Custom…* accepts any model id.
+Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; GitHub Copilot offers *Auto* (Copilot picks the model per request; no effort) and the models `copilot help config` lists with effort minimal–max (which ones you can use depends on your Copilot plan; if a model refuses an effort level the run retries without it); Antigravity offers the models `agy models` lists (effort low, medium, high or max for models whose id does not already end in -high/-medium/-low); Gemini offers its model aliases and has no effort control. A *Claude Code session* agent's model is written into its subagent file, so it really runs on that model; without one it inherits the session's model. The effort is a hint for how thorough to be. *Custom…* accepts any model id.
 
-Only Claude supports interactive permission prompts. For Codex, Antigravity and Gemini, the `ask` mode maps to the most restrictive non-interactive setting each CLI offers, and the office says so:
+Only Claude supports interactive permission prompts. For Codex, GitHub Copilot, Antigravity and Gemini, the `ask` mode maps to the most restrictive non-interactive setting each CLI offers, and the office says so:
 
-| Agent permission mode | Claude | Codex | Antigravity | Gemini |
-|---|---|---|---|---|
-| `ask` | prompts you in the office | `read-only` sandbox | read-only: file-edit and shell tools blocked by deny hooks | `default` approval mode (headless: unapproved tools are rejected) |
-| `auto-edit` | accept edits | `workspace-write` sandbox (`danger-full-access` on Windows, where Codex's sandbox cannot write files) | edits allowed, shell tools blocked (`--mode accept-edits` plus deny hooks) | `auto_edit` |
-| `auto` | bypass permissions | `danger-full-access` | `--dangerously-skip-permissions` | `yolo` |
+| Agent permission mode | Claude | Codex | GitHub Copilot | Antigravity | Gemini |
+|---|---|---|---|---|---|
+| `ask` | prompts you in the office | `read-only` sandbox | read-only: `--allow-all-tools --deny-tool write --deny-tool shell` | read-only: file-edit and shell tools blocked by deny hooks | `default` approval mode (headless: unapproved tools are rejected) |
+| `auto-edit` | accept edits | `workspace-write` sandbox (`danger-full-access` on Windows, where Codex's sandbox cannot write files) | edits allowed, shell denied (`--allow-all-tools --deny-tool shell`) | edits allowed, shell tools blocked (`--mode accept-edits` plus deny hooks) | `auto_edit` |
+| `auto` | bypass permissions | `danger-full-access` | `--allow-all-tools` | `--dangerously-skip-permissions` | `yolo` |
 
 Gemini reads MCP servers and tool exclusions from settings files, so while a Gemini worker runs, AgenticView temporarily adds an `agenticview-<run>` server entry and a `tools.exclude` list (for tools that agent may not use) to `<project>/.gemini/settings.json`, and restores the file when the last Gemini run in that project finishes. Concurrent runs each get their own entry; exclusions are the union of all running agents. If the server ever dies mid-run, the next launch strips the leftovers.
 
 Antigravity only has a global MCP config (`~/.gemini/config/mcp_config.json`), which AgenticView never edits. Instead, while an Antigravity agent runs with office tools (delegate, report, ...) or with tools it may not use, AgenticView writes a workspace plugin at `<project>/.agents/plugins/agenticview-<run>/`: `mcp_config.json` for the bridge server, and `hooks.json` with `PreToolUse` hooks that deny the blocked tools (file edits, shell, web/browser). It deletes the plugin, along with agy's schema cache for it under `~/.gemini/antigravity-cli/mcp/`, when the run ends, and removes `.agents/plugins` and `.agents` again if the run created them. Stale plugins from a crashed server are removed on the next launch. Headless agy rejects MCP tool calls unless it runs with `--dangerously-skip-permissions` (hooks can deny tools but cannot approve them), so runs with office tools use that flag and rely on the deny hooks for the agent's limits.
 
+GitHub Copilot takes extra MCP servers per session (`--additional-mcp-config`), so a Copilot run with office tools gets its own `agenticview-<run>` server from a config file in a private temp folder (`agenticview-copilot-<run>` in the OS temp dir), deleted when the run ends; the user config that `copilot mcp add` edits (`~/.copilot/mcp-config.json`) is never touched, and leftovers from a crashed server are swept on the next launch. Headless Copilot needs `--allow-all-tools` (without it, anything needing approval is denied, yet read-only shell commands still run), so every run allows all tools and then denies what the agent may not do with `--deny-tool` rules (`write`, `shell`, `url`), which Copilot applies even over `--allow-all-tools`. Runs that are not fully trusted (`auto` with every allowance) also skip Copilot's built-in GitHub MCP server, which can act on GitHub. Token usage comes from `--usage-output-file`.
+
 **Gemini vs Antigravity.** Both are Google agents but they sign in differently: the Gemini CLI needs a Gemini API key (`GEMINI_API_KEY`) or a Google account with a Google Cloud project (`GOOGLE_CLOUD_PROJECT`), while the Antigravity CLI uses your Antigravity sign-in and needs neither.
 
-An agent whose tools disallow both editing and shell (the Manager, for example) runs Codex in a `read-only` sandbox, Antigravity with the edit and shell tools denied by hooks, and Gemini with the write, shell and web tools excluded, regardless of its permission mode.
+An agent whose tools disallow both editing and shell (the Manager, for example) runs Codex in a `read-only` sandbox, GitHub Copilot with `write` and `shell` denied, Antigravity with the edit and shell tools denied by hooks, and Gemini with the write, shell and web tools excluded, regardless of its permission mode.
 
 ## Claude Code sessions as workers
 
@@ -214,7 +218,7 @@ Only missing lines are added, once, and your own lines and line endings are kept
 
 ## Security
 
-The server binds to `127.0.0.1` only. Every request and WebSocket connection needs the random token that is minted at launch and passed once in the URL. Agents only receive the tools you allowed on them. Custom tools handed to Codex, Antigravity and Gemini go through a per-run bridge token that stops working when the run ends.
+The server binds to `127.0.0.1` only. Every request and WebSocket connection needs the random token that is minted at launch and passed once in the URL. Agents only receive the tools you allowed on them. Custom tools handed to Codex, GitHub Copilot, Antigravity and Gemini go through a per-run bridge token that stops working when the run ends.
 
 ## FAQ
 
@@ -231,10 +235,11 @@ For the plugin, use Claude Code 2.x, Node.js 22 or newer on PATH, and a browser.
 - **Claude API (`claude`):** set `ANTHROPIC_API_KEY`, or put the key under `providers.claude.apiKey` in `~/.agenticview/config.json`.
 - **Claude Code session (`claude-session`):** sign in to Claude Code and run `/agenticview-work` in a session for the project. This supports your Max/Pro session; the API provider does not reuse that login.
 - **Codex (`codex`):** install with `npm i -g @openai/codex`, then run `codex login` or set `CODEX_API_KEY`.
+- **GitHub Copilot (`copilot`):** install with `npm i -g @github/copilot`, then run `copilot login`. It uses your GitHub Copilot subscription.
 - **Antigravity (`antigravity`):** install the `agy` CLI and run `agy` once to sign in with your Antigravity account.
 - **Gemini (`gemini`):** install with `npm i -g @google/gemini-cli`, then run `gemini` to sign in or set `GEMINI_API_KEY`.
 
-Choose a provider per agent or use the office default. **Automatic** selects the first available provider in this order: Claude API, Claude Code session, Codex, Antigravity, Gemini. See [Providers and credentials](#providers-and-credentials) for availability, models, and permission differences.
+Choose a provider per agent or use the office default. **Automatic** selects the first available provider in this order: Claude API, Claude Code session, Codex, GitHub Copilot, Antigravity, Gemini. See [Providers and credentials](#providers-and-credentials) for availability, models, and permission differences.
 
 ### What does the Manager do, and what do workers do?
 
@@ -250,7 +255,7 @@ Run `/agenticview-work` in a Claude Code session opened in the same project. If 
 
 ### When will agents ask for approval?
 
-Set tool allowances and the permission mode in the agent form. Claude API agents can show **Allow**/**Deny** prompts in the office; `auto-edit` accepts edits and `auto` bypasses permission prompts. Codex, Antigravity and Gemini do not support those interactive office prompts: `ask` uses Codex's read-only sandbox, a read-only Antigravity run (edit and shell tools blocked) or Gemini's restrictive headless mode. Claude Code session workers use their session's own permission prompts; the office setting does not change them. Check the [permission mapping](#providers-and-credentials) before choosing a mode, especially on Windows, where Codex `auto-edit` runs unsandboxed.
+Set tool allowances and the permission mode in the agent form. Claude API agents can show **Allow**/**Deny** prompts in the office; `auto-edit` accepts edits and `auto` bypasses permission prompts. Codex, GitHub Copilot, Antigravity and Gemini do not support those interactive office prompts: `ask` uses Codex's read-only sandbox, a read-only Copilot run (write and shell denied), a read-only Antigravity run (edit and shell tools blocked) or Gemini's restrictive headless mode. Claude Code session workers use their session's own permission prompts; the office setting does not change them. Check the [permission mapping](#providers-and-credentials) before choosing a mode, especially on Windows, where Codex `auto-edit` runs unsandboxed.
 
 ### Why will the office not open, or why is a provider unavailable?
 

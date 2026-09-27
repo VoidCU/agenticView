@@ -5,6 +5,7 @@ import type { Provider } from "./agent.js";
  * Reasoning effort, the union of what the providers accept:
  * - Claude Agent SDK `Options.effort`: low | medium | high | xhigh | max
  * - Codex `ThreadOptions.modelReasoningEffort` / `model_reasoning_effort`: minimal | low | medium | high | xhigh | max | ultra
+ * - GitHub Copilot CLI (`copilot --reasoning-effort`): none | minimal | low | medium | high | xhigh | max (none not offered)
  * - Antigravity CLI (`agy --effort`): low | medium | high | max
  * - Gemini CLI: no effort control (hidden in the UI, ignored by the runtime).
  */
@@ -35,6 +36,7 @@ const CLAUDE_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "ma
 const CODEX_FULL: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const CODEX_MAX: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
 const AGY_EFFORTS: readonly Effort[] = ["low", "medium", "high", "max"];
+const COPILOT_EFFORTS: readonly Effort[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 export interface ProviderModelCatalogue {
   /** Effort levels offered when the model is left at the provider default. */
@@ -84,6 +86,35 @@ export const MODEL_CATALOGUE: Record<Provider, ProviderModelCatalogue> = {
       { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", efforts: CODEX_FULL },
       { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", efforts: CODEX_MAX },
       { id: "gpt-5.5", label: "GPT-5.5", efforts: ["low", "medium", "high", "xhigh"] },
+    ],
+  },
+  copilot: {
+    // `copilot --reasoning-effort` takes none|minimal|low|medium|high|xhigh|max (we offer minimal..max).
+    // "auto" lets Copilot route per request and rejects any effort. Which models a user can pick depends
+    // on their Copilot plan; the list is the CLI's own `model` setting list (`copilot help config`,
+    // CLI 1.0.88). The runtime retries without effort if a model rejects the requested level.
+    defaultEfforts: [],
+    allowCustom: true,
+    models: [
+      { id: "auto", label: "Auto (Copilot routing, recommended)", efforts: [] },
+      { id: "gpt-6-astra", label: "GPT-6-Astra", efforts: COPILOT_EFFORTS },
+      { id: "gpt-5.6-sol", label: "GPT-5.6-Sol", efforts: COPILOT_EFFORTS },
+      { id: "gpt-5.6-terra", label: "GPT-5.6-Terra", efforts: COPILOT_EFFORTS },
+      { id: "gpt-5.6-luna", label: "GPT-5.6-Luna", efforts: COPILOT_EFFORTS },
+      { id: "gpt-5.5", label: "GPT-5.5", efforts: COPILOT_EFFORTS },
+      { id: "gpt-5.4", label: "GPT-5.4", efforts: COPILOT_EFFORTS },
+      { id: "gpt-5.4-mini", label: "GPT-5.4 mini", efforts: COPILOT_EFFORTS },
+      { id: "gpt-5.3-codex", label: "GPT-5.3-Codex", efforts: COPILOT_EFFORTS },
+      { id: "claude-opus-5", label: "Claude Opus 5", efforts: COPILOT_EFFORTS },
+      { id: "claude-sonnet-5", label: "Claude Sonnet 5", efforts: COPILOT_EFFORTS },
+      { id: "claude-fable-5.1", label: "Claude Fable 5.1", efforts: COPILOT_EFFORTS },
+      { id: "claude-opus-4.8", label: "Claude Opus 4.8", efforts: COPILOT_EFFORTS },
+      { id: "claude-sonnet-4.6", label: "Claude Sonnet 4.6", efforts: COPILOT_EFFORTS },
+      { id: "claude-haiku-4.5", label: "Claude Haiku 4.5", efforts: COPILOT_EFFORTS },
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", efforts: COPILOT_EFFORTS },
+      { id: "mai-code-1.1-flash", label: "MAI Code 1.1 Flash", efforts: COPILOT_EFFORTS },
+      { id: "grok-4.5", label: "Grok 4.5", efforts: COPILOT_EFFORTS },
+      { id: "kimi-k3", label: "Kimi K3", efforts: COPILOT_EFFORTS },
     ],
   },
   antigravity: {

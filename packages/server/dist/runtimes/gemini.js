@@ -284,6 +284,10 @@ export class GeminiRuntime {
                     env[k] = v;
             if (this.opts.apiKey && !env.GEMINI_API_KEY)
                 env.GEMINI_API_KEY = this.opts.apiKey;
+            // Gemini CLI 0.61+ refuses headless runs in an untrusted folder. The office already chose this
+            // workspace, so trust it for the session. The env var (rather than --skip-trust) is ignored by
+            // older CLIs, which would reject the unknown flag.
+            env.GEMINI_CLI_TRUST_WORKSPACE = "true";
             const binName = this.opts.bin ?? "gemini";
             const resolved = (await this.which(binName)) ?? binName;
             const shimTarget = await resolveNodeShim(resolved);

@@ -12,6 +12,7 @@ import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.j
 import { isTerminal } from "@agenticview/shared";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
 import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
+import { cleanupCopilotTemp } from "./runtimes/copilot.js";
 import { GameService } from "./games/gameService.js";
 import { IdleBehaviourService } from "./games/idleBehaviour.js";
 // ── Explicit-room helpers (used by addRoom / removeRoom) ─────────────────────
@@ -118,6 +119,7 @@ export async function createWorld(ref, opts) {
         providerModels: {
             claude: globalConfig.providers.claude.model,
             codex: globalConfig.providers.codex.model,
+            copilot: globalConfig.providers.copilot.model,
             antigravity: globalConfig.providers.antigravity.model,
             gemini: globalConfig.providers.gemini.model,
         },
@@ -177,6 +179,8 @@ export async function createWorld(ref, opts) {
         await cleanupGeminiSettings(ref.projectPath);
         await cleanupAntigravityPlugins(ref.projectPath);
     }
+    // Copilot's per-run files live in the OS temp dir, shared by every office (only day-old ones go).
+    await cleanupCopilotTemp();
     const info = async () => {
         const cfg = await readGlobalConfig();
         globalConfig = cfg;

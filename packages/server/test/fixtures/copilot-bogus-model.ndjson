@@ -1,0 +1,2 @@
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"pending"},"ephemeral":true,"id":"904efa52-b258-4df5-a9b1-2105cc26c76b","timestamp":"2026-09-27T00:58:50.947Z","parentId":"d6c48211-51a3-43f3-9902-6caba8150019"}
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"connected"},"ephemeral":true,"id":"5dc5ab8d-aaa3-4dde-9253-81bd3faba426","timestamp":"2026-09-27T00:58:51.872Z","parentId":"d6c48211-51a3-43f3-9902-6caba8150019"}

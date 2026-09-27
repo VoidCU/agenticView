@@ -23,6 +23,7 @@ export declare const MemoryRecordSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>;

@@ -67,6 +67,7 @@ export declare const TaskSchema: z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            copilot: "copilot";
             antigravity: "antigravity";
             gemini: "gemini";
         }>;
@@ -86,6 +87,7 @@ export declare const TaskSchema: z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            copilot: "copilot";
             antigravity: "antigravity";
             gemini: "gemini";
         }>;

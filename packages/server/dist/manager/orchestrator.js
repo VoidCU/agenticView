@@ -8,7 +8,7 @@ import { SessionRuntime } from "../runtimes/session.js";
 import { identityLine, memoryBlock, recordFor } from "../agents/memory.js";
 import { MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
 /** Legacy fallback provider order used when failoverOrder is empty. */
-const REVIVE_CANDIDATES_FALLBACK = ["claude-session", "antigravity", "codex", "gemini", "claude"];
+const REVIVE_CANDIDATES_FALLBACK = ["claude-session", "antigravity", "codex", "copilot", "gemini", "claude"];
 /** Ordered cheapest-first choices for preferCheapModels. */
 const CHEAP_CANDIDATES = [
     { provider: "claude-session", model: "sonnet" },
@@ -73,7 +73,7 @@ export class Orchestrator {
     /** Returns a human-readable problem when the agent's provider cannot run, else undefined. */
     async providerProblem(agent) {
         if (this.isAutomatic(agent) && !(await this.autoProvider())) {
-            return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex, agy (Antigravity) or gemini CLI";
+            return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex, copilot (GitHub Copilot), agy (Antigravity) or gemini CLI";
         }
         const { provider } = await this.resolveProviderLive(agent);
         const runtime = this.deps.runtimes.get(provider);

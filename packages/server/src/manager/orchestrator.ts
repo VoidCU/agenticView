@@ -70,7 +70,7 @@ export interface WorldDeps {
 }
 
 /** Legacy fallback provider order used when failoverOrder is empty. */
-const REVIVE_CANDIDATES_FALLBACK: readonly Provider[] = ["claude-session", "antigravity", "codex", "gemini", "claude"];
+const REVIVE_CANDIDATES_FALLBACK: readonly Provider[] = ["claude-session", "antigravity", "codex", "copilot", "gemini", "claude"];
 
 /** Ordered cheapest-first choices for preferCheapModels. */
 const CHEAP_CANDIDATES: ReadonlyArray<{ provider: Provider; model: string }> = [
@@ -151,7 +151,7 @@ export class Orchestrator {
   /** Returns a human-readable problem when the agent's provider cannot run, else undefined. */
   async providerProblem(agent: Agent): Promise<string | undefined> {
     if (this.isAutomatic(agent) && !(await this.autoProvider())) {
-      return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex, agy (Antigravity) or gemini CLI";
+      return "no provider available: set ANTHROPIC_API_KEY, run /agenticview-work in a Claude Code session, or sign in to the codex, copilot (GitHub Copilot), agy (Antigravity) or gemini CLI";
     }
     const { provider } = await this.resolveProviderLive(agent);
     const runtime = this.deps.runtimes.get(provider);

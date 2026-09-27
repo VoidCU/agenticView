@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ProviderSchema } from "./agent.js";
 /** Default provider order for automatic failover when a run fails or crashes. */
-export declare const DEFAULT_FAILOVER_ORDER: readonly ["codex", "antigravity", "claude-session"];
+export declare const DEFAULT_FAILOVER_ORDER: readonly ["codex", "copilot", "antigravity", "claude-session"];
 /** Default model per provider used when the failover policy switches an agent. */
 export declare const FAILOVER_PROVIDER_MODELS: Partial<Record<z.infer<typeof ProviderSchema>, string>>;
 /**
@@ -24,6 +24,7 @@ export declare const ProjectSettingsSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
@@ -38,6 +39,7 @@ export declare const ProjectSettingsSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
@@ -65,6 +67,7 @@ export declare const GlobalConfigSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
@@ -76,6 +79,10 @@ export declare const GlobalConfigSchema: z.ZodObject<{
             model: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
         codex: z.ZodPrefault<z.ZodObject<{
+            apiKey: z.ZodOptional<z.ZodString>;
+            model: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        copilot: z.ZodPrefault<z.ZodObject<{
             apiKey: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;

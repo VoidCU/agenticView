@@ -37,6 +37,7 @@ export declare const ProviderModelLimitsSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>;
@@ -81,6 +82,7 @@ export declare const ProviderLimitsEntrySchema: z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            copilot: "copilot";
             antigravity: "antigravity";
             gemini: "gemini";
         }>;
@@ -114,6 +116,7 @@ export declare const LimitsReportSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>, z.ZodObject<{
@@ -133,6 +136,7 @@ export declare const LimitsReportSchema: z.ZodObject<{
                 claude: "claude";
                 "claude-session": "claude-session";
                 codex: "codex";
+                copilot: "copilot";
                 antigravity: "antigravity";
                 gemini: "gemini";
             }>;
@@ -216,6 +220,7 @@ export declare const UsageReportSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>, z.ZodObject<{
@@ -246,6 +251,7 @@ export declare const SwitchAgentPayloadSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
@@ -266,6 +272,7 @@ export declare const SwitchProviderPayloadSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>;

@@ -122,6 +122,7 @@ async function demoRuntimes() {
         ["claude", new FakeRuntime(script, "claude")],
         ["claude-session", new FakeRuntime(script, "claude-session")],
         ["codex", new FakeRuntime(script, "codex")],
+        ["copilot", new FakeRuntime(script, "copilot")],
         ["antigravity", new FakeRuntime(script, "antigravity")],
         ["gemini", new FakeRuntime(script, "gemini")],
     ]);
