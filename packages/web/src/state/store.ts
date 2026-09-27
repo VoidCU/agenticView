@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo, ProviderConfigInfo } from "@agenticview/shared";
-import { setCustomProviders } from "@agenticview/shared";
+import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, OfficeLayout, SocialHubState, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo, ProviderConfigInfo } from "@agenticview/shared";
+import { emptySocialHub, setCustomProviders } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
 export type Bubble = { text: string; until: number; /** Local playful bonk line (shown even in walk mode). */ bonk?: boolean; /** A friendly greeting reply (walk mode H), shown like a bonk line. */ greet?: boolean };
@@ -34,6 +34,8 @@ export const ERROR_WINDOW_MS = 10000;
 export interface Store {
   connected: boolean;
   world?: WorldInfo;
+  layout: OfficeLayout | null;
+  social: SocialHubState;
   agents: Record<string, Agent>;
   tasks: Record<string, Task>;
   providers: ProviderStatus[];
@@ -149,6 +151,8 @@ function managerFor(agents: Record<string, Agent>, task: Task): string | undefin
 const initial = () => ({
   connected: false,
   world: undefined as WorldInfo | undefined,
+  layout: null as OfficeLayout | null,
+  social: emptySocialHub(),
   agents: {} as Record<string, Agent>,
   tasks: {} as Record<string, Task>,
   providers: [] as ProviderStatus[],
@@ -189,6 +193,7 @@ export const useStore = create<Store>()((set, get) => ({
         for (const t of msg.tasks) tasks[t.id] = t;
         set({
           world: msg.world,
+          layout: msg.layout ?? msg.world.layout ?? null,
           agents,
           tasks,
           providers: msg.providers,
@@ -207,6 +212,9 @@ export const useStore = create<Store>()((set, get) => ({
       }
       case "spaceNames.updated":
         set({ spaceNames: msg.spaceNames });
+        return;
+      case "layout.updated":
+        set({ layout: msg.layout });
         return;
       case "providers.updated":
         set({ providers: msg.providers, autoProvider: msg.autoProvider, ...withProviderConfig(msg.providerConfig) });

@@ -1,5 +1,5 @@
 /**
- * Whiteboard: one per pod / meeting room. In the overview it shows coloured sticky
+ * Whiteboard: one per pod / meeting / production / research room (and the manager's office). In the overview it shows coloured sticky
  * notes; while walking and near it, the board face is a canvas texture listing the
  * room's task titles with their status so it can be read in first person.
  * Clicking it (pointer or walk-mode crosshair via userData.boardSpaceId) opens the full board.
@@ -8,10 +8,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Html, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { type Agent, type Space, type Task } from "@agenticview/shared";
+import { type Agent, type OfficeLayout, type Space, type Task } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { useWalk } from "../state/walk";
-import { cornerFrame, WHITEBOARD_FACE, WHITEBOARD_SLOT } from "./kit";
+import { cornerFrame, WHITEBOARD_FACE, whiteboardSlot } from "./kit";
 import { BOARD_COLORS, BOARD_LABELS, boardColumn, podBoard, type BoardColumn } from "../state/boards";
 
 /** Live overlay sits this far in front of the physical board face (a few mm, like DeskMonitor). */
@@ -23,7 +23,7 @@ const BOARD_OVERLAY_Z = WHITEBOARD_FACE.z + BOARD_FACE_NUDGE;
  * slot (WHITEBOARD_SLOT) and the same frame yaw. `face` is the world centre of the live overlay.
  */
 export function whiteboardPose(space: Pick<Space, "kind" | "x" | "z">) {
-  const slot = space.kind === "meeting" ? WHITEBOARD_SLOT.meeting : WHITEBOARD_SLOT.pod;
+  const slot = whiteboardSlot(space.kind);
   const c = cornerFrame(slot.angleDeg, slot.at);
   const x = space.x + c.x;
   const z = space.z + c.z;
@@ -47,10 +47,15 @@ export interface BoardLine { title: string; status: BoardColumn }
 const ORDER: BoardColumn[] = ["running", "waiting", "failed", "queued", "done"];
 
 /** Task lines for a room's board: active work first, then recent done. */
-export function boardLines(space: Space, agents: Agent[], tasks: Task[]): BoardLine[] {
+/** Rooms whose board lists their own seated workers' tasks (pods, production, research); others show the Manager board. */
+export function isTeamRoom(space: Pick<Space, "kind">): boolean {
+  return space.kind === "pod" || space.kind === "production" || space.kind === "research";
+}
+
+export function boardLines(space: Space, agents: Agent[], tasks: Task[], layout?: OfficeLayout | null): BoardLine[] {
   let lines: BoardLine[];
-  if (space.kind === "pod") {
-    const { columns } = podBoard(space.id, agents, tasks);
+  if (isTeamRoom(space)) {
+    const { columns } = podBoard(space.id, agents, tasks, layout);
     lines = ORDER.flatMap((status) => columns[status].map((t) => ({ title: t.title, status })));
   } else {
     const manager = agents.find((a) => a.role === "manager");
@@ -128,7 +133,7 @@ function BoardFace({ space, heading, world }: { space: Space; heading: string; w
     if (isNear !== near) setNear(isNear);
     if (!isNear) return;
     const s = useStore.getState();
-    const lines = boardLines(space, Object.values(s.agents), Object.values(s.tasks));
+    const lines = boardLines(space, Object.values(s.agents), Object.values(s.tasks), s.layout);
     const sig = heading + JSON.stringify(lines);
     if (sig === last.current.sig) return;
     last.current.sig = sig;
@@ -153,14 +158,15 @@ export function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Sp
   const walking = useWalk((s) => s.walking);
   const agents = useStore((s) => s.agents);
   const tasks = useStore((s) => s.tasks);
-  const board = useMemo(() => podBoard(space.id, Object.values(agents), Object.values(tasks)), [space.id, agents, tasks]);
+  const layout = useStore((s) => s.layout);
+  const board = useMemo(() => podBoard(space.id, Object.values(agents), Object.values(tasks), layout), [space.id, agents, tasks, layout]);
   const active = (["queued", "running", "waiting", "failed"] as const).flatMap((status) => board.columns[status].map((task) => ({ task, status })));
   const pose = useMemo(() => whiteboardPose(space), [space]);
   const world = useMemo(() => new THREE.Vector3(...pose.face), [pose]);
   const euler = useMemo(() => new THREE.Euler(0, pose.yaw, 0, "YXZ"), [pose]);
   const cols = Math.max(6, Math.ceil(Math.sqrt(active.length * 1.7)));
   const rows = Math.max(3, Math.ceil(active.length / cols));
-  const heading = space.kind === "pod" ? `${space.name} · tasks` : "Manager board";
+  const heading = isTeamRoom(space) ? `${space.name} · tasks` : "Manager board";
   return <group position={[pose.x, 0, pose.z]} rotation={euler}>
     <mesh position={[0, 1.12, 0.04]}
       userData={{ boardSpaceId: space.id }}
@@ -172,14 +178,14 @@ export function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Sp
       <meshBasicMaterial color="#78baff" transparent opacity={hovered ? 0.24 : 0} depthWrite={false} />
     </mesh>
     {walking && <BoardFace space={space} heading={heading} world={world} />}
-    {space.kind === "pod" && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + ((i % cols) + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, BOARD_OVERLAY_Z + 0.001]} raycast={() => null}>
+    {isTeamRoom(space) && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + ((i % cols) + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, BOARD_OVERLAY_Z + 0.001]} raycast={() => null}>
       <planeGeometry args={[1.12 / cols, 0.57 / rows]} /><meshBasicMaterial color={BOARD_COLORS[status]} side={THREE.DoubleSide} />
     </mesh>)}
     {/* Overview control only: in walk mode the board is read up close and opened with the crosshair. */}
     {!walking && <Html center position={[0, 1.9, 0]} distanceFactor={14} zIndexRange={[9, 0]}>
-      <button type="button" className={`board-open ${hovered ? "is-hover" : ""}`} aria-label={space.kind === "pod" ? `Open ${space.name} board` : `Open Manager board from ${space.name}`}
+      <button type="button" className={`board-open ${hovered ? "is-hover" : ""}`} aria-label={isTeamRoom(space) ? `Open ${space.name} board` : `Open Manager board from ${space.name}`}
         onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} onClick={() => { setHovered(false); onOpen(space); }}>
-        {space.kind === "pod" ? `Tasks · ${active.length}` : "Manager board"}
+        {isTeamRoom(space) ? `Tasks · ${active.length}` : "Manager board"}
       </button>
     </Html>}
   </group>;

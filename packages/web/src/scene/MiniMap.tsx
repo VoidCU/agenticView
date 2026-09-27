@@ -21,13 +21,14 @@ function hexPoints(cx: number, cy: number, r: number): string {
   }).join(" ");
 }
 
-const KIND_FILL_DARK: Record<string, string> = { office: "#1e2240", pod: "#1a2232", meeting: "#1a2832", lounge: "#221e2a" };
-const KIND_FILL_LIGHT: Record<string, string> = { office: "#e8eaf6", pod: "#f0f4ff", meeting: "#e8f4f0", lounge: "#f4eeff" };
+const KIND_FILL_DARK: Record<string, string> = { office: "#1e2240", myoffice: "#25314d", pod: "#1a2232", meeting: "#1a2832", lounge: "#221e2a", production: "#302b1f", research: "#1a3033" };
+const KIND_FILL_LIGHT: Record<string, string> = { office: "#e8eaf6", myoffice: "#dce8ff", pod: "#f0f4ff", meeting: "#e8f4f0", lounge: "#f4eeff", production: "#fff0d9", research: "#def5f4" };
 const ACTIVITY_MARK: Record<string, string> = { lounge: "☕", break: "☕", fainted: "+", meeting: "◇" };
 
 export function MiniMap() {
   const agents = useStore((s) => s.agents);
   const spaceNames = useStore((s) => s.spaceNames);
+  const officeLayout = useStore((s) => s.layout);
   const selectAgent = useStore((s) => s.select);
   const positions = usePositions((s) => s.byAgent);
   const player = usePositions((s) => s.player);
@@ -58,12 +59,19 @@ export function MiniMap() {
       return list.map((a) => STATUS_COLORS[agentStatus(a, tasks, s.permissions, s.questions, s.feed[a.id] ?? [])]);
     }),
   );
-  const layout = useMemo(() => layoutFor(list, spaceNames), [list, spaceNames]);
+  const layout = useMemo(() => layoutFor(list, spaceNames, officeLayout), [list, spaceNames, officeLayout]);
   const { spaces } = layout;
+  const home = spaces.find((space) => space.kind === "myoffice");
+  const you = walking && player ? player : home;
   const { svgScale, svgCx, svgCy, hexR } = useMemo(() => {
-    const extent = spaces.reduce((m, s) => Math.max(m, Math.hypot(s.x, s.z)), 0) + HEX_R;
+    // Centre on the plan's bounding box, not the origin: a re-laid-out plan need not be symmetric.
+    const xs = spaces.map((s) => s.x);
+    const zs = spaces.map((s) => s.z);
+    const cx = xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0;
+    const cz = zs.length ? (Math.min(...zs) + Math.max(...zs)) / 2 : 0;
+    const extent = spaces.reduce((m, s) => Math.max(m, Math.hypot(s.x - cx, s.z - cz)), 0) + HEX_R;
     const svgScale = extent > 0 ? (MAP_SIZE / 2 - PAD) / extent : 1;
-    return { svgScale, svgCx: MAP_SIZE / 2, svgCy: MAP_SIZE / 2, hexR: HEX_R * svgScale * 0.88 };
+    return { svgScale, svgCx: MAP_SIZE / 2 - cx * svgScale, svgCy: MAP_SIZE / 2 - cz * svgScale, hexR: HEX_R * svgScale * 0.88 };
   }, [spaces]);
   const points = useMemo(() => {
     const validIds = new Set(spaces.map((s) => s.id));
@@ -142,11 +150,11 @@ export function MiniMap() {
             {keyNum >= 1 && keyNum <= 9 && <text x={svgX - hexR * 0.58} y={svgY - hexR * 0.57} textAnchor="middle" dominantBaseline="middle" fontSize={Math.max(5, hexR * 0.22)} fontWeight={700} fill={keyFill} pointerEvents="none">{keyNum}</text>}
           </g>;
         })}
-        {walking && player && <g className="minimap-player" aria-label="You are here" pointerEvents="none">
+        {you && <g className="minimap-player" aria-label={walking ? "You are here" : "Your home in My Office"} pointerEvents="none">
           <title>You · facing direction</title>
-          <circle cx={svgCx + player.x * svgScale} cy={svgCy + player.z * svgScale} r="5.5" fill="#ffffff" stroke="#3976ff" strokeWidth="2"/>
-          <path d={`M 0 -8 L -4 3 L 0 1 L 4 3 Z`} fill="#3976ff" transform={`translate(${svgCx + player.x * svgScale} ${svgCy + player.z * svgScale}) rotate(${(-player.yaw * 180) / Math.PI})`}/>
-          <text x={svgCx + player.x * svgScale + 6} y={svgCy + player.z * svgScale - 5} fontSize="6" fill={textFill}>You</text>
+          <circle cx={svgCx + you.x * svgScale} cy={svgCy + you.z * svgScale} r="5.5" fill="#ffffff" stroke="#3976ff" strokeWidth="2"/>
+          {walking && player && <path d={`M 0 -8 L -4 3 L 0 1 L 4 3 Z`} fill="#3976ff" transform={`translate(${svgCx + you.x * svgScale} ${svgCy + you.z * svgScale}) rotate(${(-player.yaw * 180) / Math.PI})`}/>}
+          <text x={svgCx + you.x * svgScale + 6} y={svgCy + you.z * svgScale - 5} fontSize="6" fill={textFill}>You</text>
         </g>}
       </svg>
     </div>

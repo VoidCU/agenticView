@@ -7,15 +7,22 @@
  *  - Mouse look via Pointer Lock API (click canvas → captured; Esc → released + exit walk mode).
  *  - Subtle walking head-bob (a few mm; eased in/out with speed; none when standing still).
  *  - Collision via movePlayer (AABB sub-step + isWalkable outer wall).
+ *  - Every walk session starts in My Office (walkStartPose: one step behind the pushable desk
+ *    chair, facing WALL_SCREEN) rather than the props' startX/startZ, which stay only as a fallback
+ *    for layouts/tests with no "myoffice" space. My Office's hex is data (scene/layout.ts
+ *    layoutFor / shared planOffice), so this tracks the layout wherever that room moves.
  *  - Screen-centre raycast: clicking while locked fires select on the nearest
  *    DeskMonitor or whiteboard within MAX_INTERACT_DIST; E (or a click) on a robot within
- *    BONK_RANGE gives it a playful bonk (state/bonk.ts).
+ *    BONK_RANGE gives it a playful bonk (state/bonk.ts); clicking the My Office wall screen
+ *    (userData.wallScreenKind === "myoffice") opens Settings on the Connections tab.
  *  - Keys ignored while typing in inputs or a modal is open.
  */
 import { useRef, useEffect, useMemo } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { spaceAt, type Space } from "@agenticview/shared";
+import { spaceAt, WALL_SCREEN, type Space } from "@agenticview/shared";
+import { myOfficeChairFrame } from "./kit";
+import { CHAIR_D } from "./solids";
 import { useWalk } from "../state/walk";
 import { useStore } from "../state/store";
 import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, BOB_FREQ, bobWeightStep, headBobSide, headBobY } from "./walkPhysics";
@@ -37,6 +44,32 @@ const MOUSE_SENSITIVITY = 0.0022;
 
 /** Max distance for monitor/whiteboard interaction raycast. */
 const MAX_INTERACT_DIST = 7;
+
+/** Gap left between the walker's collision circle and the My Office chair's back at the start. */
+export const WALK_START_CLEARANCE = 0.12;
+
+/**
+ * Where a walk session starts in My Office, as a camera pose (walk yaw: forward = (-sin, -cos)).
+ * userHome() is the seated spot at the executive desk; the pushable desk chair sits between it and the
+ * room centre, so spawning there shoved the chair (and the walker) the first frame. Instead start one
+ * small step behind the chair, on the same line (room centre -> desk -> WALL_SCREEN), so the view is
+ * unchanged: desk and chair in front, the wall screen straight ahead.
+ */
+export function walkStartPose(space: { x: number; z: number }): { x: number; z: number; yaw: number } {
+  const chair = myOfficeChairFrame();
+  // Unit vector from the room centre toward the screen (the chair, the seated spot and the desk lie on it).
+  const len = Math.hypot(WALL_SCREEN.x, WALL_SCREEN.z) || 1;
+  const ux = WALL_SCREEN.x / len;
+  const uz = WALL_SCREEN.z / len;
+  // The chair faces the screen (yaw = home.yaw), so its depth axis lies along this line.
+  const chairAlong = chair.x * ux + chair.z * uz;
+  const along = chairAlong - CHAIR_D / 2 - PLAYER_RADIUS - WALK_START_CLEARANCE;
+  const x = space.x + ux * along;
+  const z = space.z + uz * along;
+  const dx = space.x + WALL_SCREEN.x - x;
+  const dz = space.z + WALL_SCREEN.z - z;
+  return { x, z, yaw: Math.atan2(-dx, -dz) };
+}
 
 // ---- Pointer-lock helpers ----
 
@@ -81,11 +114,20 @@ export function WalkModeController({
   const setWalking = useWalk((s) => s.setWalking);
   const select = useStore((s) => s.select);
 
+  // Every session starts in My Office just behind the desk chair, facing WALL_SCREEN — not wherever
+  // the last session ended (Office.tsx's exitAt only drives the 'You' robot walking home afterwards).
+  // Falls back to the caller's startX/startZ when the layout has no "myoffice" space (older buildSpaces
+  // layouts, tests). walkStartPose returns a camera yaw already (forward = (-sin, -cos), see
+  // walkDelta's unit test); userHome()'s robot-facing yaw would need + PI.
+  const myOffice = spaces.find((s) => s.kind === "myoffice");
+  const home = myOffice ? walkStartPose(myOffice) : { x: startX, z: startZ, yaw: 0 };
+  const homeCamYaw = home.yaw;
+
   // Mutable per-frame state (not React state — no re-render on change).
   const st = useRef({
-    x: startX,
-    z: startZ,
-    yaw: 0,   // horizontal look (Y-axis rotation)
+    x: home.x,
+    z: home.z,
+    yaw: homeCamYaw,   // horizontal look (Y-axis rotation)
     pitch: 0, // vertical look (X-axis rotation)
     vx: 0,    // horizontal velocity X
     vz: 0,    // horizontal velocity Z
@@ -304,6 +346,11 @@ export function WalkModeController({
       }
       else if (action?.kind === "board") onBoard?.(action.id);
       else if (action?.kind === "challenge") window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: action.id } }));
+      else if (action?.kind === "settings") {
+        // Same pattern as opening an agent's chat: free the mouse before the modal grabs it.
+        openOverlayFromWalk();
+        window.dispatchEvent(new CustomEvent("agenticview:open-settings", { detail: { tab: action.id } }));
+      }
     }
     // First-person hand: posed after the camera moved this frame (hidden and skipped when idle).
     updateWalkHand(hand.current, camera, performance.now());
@@ -344,7 +391,7 @@ export function WalkMode({ spaces, startX, startZ, solids, onBoard }: WalkModePr
   );
 }
 
-export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge" | "greet"; id: string };
+export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge" | "greet" | "settings"; id: string };
 /** What triggered the crosshair raycast: a click, E (bonk), G (challenge to rock-paper-scissors) or H (say hi). */
 export type WalkIntent = "click" | "bonk" | "challenge" | "greet";
 /** Walk mode: challenge an agent to RPS from this close (anywhere: desk, corridor, lounge). */
@@ -353,7 +400,8 @@ export const CHALLENGE_RANGE = 3;
 /**
  * What a screen-centre click (or E press, `bonkOnly`) does, given the raycast hits (nearest first).
  * A robot within BONK_RANGE (horizontal, from the camera to the robot's origin) gets bonked; a
- * farther robot or a desk monitor selects its agent; a whiteboard opens its board.
+ * farther robot or a desk monitor selects its agent; a whiteboard opens its board; the My Office
+ * wall screen opens Settings on the Connections tab.
  * `tmp` is a caller-owned scratch vector so this never allocates.
  */
 export function walkInteraction(
@@ -380,6 +428,10 @@ export function walkInteraction(
       }
       if (ud?.agentId) return clickOnly ? undefined : { kind: "select", id: ud.agentId as string };
       if (ud?.boardSpaceId) return clickOnly ? undefined : { kind: "board", id: ud.boardSpaceId as string };
+      // My Office wall screen (userData.wallScreenKind === "myoffice", tagged by the mesh Pixel
+      // renders from screenWall()/WALL_SCREEN): opens Settings on the Connections tab. The Production
+      // Room screen carries the same tag with kind "production" but has no click action yet.
+      if (ud?.wallScreenKind === "myoffice") return clickOnly ? undefined : { kind: "settings", id: "connections" };
       obj = obj.parent;
     }
   }

@@ -50,13 +50,16 @@ export function useMaterials(p: Palette): Record<Mat, THREE.Material> {
       whiteboard: std(p.whiteboard, 0.3),
       lampGlow: new THREE.MeshBasicMaterial({ color: p.lampGlow, side: THREE.DoubleSide, toneMapped: false }),
       accent: std(p.accent, 0.5, 0.1, { emissive: p.accent, emissiveIntensity: 0.25 }),
+      rugMine: std(p.rugMine, 1),
+      acoustic: std(p.acoustic, 0.98),
+      fabric: std("#ffffff", 0.9),
     };
     return m;
   }, [p]);
   return mats;
 }
 
-const NO_SHADOW: ReadonlySet<Mat> = new Set<Mat>(["glass", "screen", "lampGlow", "rugOffice", "rugLounge", "rugLounge2", "accent", "book"]);
+const NO_SHADOW: ReadonlySet<Mat> = new Set<Mat>(["glass", "screen", "lampGlow", "rugOffice", "rugLounge", "rugLounge2", "rugMine", "accent", "book"]);
 
 /** Where each kit item landed: item index -> (instanced mesh, instance index). Lets a pushed chair move its instances in place. */
 export type InstanceRegistry = Map<number, { mesh: THREE.InstancedMesh; index: number }>;

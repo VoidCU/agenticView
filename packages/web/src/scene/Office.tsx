@@ -2,16 +2,17 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls, PerformanceMonitor, useCursor } from "@react-three/drei";
 import * as THREE from "three";
-import { HEX_R, managerHome, seatPose, spaceAt, yawToward, type Agent, type ServerMessage, type Space, type Task } from "@agenticview/shared";
+import { HEX_R, managerHome, neighbors, seatPose, spaceAt, type Agent, type ServerMessage, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, FILE_CHIP_MAX, type FeedItem, type FileChip } from "../state/store";
 import { useLoungeBreaks, isFaintedCrash, limitWalk, limitWalkBubble } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
-import { awaySeatSignature, layoutFor, seatKey, type OfficeLayout } from "./layout";
+import { awaySeatSignature, layoutFor, planSignature, seatKey, youHome, type OfficeLayout } from "./layout";
 import { Robot, type RobotTarget } from "./Robot";
 import { Beam } from "./Beam";
 import { Confetti } from "./Confetti";
 import { PlusIcon } from "../hud/ui";
-import { Kit, buildWalls, furnishSpace, type Item } from "./kit";
+import { Kit, buildWalls, furnishSpace, hasWhiteboard, type Item } from "./kit";
+import { ProductionScreen, SocialHubScreen, wallScreenPose } from "./WallScreens";
 import { Batches, useMaterials, type InstanceRegistry } from "./Batches";
 import { chairField } from "./pushChairs";
 import { PALETTES, carpetTexture, useSceneTheme, woodTexture, type Palette } from "./theme";
@@ -24,7 +25,7 @@ import { MiniMap } from "./MiniMap";
 import { WalkMode } from "./WalkMode";
 import { handState } from "./handGesture";
 import { Whiteboard, whiteboardPose } from "./Whiteboard";
-import { AllDeskMonitors } from "./DeskMonitor";
+import { AllDeskMonitors, hasDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
 import { LoungeScoreboard } from "./LoungeScoreboard";
 import { buildColliders } from "./colliders";
@@ -117,10 +118,10 @@ function useFloorMaterials(p: Palette) {
       pod: [edge, top(carpetTexture(p.carpetPod), 0.95), edge],
       meeting,
       lounge,
-      // Placeholder: reuse existing materials until the new rooms get their own floor finish.
-      myoffice: office,
-      production: meeting,
-      research: lounge,
+      // My Office: dark wood under a warm rug (kit), studio carpet for production, library green for research.
+      myoffice: [edge, top(woodTexture(p.woodDark), 0.5), edge],
+      production: [edge, top(carpetTexture(p.carpetStudio), 0.97), edge],
+      research: [edge, top(carpetTexture(p.carpetResearch), 0.95), edge],
     } satisfies Record<Space["kind"], THREE.Material[]>;
   }, [p]);
 }
@@ -289,7 +290,9 @@ function Furniture({ spaces, layout, agents, palette, away = "" }: { spaces: Spa
   const signature = useMemo(() => {
     const occ = [...layout.occupied.entries()].map(([k, id]) => `${k}=${agents[id]?.appearance.color ?? ""}`).sort();
     const manager = Object.values(agents).find((a) => a.role === "manager");
-    return `${spaces.map((s) => s.id).join(",")}|${occ.join(",")}|m=${manager?.appearance.color ?? ""}|away=${away}`;
+    // The plan signature carries kinds and hexes, so a live re-layout (rooms swapped or re-kinded,
+    // same ids) rebuilds walls and furniture too.
+    return `${planSignature(spaces)}|${occ.join(",")}|m=${manager?.appearance.color ?? ""}|away=${away}`;
   }, [spaces, layout, agents, away]);
   const items = useMemo(() => {
     const kit = new Kit();
@@ -585,9 +588,25 @@ function DropMarker({ spaces }: { spaces: Space[] }) {
 
 // ---------- camera ----------
 
-function overviewDistance(spaces: Space[]): number {
-  const extent = Math.max(...spaces.map((s) => Math.hypot(s.x, s.z))) + HEX_R;
-  return extent * 2.5 + 6;
+/** Centre of the floor plan (middle of the rooms' bounding box, nudged toward the camera like before). */
+export function overviewCenter(spaces: readonly Space[]): { x: number; z: number } {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const s of spaces) {
+    minX = Math.min(minX, s.x);
+    maxX = Math.max(maxX, s.x);
+    minZ = Math.min(minZ, s.z);
+    maxZ = Math.max(maxZ, s.z);
+  }
+  return { x: (minX + maxX) / 2 + 1.2, z: (minZ + maxZ) / 2 + 1.2 };
+}
+
+/** Overview distance of the classic ring-1 office the palettes' fog was tuned for. */
+const OVERVIEW_BASE_DIST = 54;
+
+export function overviewDistance(spaces: readonly Space[]): number {
+  const c = overviewCenter(spaces);
+  const extent = Math.max(...spaces.map((s) => Math.hypot(s.x - c.x, s.z - c.z))) + HEX_R;
+  return Math.min(78, extent * 2.15 + 6);
 }
 
 function CameraRig({ spaces }: { spaces: Space[] }) {
@@ -595,20 +614,21 @@ function CameraRig({ spaces }: { spaces: Space[] }) {
   const camera = useThree((s) => s.camera);
   const controls = useThree((s) => s.controls) as unknown as (THREE.EventDispatcher<{ start: object }> & { target: THREE.Vector3; update(): void }) | null;
   const goal = useRef<{ target: THREE.Vector3; pos: THREE.Vector3 } | null>(null);
-  const rings = Math.max(...spaces.map((s) => s.ring));
+  const plan = planSignature(spaces);
 
   useEffect(() => {
     if (!controls) return;
     const space = focus ? spaces.find((s) => s.id === focus) : undefined;
-    const target = space ? new THREE.Vector3(space.x, 0.5, space.z) : new THREE.Vector3(1.2, 0, 1.2);
+    const c = overviewCenter(spaces);
+    const target = space ? new THREE.Vector3(space.x, 0.5, space.z) : new THREE.Vector3(c.x, 0, c.z);
     const az = Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z);
     const polar = space ? 0.82 : 0.78;
     const dist = space ? 25 : overviewDistance(spaces);
     const pos = new THREE.Vector3(target.x + dist * Math.sin(polar) * Math.sin(az), dist * Math.cos(polar), target.z + dist * Math.sin(polar) * Math.cos(az));
     goal.current = { target, pos };
-    // Rings change the overview distance; a focus change moves there.
+    // A new floor plan changes the overview framing; a focus change moves there.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, rings, controls]);
+  }, [focus, plan, controls]);
 
   useEffect(() => {
     if (!controls) return;
@@ -696,6 +716,7 @@ const YOU: Agent = {
 };
 
 const FRESH_MS = 10_000;
+const NO_IDS: readonly string[] = [];
 
 /**
  * The shadow map is re-rendered every frame only while a robot moves (plus a short grace period);
@@ -740,10 +761,16 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   const settings = useStore((s) => s.settings);
   const gameAnimation = useStore((s) => s.gameAnimation);
   const activeRpsMatch = useStore((s) => s.activeRpsMatch);
+  // The server's floor plan (null until it arrives: the default plan). A new plan re-plans everything
+  // below: walls, floors, furniture, colliders, boards, screens, and robots walk to their re-mapped seats.
+  const floorPlan = useStore((s) => s.layout);
   const list = useMemo(() => sortedAgents(agents), [agents]);
-  const layout = useMemo(() => layoutFor(list, spaceNames), [list, spaceNames]);
+  const layout = useMemo(() => layoutFor(list, spaceNames, floorPlan), [list, spaceNames, floorPlan]);
   const { spaces } = layout;
-  const office = spaces[0]!;
+  const office = spaces.find((s) => s.kind === "office") ?? spaces[0]!;
+  const myOffice = spaces.find((s) => s.kind === "myoffice");
+  // A wider floor plan pulls the overview camera back: push the fog back by as much so far rooms stay crisp.
+  const fogShift = useMemo(() => Math.max(0, overviewDistance(spaces) - OVERVIEW_BASE_DIST) * 2, [spaces]);
   const manager = list.find((a) => a.role === "manager");
   const loungeEnabled = (settings as { loungeBreaks?: boolean } | undefined)?.loungeBreaks ?? true;
   const loungeBreaks = useLoungeBreaks(agents, tasks, loungeEnabled);
@@ -784,23 +811,36 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
     return [...merged].sort().join(",");
   }, [layout, targets, liveAway]);
 
-  const youPose = useMemo(() => {
-    const a = 45 * DEG;
-    const p = { x: office.x + 2.25 * Math.cos(a), z: office.z + 2.25 * Math.sin(a) };
-    return { ...p, yaw: yawToward(p, managerHome(office)) };
-  }, [office]);
+  // 'You' lives in My Office: seated at the executive desk facing the wall screen (walk mode starts
+  // there too, and after walking you stroll back). Without a My Office: in front of the manager, as before.
+  const youPose = useMemo(() => youHome(office, myOffice), [office, myOffice]);
 
-  // Desk monitor positions: one per seated worker in pod spaces.
+  // Desk monitor positions: one per seated worker at a desk with a monitor (pods, production edit desks).
   const deskMonitors = useMemo(() => {
-    const out: { agentId: string; spaceX: number; spaceZ: number; seat: number }[] = [];
+    const out: { agentId: string; spaceX: number; spaceZ: number; seat: number; kind: Space["kind"] }[] = [];
     for (const [key, agentId] of layout.occupied.entries()) {
       const [spaceId, seatStr] = key.split("#") as [string, string];
       const s = spaces.find((sp) => sp.id === spaceId);
-      if (!s || s.kind !== "pod") continue;
-      out.push({ agentId, spaceX: s.x, spaceZ: s.z, seat: parseInt(seatStr, 10) });
+      if (!s || !hasDeskMonitors(s.kind)) continue;
+      out.push({ agentId, spaceX: s.x, spaceZ: s.z, seat: parseInt(seatStr, 10), kind: s.kind });
     }
     return out;
   }, [layout.occupied, spaces]);
+
+  // Who sits in each production room (its big screen shows their running task). Keyed on a string so
+  // the arrays keep their identity until the seating really changes.
+  const productionSeatKey = spaces
+    .filter((s) => s.kind === "production")
+    .map((s) => `${s.id}=${[...layout.occupied.entries()].filter(([k]) => k.startsWith(`${s.id}#`)).map(([, id]) => id).sort().join(",")}`)
+    .join(";");
+  const productionSeated = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const part of productionSeatKey ? productionSeatKey.split(";") : []) {
+      const [id, ids] = part.split("=") as [string, string];
+      out[id] = ids ? ids.split(",") : [];
+    }
+    return out;
+  }, [productionSeatKey]);
 
   // Office chairs are dynamic (pushChairs.ts: drawn pose, pushable or fixed); everything else is static.
   const colliders = useMemo(() => buildColliders(layout, { excludeKinds: ["chair"] }), [layout]);
@@ -888,14 +928,16 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
   return (
     <>
       <color attach="background" args={[palette.bg]} />
-      <fog attach="fog" args={[palette.bg, palette.fog[0], palette.fog[1]]} />
+      <fog attach="fog" args={[palette.bg, palette.fog[0] + fogShift, palette.fog[1] + fogShift]} />
       <Lights palette={palette} spaces={spaces} />
-      <ShadowThrottle signature={`${palette.bg}|${spaces.length}|${awaySeats}|${list.length}`} />
+      <ShadowThrottle signature={`${palette.bg}|${planSignature(spaces)}|${awaySeats}|${list.length}`} />
       <Ground palette={palette} />
       <Floors spaces={spaces} palette={palette} layout={layout} managerName={manager?.name} />
       <Furniture spaces={spaces} layout={layout} agents={agents} palette={palette} away={awaySeats} />
-      {spaces.filter(s => s.kind !== "lounge").map(s => <Whiteboard key={s.id} space={s} onOpen={onBoard} />)}
+      {spaces.filter(s => hasWhiteboard(s.kind)).map(s => <Whiteboard key={s.id} space={s} onOpen={onBoard} />)}
       {spaces.filter(s => s.kind === "meeting").map(s => <MeetingTV key={`tv-${s.id}`} space={s} />)}
+      {spaces.filter(s => s.kind === "myoffice").map(s => <SocialHubScreen key={`hub-${s.id}`} space={s} />)}
+      {spaces.filter(s => s.kind === "production").map(s => <ProductionScreen key={`prod-${s.id}`} space={s} seated={productionSeated[s.id] ?? NO_IDS} />)}
       <DropMarker spaces={spaces} />
 
       {list.map((a) => {
@@ -1001,11 +1043,20 @@ export function Office({ onCreate }: { onCreate: () => void }) {
       chairField,
       spaces: () => {
         const state = useStore.getState();
-        return layoutFor(Object.values(state.agents), state.spaceNames).spaces.map((s) => ({ id: s.id, kind: s.kind, x: s.x, z: s.z }));
+        const spaces = layoutFor(Object.values(state.agents), state.spaceNames, state.layout).spaces;
+        // openTo: neighbours reachable through a doorway (a wall carrying a screen has none).
+        return spaces.map((s) => ({ id: s.id, kind: s.kind, x: s.x, z: s.z, q: s.q, r: s.r, openTo: neighbors(spaces, s).map((n) => n.space.id) }));
+      },
+      /** Frame a room like clicking its floor (screenshots of rooms beyond the 1-9 keys). */
+      focus: (spaceId?: string) => useFocus.getState().setFocus(spaceId),
+      wallScreen: (spaceId: string) => {
+        const state = useStore.getState();
+        const space = layoutFor(Object.values(state.agents), state.spaceNames, state.layout).spaces.find((s) => s.id === spaceId);
+        return space ? wallScreenPose(space) : undefined;
       },
       boardPose: (spaceId: string) => {
         const state = useStore.getState();
-        const space = layoutFor(Object.values(state.agents), state.spaceNames).spaces.find((s) => s.id === spaceId);
+        const space = layoutFor(Object.values(state.agents), state.spaceNames, state.layout).spaces.find((s) => s.id === spaceId);
         return space ? whiteboardPose(space) : undefined;
       },
     });
@@ -1031,7 +1082,7 @@ export function Office({ onCreate }: { onCreate: () => void }) {
       if (!useWalk.getState().walking && e.key >= "1" && e.key <= "9" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const state = useStore.getState();
         const list = sortedAgents(state.agents);
-        const { spaces } = layoutFor(list, state.spaceNames);
+        const { spaces } = layoutFor(list, state.spaceNames, state.layout);
         const id = keyToRoom(e.key, spaces);
         if (id) setFocus(id);
       }

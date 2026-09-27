@@ -19,7 +19,36 @@ import {
   type Space,
 } from "@agenticview/shared";
 import type { OfficeLayout } from "./layout";
-import { ARMCHAIR_W, COUNTER_D, CREDENZA_SIZE, DESK_SIZE, EXEC_DESK_SIZE, PRIVACY_SCREEN, SHELF_SIZE, SOFA_D, TV_STAND, WHITEBOARD_STAND } from "./kit";
+import {
+  ARMCHAIR_W,
+  BACKDROP_STAND,
+  COUNTER_D,
+  CREDENZA_SIZE,
+  DESK_SIZE,
+  EDIT_DESK,
+  EXEC_DESK_SIZE,
+  GLOBE,
+  MYOFFICE_PROPS,
+  MY_DESK,
+  PRIVACY_SCREEN,
+  PRODUCTION_PROPS,
+  READING_TABLE,
+  RESEARCH_PROPS,
+  SCOREBOARD_STAND,
+  SHELF_SIZE,
+  SIDE_TABLE_D,
+  SOFA_D,
+  SOFTBOX_BASE_D,
+  TRIPOD,
+  TV_STAND,
+  WHITEBOARD_SLOT,
+  WHITEBOARD_STAND,
+  cornerFrame,
+  myOfficeChairFrame,
+  researchShelfFrames,
+  scoreboardFrame,
+  wallSide,
+} from "./kit";
 
 export interface SolidBox {
   kind: string;
@@ -65,23 +94,22 @@ function cornerPose(s: Space, angleDeg: number, at = 4.55): { x: number; z: numb
 export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
   const solids: SolidObstacle[] = [];
   const spaces = layout.spaces;
-  const has = (q: number, r: number) => spaces.some((s) => s.q === q && s.r === r);
 
-  // 1. Honeycomb walls and doorway openings
+  // 1. Honeycomb walls and doorway openings (no doorway in outer walls or walls carrying a screen)
   for (const s of spaces) {
     AXIAL_DIRS.forEach(([dq, dr], dir) => {
       const nq = s.q + dq;
       const nr = s.r + dr;
-      const shared = has(nq, nr);
+      const { neighbor, open } = wallSide(spaces, s, dir);
       // Build a shared wall from the room with the smaller (q, r) only.
-      if (shared && (nq < s.q || (nq === s.q && nr < s.r))) return;
+      if (neighbor && (nq < s.q || (nq === s.q && nr < s.r))) return;
       const n = DOOR_ANGLES[dir]!;
       const c1 = { x: s.x + HEX_R * Math.cos(n - 30 * DEG), z: s.z + HEX_R * Math.sin(n - 30 * DEG) };
       const c2 = { x: s.x + HEX_R * Math.cos(n + 30 * DEG), z: s.z + HEX_R * Math.sin(n + 30 * DEG) };
       const rot = Math.atan2(c2.x - c1.x, c2.z - c1.z) - Math.PI / 2;
 
-      if (!shared) {
-        // Solid outer wall partition
+      if (!open) {
+        // Solid wall: outer, or a screen wall between two rooms
         const mx = (c1.x + c2.x) / 2;
         const mz = (c1.z + c2.z) / 2;
         const len = Math.hypot(c2.x - c1.x, c2.z - c1.z);
@@ -220,6 +248,75 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
         solids.push({ kind: "plant", x: p0.x, z: p0.z, r: potRadius(1.2) });
         const p60 = cornerPose(s, 60, 4.8);
         solids.push({ kind: "plant", x: p60.x, z: p60.z, r: potRadius(0.8) });
+        // Scoreboard stand beside the 180 corner (kit loungeRoom / LoungeScoreboard).
+        const sb = scoreboardFrame();
+        solids.push({ kind: "scoreboard", x: s.x + sb.x, z: s.z + sb.z, w: SCOREBOARD_STAND.w, d: SCOREBOARD_STAND.d, rot: sb.yaw });
+        break;
+      }
+
+      case "myoffice": {
+        solids.push({ kind: "desk", x: s.x + MY_DESK.x, z: s.z + MY_DESK.z, w: MY_DESK.w, d: MY_DESK.d, rot: MY_DESK.yaw });
+        const ch = myOfficeChairFrame();
+        solids.push({ kind: "chair", x: s.x + ch.x, z: s.z + ch.z, w: CHAIR_W, d: CHAIR_D, rot: ch.yaw });
+        const sofa = cornerPose(s, MYOFFICE_PROPS.sofa.angleDeg, MYOFFICE_PROPS.sofa.at);
+        solids.push({ kind: "sofa", x: sofa.x, z: sofa.z, w: MYOFFICE_PROPS.sofa.w, d: SOFA_D, rot: sofa.rot });
+        // Side table in the sofa's frame (local +x = (cos rot, -sin rot)).
+        const tx = MYOFFICE_PROPS.sideTableX;
+        solids.push({ kind: "table", x: sofa.x + tx * Math.cos(sofa.rot), z: sofa.z - tx * Math.sin(sofa.rot), r: SIDE_TABLE_D / 2 });
+        const arm = cornerPose(s, MYOFFICE_PROPS.armchair.angleDeg, MYOFFICE_PROPS.armchair.at);
+        solids.push({ kind: "sofa", x: arm.x, z: arm.z, w: ARMCHAIR_W, d: SOFA_D, rot: arm.rot });
+        const lx = MYOFFICE_PROPS.lampX;
+        solids.push({ kind: "lamp", x: arm.x + lx * Math.cos(arm.rot), z: arm.z - lx * Math.sin(arm.rot), r: 0.17 });
+        for (const p of MYOFFICE_PROPS.plants) {
+          const c = cornerPose(s, p.angleDeg, p.at);
+          solids.push({ kind: "plant", x: c.x, z: c.z, r: potRadius(p.size) });
+        }
+        const cr = cornerPose(s, MYOFFICE_PROPS.credenza.angleDeg, MYOFFICE_PROPS.credenza.at);
+        solids.push({ kind: "credenza", x: cr.x, z: cr.z, w: CREDENZA_SIZE.w, d: CREDENZA_SIZE.d, rot: cr.rot });
+        break;
+      }
+
+      case "production": {
+        for (let seat = 0; seat < s.seats; seat++) {
+          const l = seatLocal("production", seat);
+          const d = { x: l.x, z: -0.6 };
+          solids.push({ kind: "desk", x: s.x + d.x, z: s.z + d.z, w: EDIT_DESK.w, d: EDIT_DESK.d, rot: 0 });
+          solids.push({ kind: "chair", x: s.x + l.x, z: s.z + l.z + 0.1, w: CHAIR_W, d: CHAIR_D, rot: l.yaw });
+        }
+        const bd = cornerFrame(PRODUCTION_PROPS.backdrop.angleDeg, PRODUCTION_PROPS.backdrop.at);
+        solids.push({ kind: "backdrop", x: s.x + bd.x, z: s.z + bd.z, w: BACKDROP_STAND.w, d: BACKDROP_STAND.d, rot: bd.yaw });
+        solids.push({ kind: "tripod", x: s.x + PRODUCTION_PROPS.tripod.x, z: s.z + PRODUCTION_PROPS.tripod.z, r: TRIPOD.r });
+        const sb = cornerPose(s, PRODUCTION_PROPS.softbox.angleDeg, PRODUCTION_PROPS.softbox.at);
+        solids.push({ kind: "lamp", x: sb.x, z: sb.z, r: SOFTBOX_BASE_D / 2 - 0.02 });
+        const rack = cornerPose(s, PRODUCTION_PROPS.rack.angleDeg, PRODUCTION_PROPS.rack.at);
+        solids.push({ kind: "credenza", x: rack.x, z: rack.z, w: CREDENZA_SIZE.w, d: CREDENZA_SIZE.d, rot: rack.rot });
+        const wb = cornerPose(s, WHITEBOARD_SLOT.production.angleDeg, WHITEBOARD_SLOT.production.at);
+        solids.push({ kind: "whiteboard", x: wb.x, z: wb.z, w: WHITEBOARD_STAND.w, d: WHITEBOARD_STAND.d, rot: wb.rot });
+        for (const p of PRODUCTION_PROPS.plants) {
+          const c = cornerPose(s, p.angleDeg, p.at);
+          solids.push({ kind: "plant", x: c.x, z: c.z, r: potRadius(p.size) });
+        }
+        break;
+      }
+
+      case "research": {
+        solids.push({ kind: "table", x: s.x + READING_TABLE.x, z: s.z + READING_TABLE.z, w: READING_TABLE.w, d: READING_TABLE.d, rot: 0 });
+        for (let seat = 0; seat < s.seats; seat++) {
+          const l = seatLocal("research", seat);
+          const back = l.z < 0 ? -1 : 1;
+          solids.push({ kind: "chair", x: s.x + l.x, z: s.z + l.z + back * 0.1, w: CHAIR_W, d: CHAIR_D, rot: l.yaw });
+        }
+        for (const f of researchShelfFrames()) solids.push({ kind: "shelf", x: s.x + f.x, z: s.z + f.z, w: SHELF_SIZE.w, d: SHELF_SIZE.d, rot: f.yaw });
+        const pin = cornerPose(s, RESEARCH_PROPS.pinboard.angleDeg, RESEARCH_PROPS.pinboard.at);
+        solids.push({ kind: "whiteboard", x: pin.x, z: pin.z, w: WHITEBOARD_STAND.w, d: WHITEBOARD_STAND.d, rot: pin.rot });
+        const g = cornerPose(s, RESEARCH_PROPS.globe.angleDeg, RESEARCH_PROPS.globe.at);
+        solids.push({ kind: "globe", x: g.x, z: g.z, r: GLOBE.base / 2 });
+        const wb = cornerPose(s, WHITEBOARD_SLOT.research.angleDeg, WHITEBOARD_SLOT.research.at);
+        solids.push({ kind: "whiteboard", x: wb.x, z: wb.z, w: WHITEBOARD_STAND.w, d: WHITEBOARD_STAND.d, rot: wb.rot });
+        for (const p of RESEARCH_PROPS.plants) {
+          const c = cornerPose(s, p.angleDeg, p.at);
+          solids.push({ kind: "plant", x: c.x, z: c.z, r: potRadius(p.size) });
+        }
         break;
       }
     }

@@ -2,7 +2,7 @@ import type { Space } from "@agenticview/shared";
 
 /**
  * Ordered list of space IDs for 1–9 keyboard shortcut.
- * Order: office first, then pods (by ring then id), then meeting, then lounge.
+ * Order: office first, then pods (by ring then id), then meeting, lounge, My Office, production, research.
  */
 export function viewOrder(spaces: Space[]): string[] {
   const kindRank = (kind: Space["kind"]): number => {
@@ -15,8 +15,14 @@ export function viewOrder(spaces: Space[]): string[] {
         return 2;
       case "lounge":
         return 3;
-      default:
+      case "myoffice":
         return 4;
+      case "production":
+        return 5;
+      case "research":
+        return 6;
+      default:
+        return 7;
     }
   };
   return [...spaces]

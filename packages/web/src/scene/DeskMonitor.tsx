@@ -11,7 +11,7 @@
 import { useMemo, useRef, useCallback } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { POD_SEATS, seatLocal } from "@agenticview/shared";
+import { POD_SEATS, PRODUCTION_FOOTPRINT, seatLocal, type SpaceKind } from "@agenticview/shared";
 import { useStore, agentStatus, STATUS_COLORS } from "../state/store";
 import type { AgentStatus, FeedItem } from "../state/store";
 
@@ -378,13 +378,25 @@ export function DeskMonitor({ agentId, position, yaw }: DeskMonitorProps) {
 
 // ---- Monitor throttle wrapper ----
 
-/** Returns the monitor world position for a given pod space + seat. */
+/** Rooms whose desks carry a live monitor (pods; the production room's edit desks). */
+export function hasDeskMonitors(kind: SpaceKind): boolean {
+  return kind === "pod" || kind === "production";
+}
+
+/** Returns the monitor world position for a given space + seat (pods by default). */
 export function monitorPoseForSeat(
   spaceX: number,
   spaceZ: number,
   seat: number,
+  kind: SpaceKind = "pod",
 ): { position: [number, number, number]; yaw: number } | null {
-  if (seat >= POD_SEATS || seat < 0) return null;
+  if (kind === "production") {
+    // kit.ts productionRoom: edit desk frame at the footprint centre, yaw 0, main screen at local (0, 1.06, -0.163).
+    const d = PRODUCTION_FOOTPRINT.desks[seat];
+    if (!d) return null;
+    return { position: [spaceX + d.x, 1.06, spaceZ + d.z - 0.163], yaw: 0 };
+  }
+  if (kind !== "pod" || seat >= POD_SEATS || seat < 0) return null;
   const l = seatLocal("pod", seat);
   // Mirror kit.ts exactly: podRoom places each desk frame at (l.x, ±0.36) with yaw π for the front
   // row, and desk() puts the static screen at local (0, 1.06, -0.163) inside that frame. The live
@@ -399,15 +411,15 @@ export function monitorPoseForSeat(
 
 interface AllDeskMonitorsProps {
   /** Array of {agentId, spaceX, spaceZ, seat}. */
-  desks: { agentId: string; spaceX: number; spaceZ: number; seat: number }[];
+  desks: { agentId: string; spaceX: number; spaceZ: number; seat: number; kind?: SpaceKind }[];
 }
 
 /** Renders all desk monitors, throttling concurrent updates via MAX_UPDATES_PER_FRAME. */
 export function AllDeskMonitors({ desks }: AllDeskMonitorsProps) {
   return (
     <>
-      {desks.map(({ agentId, spaceX, spaceZ, seat }) => {
-        const pose = monitorPoseForSeat(spaceX, spaceZ, seat);
+      {desks.map(({ agentId, spaceX, spaceZ, seat, kind }) => {
+        const pose = monitorPoseForSeat(spaceX, spaceZ, seat, kind);
         if (!pose) return null;
         return (
           <DeskMonitor

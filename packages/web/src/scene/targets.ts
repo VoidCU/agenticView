@@ -1,4 +1,5 @@
-import { assignLoungeSpots, loungeSpots, managerHome, rpsFacing, visitPose, yawToward, type Agent, type Match, type Space } from "@agenticview/shared";
+import { AXIAL_DIRS, DOOR_ANGLES, LOUNGE_DOOR_ANGLE, assignLoungeSpots, loungeSpots, managerHome, rpsFacing, visitPose, wallIsOpen, yawToward, type Agent, type Match, type Space } from "@agenticview/shared";
+import { hasWhiteboard } from "./kit";
 import type { OfficeLayout } from "./layout";
 import type { LoungeBreak } from "./breaks";
 import { agentRevivePhase, isFaintedCrash, limitWalk } from "./breaks";
@@ -62,7 +63,7 @@ export function visitTarget(agent: Agent, layout: Pick<OfficeLayout, "poses" | "
   }
   if (v.spaceId) {
     const space = layout.spaces.find((s) => s.id === v.spaceId);
-    if (space && space.kind !== "lounge") {
+    if (space && hasWhiteboard(space.kind)) {
       const b = whiteboardPose(space);
       const fx = Math.sin(b.yaw);
       const fz = Math.cos(b.yaw);
@@ -90,6 +91,22 @@ export function reportSpot(office: Space, slot = 0): Target {
   const side = slot === 0 ? 0 : (slot % 2 === 1 ? 1 : -1) * Math.ceil(slot / 2) * VISITOR_GAP;
   const p = { x: home.x + fx * REPORT_DIST + fz * side, z: home.z + fz * REPORT_DIST - fx * side };
   return { ...p, yaw: yawToward(p, home), yOffset: 0 };
+}
+
+/**
+ * The lounge doorway overflow agents queue outside: the one toward the manager's office when they share
+ * a doorway, else the lounge's first doorway, else the default (-150 degrees). Follows live re-layouts.
+ */
+export function loungeDoorAngle(spaces: readonly Space[], lounge: Space): number {
+  let first: number | undefined;
+  let toOffice: number | undefined;
+  AXIAL_DIRS.forEach(([dq, dr], dir) => {
+    const n = spaces.find((o) => o.q === lounge.q + dq && o.r === lounge.r + dr);
+    if (!n || !wallIsOpen(lounge, n)) return;
+    first ??= DOOR_ANGLES[dir]!;
+    if (n.kind === "office") toOffice = DOOR_ANGLES[dir]!;
+  });
+  return toOffice ?? first ?? LOUNGE_DOOR_ANGLE;
 }
 
 export interface TargetInputs {
@@ -140,7 +157,7 @@ export function computeTargets(inp: TargetInputs): { targets: Record<string, Tar
       if (isFaintedCrash(a)) loungeAgentIds.push(a.id);
     }
     if (loungeAgentIds.length > 0) {
-      const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2));
+      const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2), undefined, loungeDoorAngle(layout.spaces, lounge));
       loungeAssign = assignLoungeSpots(loungeAgentIds, loungeLayout.spots, inp.prevLoungeAssign);
       for (const agentId of loungeAgentIds) {
         const spotId = loungeAssign[agentId];

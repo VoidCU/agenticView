@@ -73,6 +73,14 @@ export interface Palette {
   rugOffice: string;
   rugLounge: string;
   rugLounge2: string;
+  /** My Office: dark wood floor under a warm rug. */
+  woodDark: string;
+  rugMine: string;
+  /** Production Room: dark studio carpet and acoustic fabric. */
+  carpetStudio: string;
+  acoustic: string;
+  /** Research Room: library-green carpet. */
+  carpetResearch: string;
   whiteboard: string;
   lampGlow: string;
   accent: string;
@@ -123,6 +131,11 @@ export const PALETTES: Record<SceneTheme, Palette> = {
     rugOffice: "#35456b",
     rugLounge: "#e1c7a0",
     rugLounge2: "#c9785a",
+    woodDark: "#6e4b32",
+    rugMine: "#b57356",
+    carpetStudio: "#4b505b",
+    acoustic: "#3a3f48",
+    carpetResearch: "#61806b",
     whiteboard: "#fbfbf8",
     lampGlow: "#ffe2a8",
     accent: "#e8a93a",
@@ -171,6 +184,11 @@ export const PALETTES: Record<SceneTheme, Palette> = {
     rugOffice: "#26314f",
     rugLounge: "#7d6a52",
     rugLounge2: "#8a4f3b",
+    woodDark: "#3f2b1e",
+    rugMine: "#7a4330",
+    carpetStudio: "#1e2229",
+    acoustic: "#1b1e24",
+    carpetResearch: "#2c4334",
     whiteboard: "#dcdcd6",
     lampGlow: "#ffc978",
     accent: "#ffc14d",

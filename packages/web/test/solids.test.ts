@@ -7,10 +7,12 @@ import {
   seatPose,
   buildSpaces,
   planOffice,
+  doorPoint,
   type Agent,
 } from "@agenticview/shared";
 import { layoutFor } from "../src/scene/layout";
 import { solidsForLayout, type SolidBox, type SolidCircle } from "../src/scene/solids";
+import { SCOREBOARD_STAND, scoreboardFrame } from "../src/scene/kit";
 import { monitorPoseForSeat } from "../src/scene/DeskMonitor";
 
 const DEG = Math.PI / 180;
@@ -129,49 +131,40 @@ describe("solidsForLayout", () => {
 });
 
 describe("lounge scoreboard placement", () => {
-  const spaces = buildSpaces(1);
-  const lounge = spaces.find((s) => s.kind === "lounge")!;
+  // The lounge is the centre hex of the default plan, so every one of its walls can hold a doorway:
+  // the board stands on a wall run next to the 180 corner (kit scoreboardFrame), never in a doorway.
   const layout = layoutFor([]);
-  const loungeSolids = solidsForLayout(layout).filter(
-    (s) => Math.hypot(s.x - lounge.x, s.z - lounge.z) < HEX_R,
-  );
+  const lounge = layout.spaces.find((s) => s.kind === "lounge")!;
+  const sb = scoreboardFrame();
+  const sbX = lounge.x + sb.x;
+  const sbZ = lounge.z + sb.z;
+  const loungeSolids = solidsForLayout(layout).filter((s) => Math.hypot(s.x - lounge.x, s.z - lounge.z) < HEX_R);
 
-  // Scoreboard location as configured in LoungeScoreboard.tsx
-  const angle = 210 * DEG;
-  const dist = HEX_APOTHEM - 0.08;
-  const sbX = lounge.x + dist * Math.cos(angle);
-  const sbZ = lounge.z + dist * Math.sin(angle);
+  it("stands beside a wall, facing into the room and toward the camera side", () => {
+    const d = Math.hypot(sbX - lounge.x, sbZ - lounge.z);
+    expect(d).toBeGreaterThan(HEX_APOTHEM - 1);
+    expect(d).toBeLessThan(HEX_R);
+    // Facing (sin yaw, cos yaw) points into the room and toward +x/+z.
+    expect(Math.sin(sb.yaw)).toBeGreaterThan(0);
+    expect(Math.cos(sb.yaw)).toBeGreaterThan(0);
+    expect(Math.sin(sb.yaw) * (lounge.x - sbX) + Math.cos(sb.yaw) * (lounge.z - sbZ)).toBeGreaterThan(0);
+  });
 
-  it("is placed on the clear wall facing the camera without overlapping furniture", () => {
-    // Scoreboard should be near the outer wall at 210 degrees
-    const wallDist = Math.hypot(sbX - lounge.x, sbZ - lounge.z);
-    expect(wallDist).toBeCloseTo(HEX_APOTHEM - 0.08, 2);
-
-    // Normal points toward center: (lounge.x - sbX, lounge.z - sbZ)
-    // At angle 210°, vector to center has positive X and positive Z (facing +X, +Z camera)
-    const normalX = lounge.x - sbX;
-    const normalZ = lounge.z - sbZ;
-    expect(normalX).toBeGreaterThan(0);
-    expect(normalZ).toBeGreaterThan(0);
-
-    // Verify distance to all interior furniture (excluding walls)
-    const nonWallSolids = loungeSolids.filter((s) => s.kind !== "wall");
-    for (const solid of nonWallSolids) {
-      const d = Math.hypot(sbX - solid.x, sbZ - solid.z);
-      // All furniture should be at least 1.5 units away from scoreboard
-      expect(d).toBeGreaterThan(1.5);
+  it("never covers a doorway: both board edges stay clear of every doorway gap", () => {
+    for (const side of [-1, 1]) {
+      const ex = sbX + side * (SCOREBOARD_STAND.w / 2) * Math.cos(sb.yaw);
+      const ez = sbZ - side * (SCOREBOARD_STAND.w / 2) * Math.sin(sb.yaw);
+      for (let dir = 0; dir < 6; dir++) {
+        const door = doorPoint(lounge, dir);
+        expect(Math.hypot(ex - door.x, ez - door.z)).toBeGreaterThan(0.9 + 0.2);
+      }
     }
   });
 
-  it("is clear of the kitchenette at corner 240 and sofa at corner 180", () => {
-    const k240Dist = (4.6 * HEX_R) / 6;
-    const kx = lounge.x + k240Dist * Math.cos(240 * DEG);
-    const kz = lounge.z + k240Dist * Math.sin(240 * DEG);
-    expect(Math.hypot(sbX - kx, sbZ - kz)).toBeGreaterThan(2.0);
-
-    const s180Dist = (4.5 * HEX_R) / 6;
-    const sx = lounge.x + s180Dist * Math.cos(180 * DEG);
-    const sz = lounge.z + s180Dist * Math.sin(180 * DEG);
-    expect(Math.hypot(sbX - sx, sbZ - sz)).toBeGreaterThan(2.0);
+  it("has its own collider and keeps clear of the other lounge furniture", () => {
+    expect(loungeSolids.some((s) => s.kind === "scoreboard")).toBe(true);
+    for (const s of loungeSolids.filter((o) => o.kind !== "wall" && o.kind !== "scoreboard")) {
+      expect(Math.hypot(sbX - s.x, sbZ - s.z)).toBeGreaterThan(1.3);
+    }
   });
 });

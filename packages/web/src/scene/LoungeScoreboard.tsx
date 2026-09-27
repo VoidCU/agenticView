@@ -10,12 +10,12 @@ import { useFrame } from "@react-three/fiber";
 import { Html, useCursor } from "@react-three/drei";
 import { useWalk } from "../state/walk";
 import * as THREE from "three";
-import { HEX_APOTHEM, HEX_R, yawToward, type Space } from "@agenticview/shared";
+import type { Space } from "@agenticview/shared";
+import { SCOREBOARD_STAND, scoreboardFrame } from "./kit";
 import type { PlayerStats } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { PALETTES, useSceneTheme } from "./theme";
 
-const DEG = Math.PI / 180;
 
 function buildScoreboardTexture(leaderboard: PlayerStats[], isDark: boolean): THREE.CanvasTexture {
   const W = 512;
@@ -119,12 +119,12 @@ export function LoungeScoreboard({ lounge }: Props) {
     // The ≤1/s constraint is satisfied by React's batched renders.
   });
 
-  // Position: on the clear lounge wall facing the camera (midpoint between 180° and 240°).
-  const angle = 210 * DEG;
-  const dist = HEX_APOTHEM - 0.08;
-  const bx = lounge.x + dist * Math.cos(angle);
-  const bz = lounge.z + dist * Math.sin(angle);
-  const faceYaw = yawToward({ x: bx, z: bz }, { x: lounge.x, z: lounge.z });
+  // Position: on its stand (kit.ts loungeRoom) on the 210° wall run beside the 180° corner, clear of the
+  // doorway (the lounge is the centre hex: every wall of it can hold a doorway).
+  const sb = scoreboardFrame();
+  const bx = lounge.x + sb.x;
+  const bz = lounge.z + sb.z;
+  const faceYaw = sb.yaw;
 
   const handleClick = (e: { stopPropagation(): void; delta: number }) => {
     e.stopPropagation();
@@ -133,14 +133,9 @@ export function LoungeScoreboard({ lounge }: Props) {
 
   return (
     <group position={[bx, 0, bz]} rotation={[0, faceYaw, 0]}>
-      {/* Backing board */}
-      <mesh position={[0, 1.15, -0.01]}>
-        <planeGeometry args={[1.75, 1.15]} />
-        <meshStandardMaterial color="#0d1117" roughness={0.9} />
-      </mesh>
-      {/* Texture plane */}
+      {/* Texture plane, a few mm in front of the kit's board (bezel front face at z -0.005). */}
       <mesh
-        position={[0, 1.15, 0]}
+        position={[0, SCOREBOARD_STAND.y, -0.002]}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
         onPointerOut={() => setHovered(false)}
         onClick={handleClick}

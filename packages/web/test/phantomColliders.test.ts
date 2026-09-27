@@ -14,11 +14,12 @@
  * spilling over open floor, e.g. a solid that lines up with the wrong piece.
  *
  * Both checks run over: the default office (manager office, 4 pods, meeting room, lounge with its
- * game spots, scoreboard and counter), a 30-worker office (ring 2 exists), and an explicit layout
- * with extra rooms placed the way add_room places them (a second meeting room and lounge in ring 2).
+ * game spots, scoreboard and counter, My Office with its wall screen, Production Room, Research Room),
+ * a live re-layout of it (screen walls shared with the lounge, so no doorway there), a 30-worker office
+ * (ring 2 exists), and a legacy explicit layout with extra rooms placed the way add_room placed them.
  */
 import { describe, expect, it } from "vitest";
-import { HEX_R, buildSpacesFromExplicit, hexesForRing, spaceAt, type ExplicitRoom, type Space } from "@agenticview/shared";
+import { HEX_R, applyLayoutMoves, buildSpacesFromExplicit, defaultLayout, hexesForRing, spaceAt, validateLayout, type ExplicitRoom, type OfficeLayout as FloorPlan, type Space } from "@agenticview/shared";
 import { buildColliders, type Solid } from "../src/scene/colliders";
 import { Kit, buildWalls, furnishSpace, type Item } from "../src/scene/kit";
 import { layoutFor, type OfficeLayout } from "../src/scene/layout";
@@ -128,8 +129,29 @@ function explicitRooms(): ExplicitRoom[] {
   return rooms;
 }
 
+/**
+ * A re-laid-out plan (live re-layout): My Office and the Production Room swapped onto hexes where their
+ * screen walls face the lounge (no doorway there), research and the meeting room trade places, and the
+ * manager's office moves out to ring 2.
+ */
+function swappedPlan(): FloorPlan {
+  const plan = applyLayoutMoves(defaultLayout(0), [
+    { space: "myoffice", toHex: { q: 1, r: 0 } },
+    { space: "production", toHex: { q: 0, r: 1 } },
+    { space: "research", toHex: { q: 0, r: -1 } },
+    { space: "office", toHex: { q: 1, r: -2 } },
+  ]);
+  const ok = validateLayout(plan);
+  if (!ok.ok) throw new Error(ok.errors.join("; "));
+  return plan;
+}
+
+/** Room kinds of the default plan (layout as data): My Office, Production and Research are always there. */
+const ALL_KINDS = ["office", "pod", "meeting", "lounge", "myoffice", "production", "research"] as const;
+
 const scenarios: Scenario[] = [
   { name: "default office (ring 1)", layout: layoutFor([manager, ...workers(9)]) },
+  { name: "live re-layout: screen walls face the lounge, office in ring 2", layout: layoutFor([manager, ...workers(9)], undefined, swappedPlan()) },
   { name: "30 workers (ring 2)", layout: layoutFor([manager, ...workers(30)]) },
   {
     name: "explicit rooms via add_room (ring 2 meeting + lounge + pod)",
@@ -142,7 +164,8 @@ describe.each(scenarios)("no phantom barriers: $name", ({ layout }) => {
 
   it("covers the room kinds and rings it claims", () => {
     const kinds = new Set(layout.spaces.map((s) => s.kind));
-    for (const k of ["office", "pod", "meeting", "lounge"]) expect(kinds.has(k as never)).toBe(true);
+    const expected = layout.spaces.some((s) => s.kind === "myoffice") ? ALL_KINDS : (["office", "pod", "meeting", "lounge"] as const);
+    for (const k of expected) expect(kinds.has(k), `missing ${k}`).toBe(true);
     expect(solids.length).toBeGreaterThan(0);
   });
 
