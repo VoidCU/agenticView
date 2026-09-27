@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
   EffortSchema,
-  MODEL_CATALOGUE,
+  catalogueFor,
+  isCustomProvider,
+  getCustomProviders,
   effortsFor,
   findModel,
   isTerminal,
@@ -144,12 +146,19 @@ async function findAgent(ctx: Pick<ManagerToolContext, "registry">, ref: string)
 
 const SESSION_INHERITS = "model/effort ignored: Claude Code session agents run on the model and effort of the session that serves them (use assign_session to pick the session)";
 
+/** ", or a custom provider: custom:x (Label: m1, m2)" for the custom providers configured on this machine. */
+export function customHint(): string {
+  const list = getCustomProviders();
+  if (list.length === 0) return "";
+  return `, or a custom provider: ${list.map((c) => `custom:${c.id} (${c.label}${c.models.length ? `: ${c.models.map((m) => m.id).join(", ")}` : ""})`).join("; ")}`;
+}
+
 /** Validate a per-task model tier for a provider. */
 export function validateTier(provider: Provider, agent: Agent, model: string | undefined, effort: Effort | undefined): { ok: true; tier?: NonNullable<Task["tier"]>; note: string } | { ok: false; error: string } {
   if (model === undefined && effort === undefined) return { ok: true, note: "" };
   if (provider === "claude-session") return { ok: true, note: ` (${SESSION_INHERITS})` };
-  const cat = MODEL_CATALOGUE[provider];
-  if (model !== undefined && !findModel(provider, model)) {
+  const cat = catalogueFor(provider);
+  if (model !== undefined && !findModel(provider, model) && !(isCustomProvider(provider) && cat.models.length === 0)) {
     return { ok: false, error: `ERROR: model "${model}" is not in the ${provider} catalogue. Valid: ${cat.models.map((m) => m.id).join(", ")}` };
   }
   let note = "";
@@ -262,7 +271,7 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
         name: z.string().min(1).max(40),
         specialty: z.string().max(120),
         description: z.string().max(2000).optional(),
-        provider: ProviderSchema.optional().describe("claude (API key), claude-session (a Claude Code session running /agenticview-work), codex, copilot (the GitHub Copilot CLI), antigravity (the Antigravity CLI, agy) or gemini; omit to use the world default"),
+        provider: ProviderSchema.optional().describe(`claude (API key), claude-session (a Claude Code session running /agenticview-work), codex, copilot (the GitHub Copilot CLI), antigravity (the Antigravity CLI, agy) or gemini${customHint()}; omit to use the world default`),
         model: z.string().optional().describe(MODEL_HINT),
         effort: EffortSchema.optional().describe(EFFORT_HINT),
         systemPrompt: z.string().max(20000).optional(),
@@ -306,7 +315,7 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
       description: "Change a worker's provider, model, reasoning effort, specialty or instructions (a lasting change; for one task use assign_task's model/effort). Pass null for model/effort to go back to the provider default. For claude-session agents model and effort are ignored: they run on their session's model, so pick the session with assign_session. After a provider limit, move the agent here, then retry_task the failed task.",
       schema: {
         agentId: z.string(),
-        provider: ProviderSchema.nullable().optional().describe("claude, claude-session, codex, copilot, antigravity or gemini; null for the world default"),
+        provider: ProviderSchema.nullable().optional().describe(`claude, claude-session, codex, copilot, antigravity or gemini${customHint()}; null for the world default`),
         model: z.string().nullable().optional().describe(MODEL_HINT),
         effort: EffortSchema.nullable().optional().describe(EFFORT_HINT),
         specialty: z.string().max(120).optional(),

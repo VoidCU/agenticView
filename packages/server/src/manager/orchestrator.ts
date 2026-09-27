@@ -36,6 +36,8 @@ export interface ResolvedSettings extends ProjectSettings {
   globalDefaultProvider: Provider | null;
   globalDefaultModel: string | null;
   providerModels: Partial<Record<Provider, string | undefined>>;
+  /** The user's provider order over every provider in effect (Automatic, limit summary). Default PROVIDER_ORDER. */
+  providerOrder?: readonly Provider[];
 }
 
 import type { UsageTracker } from "./usageTracker.js";
@@ -134,9 +136,17 @@ export class Orchestrator {
     return !agent.provider && !s.defaultProvider && !s.globalDefaultProvider;
   }
 
-  /** "Automatic": the first provider in PROVIDER_ORDER whose check() is ok, or null when none is. */
+  /** Provider order in effect: the user's order, else PROVIDER_ORDER; then any other registered runtime. */
+  providerOrder(): Provider[] {
+    const base = this.deps.settings().providerOrder ?? PROVIDER_ORDER;
+    const out = base.filter((p) => this.deps.runtimes.has(p));
+    for (const p of this.deps.runtimes.keys()) if (!out.includes(p)) out.push(p);
+    return out;
+  }
+
+  /** "Automatic": the first provider in the provider order whose check() is ok, or null when none is. */
   async autoProvider(): Promise<Provider | null> {
-    for (const p of PROVIDER_ORDER) {
+    for (const p of this.providerOrder()) {
       const rt = this.deps.runtimes.get(p);
       if (rt && (await rt.check()).ok) return p;
     }
@@ -589,7 +599,7 @@ export class Orchestrator {
   /** "Limits now: codex limited until X; antigravity ok; ..." for the configured providers. */
   private limitSummary(): string {
     const parts: string[] = [];
-    for (const p of PROVIDER_ORDER) {
+    for (const p of this.providerOrder()) {
       if (!this.deps.runtimes.has(p)) continue;
       const lim = this.deps.usageTracker?.getProviderLimit(p);
       parts.push(lim?.limited ? `${p} limited${lim.resetAt ? ` until ${lim.resetAt}` : ""}` : `${p} ok`);

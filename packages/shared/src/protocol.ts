@@ -7,6 +7,7 @@ import type { RunEvent } from "./runtime.js";
 import { AgentSessionSchema, MAX_SESSION_CAPACITY, type WorkerSessionInfo } from "./session.js";
 import { LimitInfoSchema, type LimitInfo } from "./limits.js";
 import { MoveSchema, type Match, type GamesData, type GameRoundResult } from "./games.js";
+import { CustomProviderUpsertSchema, KEYED_PROVIDERS, type CustomProviderInfo, type KeyedProvider } from "./providers.js";
 
 export type { Match, GamesData, GameRoundResult };
 
@@ -81,6 +82,10 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("permission.respond"), id: z.string(), allow: z.boolean() }),
   z.object({ type: z.literal("question.respond"), id: z.string(), answer: z.string() }),
   z.object({ type: z.literal("settings.update"), settings: ProjectSettingsSchema.partial() }),
+  z.object({ type: z.literal("provider.setKey"), provider: z.enum(KEYED_PROVIDERS), apiKey: z.string().max(2000).nullable() }),
+  z.object({ type: z.literal("provider.order"), order: z.array(z.string().max(64)).max(64) }),
+  z.object({ type: z.literal("customProvider.upsert"), provider: CustomProviderUpsertSchema }),
+  z.object({ type: z.literal("customProvider.remove"), id: z.string().max(64) }),
   z.object({ type: z.literal("project.open"), path: z.string() }),
   z.object({ type: z.literal("session.rename"), id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) }),
   z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),
@@ -134,6 +139,18 @@ export interface PendingQuestionInfo {
 
 export const SpaceNamesSchema = z.record(z.string(), z.string().trim().min(1).max(40));
 
+/** Global provider configuration the web needs. Never carries key values: only whether each is set. */
+export interface ProviderConfigInfo {
+  /** Custom (OpenAI-/Anthropic-compatible) providers in effect, without their keys. */
+  customProviders: CustomProviderInfo[];
+  /** The user's provider order, resolved over every provider in effect. */
+  providerOrder: Provider[];
+  /** Whether an API key is stored in AgenticView's config for each keyed built-in provider. */
+  providerKeys: Record<KeyedProvider, boolean>;
+  /** True when saved provider config differs from what this office started with (restart to apply). */
+  restartNeeded?: boolean;
+}
+
 export interface Snapshot {
   spaceNames?: Record<string, string>;
   world: WorldInfo;
@@ -143,6 +160,8 @@ export interface Snapshot {
   providers: ProviderStatus[];
   /** What "Automatic" resolves to right now (first available provider), or null when none is. */
   autoProvider?: Provider | null;
+  /** Provider config (custom providers, order, which keys are set). */
+  providerConfig?: ProviderConfigInfo;
   settings: ProjectSettings;
   permissions: PendingPermissionInfo[];
   questions: PendingQuestionInfo[];
@@ -174,7 +193,7 @@ export type ServerMessage =
   | { type: "mirror.event"; event: MirrorEvent }
   | { type: "error"; message: string; ref?: string }
   | { type: "opened"; url: string }
-  | { type: "providers.updated"; providers: ProviderStatus[]; autoProvider: Provider | null }
+  | { type: "providers.updated"; providers: ProviderStatus[]; autoProvider: Provider | null; providerConfig?: ProviderConfigInfo }
   | { type: "sessions.updated"; sessions: WorkerSessionInfo[] }
   | { type: "limit.request"; id: string; agentId: string; taskId: string; suggested?: { provider: Provider; model?: string }; resetAt?: string; reason?: string }
   | { type: "limit.resolved"; id: string }

@@ -1,4 +1,4 @@
-import type { PermissionMode, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
+import type { PermissionMode, Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
 import type { Codex as CodexClass, ThreadEvent, ThreadItem, UserInput, SandboxMode } from "@openai/codex-sdk";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 import { which as defaultWhich, type Which } from "./which.js";
@@ -8,8 +8,21 @@ export interface CodexSdk {
   Codex: typeof CodexClass;
 }
 
+export interface CodexCustomEndpoint {
+  /** Provider id this runtime serves ("custom:<slug>"). */
+  provider: Provider;
+  /** Display name (model_providers.<id>.name). */
+  name: string;
+  baseUrl: string;
+  apiKey?: string;
+  /** Model used when the agent sets none. */
+  defaultModel?: string | null;
+}
+
 export interface CodexRuntimeOptions {
   sdk?: CodexSdk;
+  /** Run against a custom OpenAI-compatible endpoint instead of OpenAI (engine "openai" custom providers). */
+  custom?: CodexCustomEndpoint;
   bridgeEntry: string;
   bridgeUrl: () => string;
   apiKey?: string;
@@ -93,19 +106,20 @@ export function mapCodexEvent(ev: ThreadEvent, started: Set<string>): RunEvent[]
 }
 
 export class CodexRuntime implements Runtime {
-  readonly provider = "codex" as const;
+  readonly provider: Provider;
   private sdk?: CodexSdk;
   private readonly which: Which;
 
   constructor(private readonly opts: CodexRuntimeOptions) {
     this.sdk = opts.sdk;
     this.which = opts.which ?? defaultWhich;
+    this.provider = opts.custom?.provider ?? "codex";
   }
 
   async check(): Promise<ProviderStatus> {
     const bin = await this.which("codex");
-    if (!bin) return { provider: "codex", ok: false, reason: CODEX_MISSING_REASON };
-    return { provider: "codex", ok: true, version: bin };
+    if (!bin) return { provider: this.provider, ok: false, reason: this.opts.custom ? `${this.opts.custom.name} runs through the Codex CLI: ${CODEX_MISSING_REASON}` : CODEX_MISSING_REASON };
+    return { provider: this.provider, ok: true, version: this.opts.custom ? `codex via ${this.opts.custom.baseUrl}` : bin };
   }
 
   private async loadSdk(): Promise<CodexSdk> {
@@ -119,10 +133,7 @@ export class CodexRuntime implements Runtime {
     try {
       if (signal.aborted) return { text, stopReason: "aborted" };
       const sdk = await this.loadSdk();
-      const env: Record<string, string> = {};
-      for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") env[k] = v;
-      if (this.opts.apiKey && !env.CODEX_API_KEY) env.CODEX_API_KEY = this.opts.apiKey;
-      const config: Record<string, unknown> = { approval_policy: "never" };
+      const { env, config } = codexEnvAndConfig(process.env, this.opts);
       if (req.bridgeTools.length > 0) {
         config.mcp_servers = {
           agenticview: {
@@ -137,6 +148,7 @@ export class CodexRuntime implements Runtime {
       }
       const codex = new sdk.Codex({ env, config: config as never });
       const threadOpts = codexThreadOptions(req, process.platform);
+      if (this.opts.custom && !threadOpts.model && this.opts.custom.defaultModel) threadOpts.model = this.opts.custom.defaultModel;
       const thread = req.sessionId ? codex.resumeThread(req.sessionId, threadOpts) : codex.startThread(threadOpts);
 
       const input: UserInput[] = [];
@@ -167,6 +179,8 @@ export class CodexRuntime implements Runtime {
             rateLimits = ev.rate_limits ?? (ev as unknown as RunResult["rateLimits"]);
           }
           for (const mapped of mapCodexEvent(ev, started)) {
+            // Codex has no metadata for a custom endpoint's models and says so on every run; not an error for the user.
+            if (this.opts.custom && mapped.type === "status" && /^error: Model metadata for/.test(mapped.text)) continue;
             if (mapped.type === "text") text += (text ? "\n\n" : "") + mapped.text;
             sink(mapped);
           }
@@ -192,4 +206,42 @@ export function codexThreadOptions(req: RunRequest, platform: NodeJS.Platform): 
   if (req.model) opts.model = req.model;
   if (req.effort) opts.modelReasoningEffort = req.effort;
   return opts;
+}
+
+/** Env var a custom endpoint's key is passed in (model_providers.<id>.env_key); only ever in the child env. */
+export const CUSTOM_KEY_ENV = "AGENTICVIEW_CUSTOM_KEY";
+
+/** Codex config-table id for a custom provider ("custom:my-llm" -> "agenticview_my_llm"). */
+export function codexProviderId(provider: string): string {
+  return `agenticview_${provider.replace(/^custom:/, "").replace(/[^a-z0-9]/gi, "_")}`;
+}
+
+/**
+ * Child env and `--config` overrides for one Codex run. For a custom OpenAI-compatible endpoint the
+ * overrides define `model_providers.<id>` (Responses API; codex 0.156 dropped the chat wire API) and select
+ * it with `model_provider`, so the user's ~/.codex config and login stay untouched. Keys go to the child
+ * env only, never into this process's env.
+ */
+export function codexEnvAndConfig(
+  base: NodeJS.ProcessEnv,
+  opts: Pick<CodexRuntimeOptions, "apiKey" | "custom">,
+): { env: Record<string, string>; config: Record<string, unknown> } {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base)) if (typeof v === "string") env[k] = v;
+  const config: Record<string, unknown> = { approval_policy: "never" };
+  const custom = opts.custom;
+  if (custom) {
+    const id = codexProviderId(custom.provider);
+    const entry: Record<string, unknown> = { name: custom.name, base_url: custom.baseUrl, wire_api: "responses" };
+    delete env[CUSTOM_KEY_ENV];
+    if (custom.apiKey) {
+      env[CUSTOM_KEY_ENV] = custom.apiKey;
+      entry.env_key = CUSTOM_KEY_ENV;
+    }
+    config.model_provider = id;
+    config.model_providers = { [id]: entry };
+  } else if (opts.apiKey && !env.CODEX_API_KEY) {
+    env.CODEX_API_KEY = opts.apiKey;
+  }
+  return { env, config };
 }

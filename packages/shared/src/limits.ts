@@ -57,7 +57,7 @@ export const ProviderLimitsEntrySchema = z.object({
 export type ProviderLimitsEntry = z.infer<typeof ProviderLimitsEntrySchema>;
 
 export const LimitsReportSchema = z.object({
-  providers: z.record(ProviderSchema, ProviderLimitsEntrySchema),
+  providers: z.record(z.string(), ProviderLimitsEntrySchema),
   updatedAt: z.string(),
 });
 export type LimitsReport = z.infer<typeof LimitsReportSchema>;
@@ -79,7 +79,9 @@ export type UsageAggregate = z.infer<typeof UsageAggregateSchema>;
 
 export const UsageReportSchema = z.object({
   agents: z.record(z.string(), UsageAggregateSchema),
-  providers: z.record(ProviderSchema, UsageAggregateSchema),
+  providers: z.record(z.string(), UsageAggregateSchema),
+  /** Per provider + model (runs record the model they used, "default" when none was set). */
+  models: z.array(z.object({ provider: ProviderSchema, model: z.string(), usage: UsageAggregateSchema })).optional(),
   updatedAt: z.string(),
 });
 export type UsageReport = z.infer<typeof UsageReportSchema>;

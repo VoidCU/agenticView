@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentSchema, AgentPatchSchema, EffortSchema, MODEL_CATALOGUE, ProviderSchema, defaultAgent, effectiveEffort, effortsFor, findModel, modelLabel } from "../src/index.js";
+import { AgentSchema, AgentPatchSchema, EffortSchema, MODEL_CATALOGUE, ProviderSchema, BuiltinProviderSchema, defaultAgent, effectiveEffort, effortsFor, findModel, modelLabel } from "../src/index.js";
 
 describe("antigravity catalogue", () => {
   it("hides effort for ids that encode it and offers low..max otherwise", () => {
@@ -14,7 +14,7 @@ describe("antigravity catalogue", () => {
 
 describe("model catalogue", () => {
   it("covers every provider with unique ids and valid efforts", () => {
-    for (const p of ProviderSchema.options) {
+    for (const p of BuiltinProviderSchema.options) {
       const cat = MODEL_CATALOGUE[p];
       const ids = cat.models.map((m) => m.id);
       expect(new Set(ids).size).toBe(ids.length);

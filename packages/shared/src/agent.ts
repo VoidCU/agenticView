@@ -4,8 +4,25 @@ import { EffortSchema } from "./models.js";
 import { AgentSessionSchema } from "./session.js";
 import { LimitInfoSchema } from "./limit-info.js";
 
-export const ProviderSchema = z.enum(["claude", "claude-session", "codex", "copilot", "antigravity", "gemini"]);
-export type Provider = z.infer<typeof ProviderSchema>;
+export const BUILTIN_PROVIDERS = ["claude", "claude-session", "codex", "copilot", "antigravity", "gemini"] as const;
+export const BuiltinProviderSchema = z.enum(BUILTIN_PROVIDERS);
+export type BuiltinProvider = z.infer<typeof BuiltinProviderSchema>;
+/** Prefix of a user-configured provider id ("custom:<slug>"); the slug is the entry's id in config.providers.custom. */
+export const CUSTOM_PROVIDER_PREFIX = "custom:";
+export type CustomProviderRef = `custom:${string}`;
+export const CUSTOM_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const CustomProviderRefSchema = z
+  .string()
+  .regex(/^custom:[a-z0-9][a-z0-9-]{0,31}$/, "custom provider ids look like custom:<slug>") as unknown as z.ZodType<CustomProviderRef>;
+/** A built-in provider, or a user-configured OpenAI-/Anthropic-compatible endpoint ("custom:<slug>"). */
+export const ProviderSchema = z.union([BuiltinProviderSchema, CustomProviderRefSchema]);
+export type Provider = BuiltinProvider | CustomProviderRef;
+export function isCustomProvider(p: string | null | undefined): p is CustomProviderRef {
+  return typeof p === "string" && p.startsWith(CUSTOM_PROVIDER_PREFIX);
+}
+export function isBuiltinProvider(p: string | null | undefined): p is BuiltinProvider {
+  return typeof p === "string" && (BUILTIN_PROVIDERS as readonly string[]).includes(p);
+}
 export const RoleSchema = z.enum(["manager", "worker"]);
 export type Role = z.infer<typeof RoleSchema>;
 export const ScopeSchema = z.enum(["project", "global"]);
@@ -141,9 +158,9 @@ export function defaultAgent(init: AgentInit): Agent {
 }
 
 /** Automatic provider resolution order: the first provider whose check() is ok wins. */
-export const PROVIDER_ORDER: readonly Provider[] = ["claude", "claude-session", "codex", "copilot", "antigravity", "gemini"];
+export const PROVIDER_ORDER: readonly BuiltinProvider[] = ["claude", "claude-session", "codex", "copilot", "antigravity", "gemini"];
 
-export const PROVIDER_LABELS: Record<Provider, string> = {
+export const PROVIDER_LABELS: Record<BuiltinProvider, string> = {
   claude: "Claude",
   "claude-session": "Claude Code session",
   codex: "Codex",
