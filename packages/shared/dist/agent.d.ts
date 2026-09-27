@@ -3,6 +3,7 @@ export declare const ProviderSchema: z.ZodEnum<{
     claude: "claude";
     "claude-session": "claude-session";
     codex: "codex";
+    copilot: "copilot";
     antigravity: "antigravity";
     gemini: "gemini";
 }>;
@@ -64,6 +65,7 @@ export declare const AgentReviveSchema: z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            copilot: "copilot";
             antigravity: "antigravity";
             gemini: "gemini";
         }>;
@@ -90,6 +92,7 @@ export declare const AgentSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>;
@@ -162,6 +165,7 @@ export declare const AgentSchema: z.ZodObject<{
                 claude: "claude";
                 "claude-session": "claude-session";
                 codex: "codex";
+                copilot: "copilot";
                 antigravity: "antigravity";
                 gemini: "gemini";
             }>;

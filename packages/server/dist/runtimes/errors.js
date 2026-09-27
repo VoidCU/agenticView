@@ -64,6 +64,8 @@ export function extractCliError(raw) {
         /usage limit/i.test(l) ||
         /rate limit/i.test(l) ||
         /quota/i.test(l) ||
+        /premium request/i.test(l) ||
+        /ai credit/i.test(l) ||
         /unauthorized/i.test(l) ||
         /\b429\b/.test(l) ||
         /\b401\b/.test(l));
@@ -91,7 +93,15 @@ export function classifyError(errorText) {
         /insufficient funds/.test(text) ||
         /billing/.test(text) ||
         /exceeded your.*quota/.test(text) ||
-        /plan limit/.test(text)) {
+        /plan limit/.test(text) ||
+        // GitHub Copilot CLI (not observed live, patterns from its billing/limits docs): premium requests /
+        // AI credits exhausted, a --max-ai-credits session limit, or a weekly/monthly model limit.
+        /premium requests?\b.*\b(limit|exhausted|exceeded|reached|used up|run out)/.test(text) ||
+        /\b(limit|exhausted|exceeded|reached|out of)\b.*premium requests?/.test(text) ||
+        /ai credits?\b.*\b(limit|exhausted|exceeded|reached|used up|run out)/.test(text) ||
+        /\b(limit|exhausted|exceeded|reached|out of)\b.*ai credits?/.test(text) ||
+        /session limits? (?:has been |was )?reached/.test(text) ||
+        /(weekly|monthly) (?:usage |rate )?limit/.test(text)) {
         return "quota";
     }
     // 2. Rate limit / 429 / throttling

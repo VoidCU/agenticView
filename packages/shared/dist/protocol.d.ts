@@ -11,6 +11,7 @@ export declare const ProviderStatusSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>;
@@ -52,6 +53,7 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
@@ -102,6 +104,7 @@ export declare const AgentPatchSchema: z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
@@ -156,6 +159,7 @@ export declare const AgentPatchSchema: z.ZodObject<{
                 claude: "claude";
                 "claude-session": "claude-session";
                 codex: "codex";
+                copilot: "copilot";
                 antigravity: "antigravity";
                 gemini: "gemini";
             }>;
@@ -193,6 +197,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            copilot: "copilot";
             antigravity: "antigravity";
             gemini: "gemini";
         }>>>;
@@ -245,6 +250,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            copilot: "copilot";
             antigravity: "antigravity";
             gemini: "gemini";
         }>>>;
@@ -299,6 +305,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     claude: "claude";
                     "claude-session": "claude-session";
                     codex: "codex";
+                    copilot: "copilot";
                     antigravity: "antigravity";
                     gemini: "gemini";
                 }>;
@@ -324,6 +331,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>>;
@@ -343,6 +351,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>;
@@ -350,6 +359,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>;
@@ -381,6 +391,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            copilot: "copilot";
             antigravity: "antigravity";
             gemini: "gemini";
         }>>>>;
@@ -395,6 +406,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             claude: "claude";
             "claude-session": "claude-session";
             codex: "codex";
+            copilot: "copilot";
             antigravity: "antigravity";
             gemini: "gemini";
         }>>>>;
@@ -436,6 +448,7 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         claude: "claude";
         "claude-session": "claude-session";
         codex: "codex";
+        copilot: "copilot";
         antigravity: "antigravity";
         gemini: "gemini";
     }>>;

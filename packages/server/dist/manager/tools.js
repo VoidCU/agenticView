@@ -16,7 +16,7 @@ Rules:
 - Group agents by role and name their rooms with rename_space. Move collaborators next to each other while they work on the same task.
 - Use brainstorm for design questions that need several experts; repeat the same topic after stillRunning until the summary is ready.
 - Claude Code session agents (provider claude-session) run on the model and effort of the session that serves them; you cannot set a model for them. The user usually keeps one Opus session and one Sonnet session open. Call list_sessions to see each session's model, capacity, load and bound agents, then route with assign_session before assign_task: hard, architectural or cross-cutting work goes to the strongest-model session (e.g. Opus); routine edits, tests and docs go to Sonnet sessions. Balance load across online sessions with free slots, and never leave a task waiting on a full or offline session while another suitable session has a free slot (move the agent with assign_session, or "any").
-- Model tiers for codex, antigravity and gemini agents: assign_task takes optional model and effort for that task only. Default to the cheap tier (codex gpt-6-luna with effort medium; antigravity gemini-3.8-flash-medium; gemini flash). Step up to the strong tier (codex gpt-6-sol; antigravity gemini-3.8-flash-high or gemini-3.1-pro-high; gemini pro) only for genuinely hard tasks (tricky debugging, architecture, large refactors, subtle concurrency or security work), and say why in the task description.
+- Model tiers for codex, copilot, antigravity and gemini agents: assign_task takes optional model and effort for that task only. Default to the cheap tier (codex gpt-6-luna with effort medium; copilot auto; antigravity gemini-3.8-flash-medium; gemini flash). Step up to the strong tier (codex gpt-6-sol; copilot gpt-5.6-sol or claude-opus-5; antigravity gemini-3.8-flash-high or gemini-3.1-pro-high; gemini pro) only for genuinely hard tasks (tricky debugging, architecture, large refactors, subtle concurrency or security work), and say why in the task description.
 - Workers keep a memory of their recent tasks that survives provider and model switches, so a task retried on another provider continues where it left off; you do not need to repeat earlier context.
 - "## Provider notes" in the preamble report agents that hit a provider limit and were failed over automatically. Review each with proper analysis: how hard the task is, what limits remain (usage/limit status), and which provider/model/session fits. Then place the agent well with update_agent, assign_session or a per-task model, and retry the failed task with retry_task if it still needs doing (or it was already retried by the failover: then leave it running unless the placement is clearly wrong).
 - You never edit files yourself.
@@ -34,8 +34,8 @@ export function workerSystemPrompt(agent, projectPath) {
         .filter(Boolean)
         .join("\n\n");
 }
-const MODEL_HINT = "Model id or alias for the agent's provider, e.g. claude: opus | sonnet | haiku | fable; codex: gpt-6-sol; antigravity: gemini-3.8-flash-high | gemini-3.1-pro-high | claude-sonnet-4-6 | claude-opus-4-6-thinking (run `agy models`); gemini: pro | flash. Omit for the provider default.";
-const EFFORT_HINT = "Reasoning effort: low | medium | high (claude also xhigh | max; codex also xhigh | max | ultra on supporting models; antigravity also max, ignored for its -high/-medium/-low model ids; ignored for gemini). Omit for the default.";
+const MODEL_HINT = "Model id or alias for the agent's provider, e.g. claude: opus | sonnet | haiku | fable; codex: gpt-6-sol; copilot: auto (Copilot routes per request) | gpt-5.6-sol | claude-sonnet-5 | claude-opus-5 (availability depends on the user's Copilot plan); antigravity: gemini-3.8-flash-high | gemini-3.1-pro-high | claude-sonnet-4-6 | claude-opus-4-6-thinking (run `agy models`); gemini: pro | flash. Omit for the provider default.";
+const EFFORT_HINT = "Reasoning effort: low | medium | high (claude also xhigh | max; codex also xhigh | max | ultra on supporting models; copilot also minimal | xhigh | max, ignored for copilot model auto; antigravity also max, ignored for its -high/-medium/-low model ids; ignored for gemini). Omit for the default.";
 function agentLine(a, tasks, sessions = []) {
     const active = tasks.find((t) => t.assigneeId === a.id && (t.status === "running" || t.status === "waiting"));
     const base = { id: a.id, name: a.name, scope: a.scope, specialty: a.specialty, provider: a.provider ?? "default" };
@@ -204,7 +204,7 @@ export function managerTools(ctx) {
                 name: z.string().min(1).max(40),
                 specialty: z.string().max(120),
                 description: z.string().max(2000).optional(),
-                provider: ProviderSchema.optional().describe("claude (API key), claude-session (a Claude Code session running /agenticview-work), codex, antigravity (the Antigravity CLI, agy) or gemini; omit to use the world default"),
+                provider: ProviderSchema.optional().describe("claude (API key), claude-session (a Claude Code session running /agenticview-work), codex, copilot (the GitHub Copilot CLI), antigravity (the Antigravity CLI, agy) or gemini; omit to use the world default"),
                 model: z.string().optional().describe(MODEL_HINT),
                 effort: EffortSchema.optional().describe(EFFORT_HINT),
                 systemPrompt: z.string().max(20000).optional(),
@@ -249,7 +249,7 @@ export function managerTools(ctx) {
             description: "Change a worker's model, reasoning effort, provider, specialty or instructions. Pass null for model/effort to go back to the provider default.",
             schema: {
                 agentId: z.string(),
-                provider: ProviderSchema.nullable().optional().describe("claude, claude-session, codex, antigravity or gemini; null for the world default"),
+                provider: ProviderSchema.nullable().optional().describe("claude, claude-session, codex, copilot, antigravity or gemini; null for the world default"),
                 model: z.string().nullable().optional().describe(MODEL_HINT),
                 effort: EffortSchema.nullable().optional().describe(EFFORT_HINT),
                 specialty: z.string().max(120).optional(),
@@ -289,7 +289,7 @@ export function managerTools(ctx) {
                 title: z.string().min(1).max(120),
                 description: z.string().min(1).describe("Self-contained instructions: what, where, how to verify"),
                 projectPath: z.string().optional().describe("Target project path (hub only, or a global agent working in another known project)"),
-                model: z.string().optional().describe("Per-task model tier for THIS task only (codex: gpt-6-luna cheap | gpt-6-sol strong; antigravity: gemini-3.8-flash-medium cheap | gemini-3.8-flash-high / gemini-3.1-pro-high strong; gemini: flash cheap | pro strong). Ignored for claude-session agents."),
+                model: z.string().optional().describe("Per-task model tier for THIS task only (codex: gpt-6-luna cheap | gpt-6-sol strong; copilot: auto cheap | gpt-5.6-sol / claude-opus-5 strong; antigravity: gemini-3.8-flash-medium cheap | gemini-3.8-flash-high / gemini-3.1-pro-high strong; gemini: flash cheap | pro strong). Ignored for claude-session agents."),
                 effort: EffortSchema.optional().describe("Per-task reasoning effort for THIS task only (validated for the model). Ignored for claude-session agents."),
             },
             handler: async (args) => {
