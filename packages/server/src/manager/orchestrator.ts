@@ -23,6 +23,7 @@ import {
 import { classifyError } from "../runtimes/errors.js";
 import type { AgentRegistry, WorldRef } from "../agents/registry.js";
 import type { TaskService } from "../tasks/taskService.js";
+import { coverInsteadOfRetry } from "../tasks/retryGuard.js";
 import type { BridgeTool, Runtime, RunRequest } from "../runtimes/types.js";
 import type { ToolRegistry } from "../bridge/toolRegistry.js";
 import type { EventBus } from "../events/bus.js";
@@ -456,10 +457,11 @@ export class Orchestrator {
         revive: { phase: "done", failedTaskId, ...(cause ? { cause } : {}), ...(failedProvider ? { failedProvider } : {}), switchTo: { provider: provider ?? null, model: model ?? null } },
       });
       this.emitAgent(updated);
-      // Retry the task.
+      // Retry the task, unless its work is already covered (resolved, or a done replacement exists):
+      // then it is marked solved instead of re-run.
       if (failedTaskId) {
         const task = await tasks.get(failedTaskId);
-        if (task && task.status === "failed") {
+        if (task && task.status === "failed" && !(await coverInsteadOfRetry(tasks, failedTaskId))) {
           await tasks.transition(failedTaskId, "queued", { error: undefined, result: undefined });
           this.startTask(failedTaskId);
         }
@@ -558,7 +560,9 @@ export class Orchestrator {
       const target = this.deps.world.kind === "hub" && task.projectPath ? `\n\nTarget project: ${task.projectPath} (pass this as projectPath to assign_task)` : "";
       const notes = this.takeProviderNotes();
       const notesBlock = notes.length ? `\n\n## Provider notes\n${notes.map((n) => `- ${n}`).join("\n")}` : "";
-      text = `${preamble}${target}${notesBlock}\n\n## User request\n${task.description}`;
+      // The request's own id: tasks assigned now get it as parentId (the closing rule's failed children).
+      const self = `\n\nThis request is task ${task.id}; the tasks you assign are its children (parentId ${task.id}).`;
+      text = `${preamble}${target}${notesBlock}${self}\n\n## User request\n${task.description}`;
     } else {
       const body = task.kind === "work" ? `${task.title}\n\n${task.description}` : task.description;
       if (agent.role === "worker" && provider !== "claude-session") {
