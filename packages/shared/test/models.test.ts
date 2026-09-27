@@ -70,3 +70,16 @@ describe("agent effort persistence", () => {
     expect(AgentPatchSchema.parse({ effort: null }).effort).toBeNull();
   });
 });
+
+describe("copilot catalogue", () => {
+  it("offers Auto first with no effort, and minimal..max for picked models", () => {
+    expect(MODEL_CATALOGUE.copilot.models[0]).toMatchObject({ id: "auto", efforts: [] });
+    expect(effortsFor("copilot", null)).toEqual([]);
+    expect(effectiveEffort("copilot", "auto", "high")).toBeNull();
+    expect(effortsFor("copilot", "gpt-5.6-luna")).toEqual(["minimal", "low", "medium", "high", "xhigh", "max"]);
+    expect(effectiveEffort("copilot", "claude-sonnet-5", "ultra")).toBeNull();
+    expect(MODEL_CATALOGUE.copilot.allowCustom).toBe(true);
+    expect(ProviderSchema.parse("copilot")).toBe("copilot");
+    expect(modelLabel("copilot", "gpt-5.6-sol")).toBe("GPT-5.6-Sol");
+  });
+});
