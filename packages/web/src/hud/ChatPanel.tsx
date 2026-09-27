@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState, type ClipboardEvent, ty
 import { EFFORT_LABELS, effectiveEffort, modelLabel, type Agent, type RunEvent } from "@agenticview/shared";
 import { useStore, useAgentStatus, type FeedItem } from "../state/store";
 import { useWalkChat } from "../state/walkChat";
+import { RPS_BUSY_LINE, agentOnTask } from "../state/rps";
 import { uploadImage } from "../net/ws";
 import { AgentMenu } from "./AgentMenu";
 import { LimitChip, SwitchAgentModal } from "./LimitChip";
@@ -85,6 +86,27 @@ function Feed({ items }: { items: FeedItem[] }) {
   );
 }
 
+/**
+ * Rock-paper-scissors from the conversation (an overview click on a robot opens its chat, not the
+ * game). Disabled with the agent's reason while it is busy on a task, like the agent menu's item.
+ */
+function PlayRpsButton({ agent }: { agent: Agent }) {
+  const busy = useStore((s) => agentOnTask(s.tasks, agent.id));
+  return (
+    <button
+      type="button"
+      className="btn btn-ghost btn-xs chat-rps"
+      disabled={busy}
+      aria-label={`Play rock-paper-scissors with ${agent.name}`}
+      title={busy ? `${agent.name} is busy on a task: "${RPS_BUSY_LINE}"` : `Play rock-paper-scissors with ${agent.name}`}
+      data-testid="chat-play-rps"
+      onClick={() => window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: agent.id } }))}
+    >
+      Play RPS
+    </button>
+  );
+}
+
 function Header({ agent, onCollapse }: { agent: Agent; onCollapse?: () => void }) {
   const status = useAgentStatus(agent.id);
   const providers = useStore((s) => s.providers);
@@ -129,6 +151,7 @@ function Header({ agent, onCollapse }: { agent: Agent; onCollapse?: () => void }
       </div>
       {/* One flex row, never stacked: actions menu, then Collapse at the far right. */}
       <div className="chat-head-actions">
+        <PlayRpsButton agent={agent} />
         <AgentMenu agent={agent} />
         {onCollapse && <button type="button" className="chat-collapse btn btn-ghost btn-xs" onClick={onCollapse} aria-label="Collapse chat">Collapse</button>}
       </div>

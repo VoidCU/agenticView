@@ -12,6 +12,7 @@ import { stepPath, useEngage, yawToViewer } from "./engage";
 import { agentActivityText } from "./selectors";
 import { useWalk } from "../state/walk";
 import { useHudPrefs } from "../state/hudPrefs";
+import { overviewAgentClick } from "../state/agentClick";
 import { WALK_BUBBLE_DISTANCE_FACTOR, bonk, bonkLooking, bonkState, bubbleAnchorY, interactionNod, interactionWobble } from "../state/bonk";
 import { ROBOT_SCALE, basicMat, physMat, robotGeoms, stdMat } from "./robotParts";
 
@@ -109,6 +110,18 @@ function Eyes({
 }
 
 const EYE_X = [-0.2, 0.2] as const;
+
+/**
+ * A click on a robot's body in the overview: Alt+click bonks; otherwise (unless it ends a drag) it
+ * toggles the selection, then calls `onBodyClick` (Office passes overviewAgentClick: open the chat).
+ */
+export function robotClick(agentId: string, altKey: boolean, onBodyClick?: (agentId: string) => void): void {
+  if (altKey) { bonk(agentId); return; }
+  if (Date.now() - useDrag.getState().droppedAt < 250) return;
+  const { selectedAgentId, select } = useStore.getState();
+  select(selectedAgentId === agentId ? undefined : agentId);
+  onBodyClick?.(agentId);
+}
 
 export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, statusBubble, onArrive, onGrab, onBodyClick, children, fainted = false }: Props) {
   const _status = useAgentStatus(agent.id);
@@ -335,11 +348,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, statusBu
 
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    // Alt+click: a playful bonk instead of selecting.
-    if (e.altKey) { bonk(agent.id); return; }
-    if (Date.now() - useDrag.getState().droppedAt < 250) return;
-    select(selected ? undefined : agent.id);
-    onBodyClick?.(agent.id);
+    robotClick(agent.id, e.altKey, onBodyClick);
   };
 
   return (
@@ -449,7 +458,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, statusBu
               ) : question ? (
                 <>
                   <div className="bubble-title">{question.question}</div>
-                  <button type="button" className="btn btn-primary btn-xs" onClick={() => select(agent.id)}>
+                  <button type="button" className="btn btn-primary btn-xs" onClick={() => { select(agent.id); overviewAgentClick(agent.id); }}>
                     Answer in chat
                   </button>
                 </>
@@ -461,7 +470,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, statusBu
           <button
             type="button"
             className="tag"
-            onClick={() => select(selected ? undefined : agent.id)}
+            onClick={() => { select(selected ? undefined : agent.id); overviewAgentClick(agent.id); }}
             style={{
               borderColor: statusColor,
               display: "flex",

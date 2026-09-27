@@ -3507,6 +3507,8 @@ kbd {
 
 .chat-head-actions { flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .chat-head-actions > .menu-wrap > .icon-btn, .chat-collapse { min-width: 24px; min-height: 28px; }
+.chat-rps { min-height: 28px; white-space: nowrap; }
+.chat-rps:disabled { opacity: .5; cursor: not-allowed; }
 .topbar { flex-wrap: wrap; gap: 8px; }
 .topbar-left, .topbar-mid, .topbar-right { min-width: 0; }
 .topbar-right { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }

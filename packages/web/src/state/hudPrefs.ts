@@ -7,6 +7,12 @@ interface HudPrefs {
   setShowTags(value: boolean): void;
   setChatCollapsed(value: boolean): void;
   setTasksCollapsed(value: boolean): void;
+  /**
+   * Expand the Chat panel for now without changing the saved preference: opening an agent's chat
+   * (an overview robot click, C in walk mode) reveals it, but a user who keeps chat collapsed gets it
+   * collapsed again on reload, and collapsing it themselves simply puts it back.
+   */
+  showChat(): void;
 }
 
 function read(key: string, fallback: boolean): boolean {
@@ -20,4 +26,5 @@ export const useHudPrefs = create<HudPrefs>((set) => ({
   setShowTags: (showTags) => { write("show-tags", showTags); set({ showTags }); },
   setChatCollapsed: (chatCollapsed) => { write("chat-collapsed", chatCollapsed); set({ chatCollapsed }); },
   setTasksCollapsed: (tasksCollapsed) => { write("tasks-collapsed", tasksCollapsed); set({ tasksCollapsed }); },
+  showChat: () => set({ chatCollapsed: false }),
 }));

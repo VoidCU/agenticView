@@ -33,6 +33,7 @@ import { usePositions, type AgentActivity, type AgentPosition } from "../state/p
 import { computeTargets, nextVisitExpiry, workingAgentIds } from "./targets";
 import { ShadowScheduler, applyRenderTuning } from "./renderTuning";
 import { ingestMessage } from "../net/ws";
+import { overviewAgentClick } from "../state/agentClick";
 
 const DEG = Math.PI / 180;
 
@@ -948,7 +949,6 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
         const home = managerHome(office);
         const limitW = limitWalk(a);
         const isFainted = isFaintedCrash(a);
-        const isLounging = a.lounging === true && a.role === "worker";
         return (
           <Robot
             key={a.id}
@@ -958,7 +958,8 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
             spawnAt={fresh ? { x: home.x + 1.6, z: home.z + 1.6 } : undefined}
             onArrive={a.role === "manager" ? onArrive : undefined}
             onGrab={a.role === "worker" && !isFainted ? onGrab : undefined}
-            onBodyClick={isLounging ? (agentId) => window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId } })) : undefined}
+            // Any agent, lounging or not: the click opens its conversation (RPS is in the chat header).
+            onBodyClick={overviewAgentClick}
             fainted={isFainted}
             statusBubble={limitW ? limitWalkBubble(limitW) : undefined}
           >

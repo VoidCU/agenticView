@@ -38,7 +38,7 @@ export function openWalkChat(agentId: string, doc: Document = document): void {
   // A second C on another agent keeps the original "before" state and the one pointer release.
   const prevCollapsed = prev ? prev.prevCollapsed : hud.chatCollapsed;
   const release = prev?.release ?? openOverlayFromWalk(doc);
-  if (hud.chatCollapsed) hud.setChatCollapsed(false);
+  if (hud.chatCollapsed) hud.showChat();
   useStore.getState().select(agentId);
   useWalkChat.setState((s) => ({ session: { agentId, prevCollapsed, release }, focusSeq: s.focusSeq + 1 }));
 }

@@ -1,6 +1,6 @@
 /**
- * Challenging an agent to rock-paper-scissors (walk-mode G, the agent menu, a click on a lounging
- * robot, the scoreboard). An agent that is idle or on a break pauses and plays (scene/engage.ts);
+ * Challenging an agent to rock-paper-scissors (walk-mode G, the chat header's Play button, the agent
+ * menu, the scoreboard; an overview click on a robot opens its chat, never the game). An agent that is idle or on a break pauses and plays (scene/engage.ts);
  * one that is busy on a task politely declines with a bubble instead of opening the popup.
  */
 import type { GameRoundResult, Move, Task } from "@agenticview/shared";

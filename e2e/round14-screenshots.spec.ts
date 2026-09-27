@@ -2,7 +2,8 @@
  * Round 14 review screenshots, light and dark, 1440x900:
  *  - walk-mode whiteboards drawn as the popup's pinned notes (Pod A's tasks, the Manager board's requests);
  *  - the Manager board popup's "View timeline" rows, and the request's workflow swapped into the dialog;
- *  - C near an agent in walk mode: its chat opens expanded and focused; Esc collapses it and walking resumes.
+ *  - C near an agent in walk mode: its chat opens expanded and focused; Esc collapses it and walking resumes;
+ *  - an overview click on an agent opens its chat (never the game); Play RPS in the chat header.
  *
  * Runs when AGENTICVIEW_SCREENSHOTS=1 npm run test:e2e. Saved to e2e/screenshots/ (gitignored).
  */
@@ -114,5 +115,28 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.getByTestId("walk-hint")).toContainText("Click the view to look around");
     await page.screenshot({ path: `e2e/screenshots/r14-walk-chat-closed-${theme}-1440x900.png` });
     await page.evaluate(() => (window as unknown as W).__setWalking?.(false));
+  });
+
+  test(`${theme}: an overview click on an agent opens its chat; the game is one click further`, async ({ page }) => {
+    mkdirSync("e2e/screenshots", { recursive: true });
+    await page.emulateMedia({ colorScheme: theme });
+    await page.addInitScript(() => localStorage.setItem("av:hud:chat-collapsed", "true"));
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Expand chat" })).toBeVisible();
+    let plays = 0;
+    await page.exposeFunction("__countPlay", () => { plays++; });
+    await page.evaluate(() => window.addEventListener("agenticview:play-rps", () => (window as unknown as { __countPlay(): void }).__countPlay()));
+    await page.locator("button.tag", { hasText: "Atlas" }).click();
+    const chat = page.getByRole("complementary", { name: "Chat with Atlas" });
+    await expect(chat).toBeVisible();
+    await expect(chat.getByTestId("chat-play-rps")).toBeVisible();
+    expect(plays).toBe(0); // the click opened the conversation, not the game
+    await page.screenshot({ path: `e2e/screenshots/r14-overview-click-chat-${theme}-1440x900.png` });
+    await chat.getByTestId("chat-play-rps").click();
+    await expect(page.getByTestId("play-rps-modal")).toBeVisible();
+    await page.screenshot({ path: `e2e/screenshots/r14-chat-play-rps-${theme}-1440x900.png` });
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("play-rps-modal")).toBeHidden();
   });
 }
