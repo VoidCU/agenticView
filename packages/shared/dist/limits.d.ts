@@ -33,14 +33,14 @@ export declare const ClaudeLimitsBodySchema: z.ZodObject<{
 }, z.core.$strip>;
 export type ClaudeLimitsBody = z.infer<typeof ClaudeLimitsBodySchema>;
 export declare const ProviderModelLimitsSchema: z.ZodObject<{
-    provider: z.ZodEnum<{
+    provider: z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
     model: z.ZodString;
     fiveHour: z.ZodDiscriminatedUnion<[z.ZodObject<{
         status: z.ZodLiteral<"not reported">;
@@ -78,14 +78,14 @@ export declare const ProviderLimitsEntrySchema: z.ZodObject<{
         resetAt: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
     models: z.ZodRecord<z.ZodString, z.ZodObject<{
-        provider: z.ZodEnum<{
+        provider: z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
-        }>;
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
         model: z.ZodString;
         fiveHour: z.ZodDiscriminatedUnion<[z.ZodObject<{
             status: z.ZodLiteral<"not reported">;
@@ -112,14 +112,7 @@ export declare const ProviderLimitsEntrySchema: z.ZodObject<{
 }, z.core.$strip>;
 export type ProviderLimitsEntry = z.infer<typeof ProviderLimitsEntrySchema>;
 export declare const LimitsReportSchema: z.ZodObject<{
-    providers: z.ZodRecord<z.ZodEnum<{
-        claude: "claude";
-        "claude-session": "claude-session";
-        codex: "codex";
-        copilot: "copilot";
-        antigravity: "antigravity";
-        gemini: "gemini";
-    }>, z.ZodObject<{
+    providers: z.ZodRecord<z.ZodString, z.ZodObject<{
         limit: z.ZodObject<{
             limited: z.ZodBoolean;
             errorType: z.ZodOptional<z.ZodEnum<{
@@ -132,14 +125,14 @@ export declare const LimitsReportSchema: z.ZodObject<{
             resetAt: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
         models: z.ZodRecord<z.ZodString, z.ZodObject<{
-            provider: z.ZodEnum<{
+            provider: z.ZodUnion<readonly [z.ZodEnum<{
                 claude: "claude";
-                "claude-session": "claude-session";
                 codex: "codex";
+                gemini: "gemini";
+                "claude-session": "claude-session";
                 copilot: "copilot";
                 antigravity: "antigravity";
-                gemini: "gemini";
-            }>;
+            }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
             model: z.ZodString;
             fiveHour: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 status: z.ZodLiteral<"not reported">;
@@ -216,14 +209,7 @@ export declare const UsageReportSchema: z.ZodObject<{
             runs: z.ZodNumber;
         }, z.core.$strip>;
     }, z.core.$strip>>;
-    providers: z.ZodRecord<z.ZodEnum<{
-        claude: "claude";
-        "claude-session": "claude-session";
-        codex: "codex";
-        copilot: "copilot";
-        antigravity: "antigravity";
-        gemini: "gemini";
-    }>, z.ZodObject<{
+    providers: z.ZodRecord<z.ZodString, z.ZodObject<{
         session: z.ZodObject<{
             inputTokens: z.ZodNumber;
             outputTokens: z.ZodNumber;
@@ -243,18 +229,49 @@ export declare const UsageReportSchema: z.ZodObject<{
             runs: z.ZodNumber;
         }, z.core.$strip>;
     }, z.core.$strip>>;
+    models: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        provider: z.ZodUnion<readonly [z.ZodEnum<{
+            claude: "claude";
+            codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
+            copilot: "copilot";
+            antigravity: "antigravity";
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
+        model: z.ZodString;
+        usage: z.ZodObject<{
+            session: z.ZodObject<{
+                inputTokens: z.ZodNumber;
+                outputTokens: z.ZodNumber;
+                totalTokens: z.ZodNumber;
+                runs: z.ZodNumber;
+            }, z.core.$strip>;
+            today: z.ZodObject<{
+                inputTokens: z.ZodNumber;
+                outputTokens: z.ZodNumber;
+                totalTokens: z.ZodNumber;
+                runs: z.ZodNumber;
+            }, z.core.$strip>;
+            last7Days: z.ZodObject<{
+                inputTokens: z.ZodNumber;
+                outputTokens: z.ZodNumber;
+                totalTokens: z.ZodNumber;
+                runs: z.ZodNumber;
+            }, z.core.$strip>;
+        }, z.core.$strip>;
+    }, z.core.$strip>>>;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
 export type UsageReport = z.infer<typeof UsageReportSchema>;
 export declare const SwitchAgentPayloadSchema: z.ZodObject<{
-    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+    provider: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
     model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     effort: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
         minimal: "minimal";
@@ -268,14 +285,14 @@ export declare const SwitchAgentPayloadSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type SwitchAgentPayload = z.infer<typeof SwitchAgentPayloadSchema>;
 export declare const SwitchProviderPayloadSchema: z.ZodObject<{
-    toProvider: z.ZodEnum<{
+    toProvider: z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
     toModel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$strip>;
 export type SwitchProviderPayload = z.infer<typeof SwitchProviderPayloadSchema>;

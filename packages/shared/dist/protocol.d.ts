@@ -5,16 +5,17 @@ import { type ProjectSettings } from "./settings.js";
 import type { RunEvent } from "./runtime.js";
 import { type WorkerSessionInfo } from "./session.js";
 import { type Match, type GamesData, type GameRoundResult } from "./games.js";
+import { type CustomProviderInfo, type KeyedProvider } from "./providers.js";
 export type { Match, GamesData, GameRoundResult };
 export declare const ProviderStatusSchema: z.ZodObject<{
-    provider: z.ZodEnum<{
+    provider: z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
     ok: z.ZodBoolean;
     version: z.ZodOptional<z.ZodString>;
     reason: z.ZodOptional<z.ZodString>;
@@ -49,14 +50,14 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
     name: z.ZodString;
     specialty: z.ZodString;
     description: z.ZodOptional<z.ZodString>;
-    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+    provider: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
     model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     effort: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
         minimal: "minimal";
@@ -100,14 +101,14 @@ export declare const CreateAgentPayloadSchema: z.ZodObject<{
 export type CreateAgentPayload = z.infer<typeof CreateAgentPayloadSchema>;
 export declare const AgentPatchSchema: z.ZodObject<{
     model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+    provider: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
     session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
         id: z.ZodString;
         name: z.ZodOptional<z.ZodString>;
@@ -157,35 +158,35 @@ export declare const AgentPatchSchema: z.ZodObject<{
             crash: "crash";
             limit: "limit";
         }>>;
-        failedProvider: z.ZodOptional<z.ZodEnum<{
+        failedProvider: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
-        }>>;
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>;
         managerId: z.ZodOptional<z.ZodString>;
         suggested: z.ZodOptional<z.ZodObject<{
-            provider: z.ZodEnum<{
+            provider: z.ZodUnion<readonly [z.ZodEnum<{
                 claude: "claude";
-                "claude-session": "claude-session";
                 codex: "codex";
+                gemini: "gemini";
+                "claude-session": "claude-session";
                 copilot: "copilot";
                 antigravity: "antigravity";
-                gemini: "gemini";
-            }>;
+            }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
             model: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
         switchTo: z.ZodOptional<z.ZodObject<{
-            provider: z.ZodNullable<z.ZodEnum<{
+            provider: z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
                 claude: "claude";
-                "claude-session": "claude-session";
                 codex: "codex";
+                gemini: "gemini";
+                "claude-session": "claude-session";
                 copilot: "copilot";
                 antigravity: "antigravity";
-                gemini: "gemini";
-            }>>;
+            }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>;
             model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>;
         failedTaskId: z.ZodOptional<z.ZodString>;
@@ -216,14 +217,14 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         name: z.ZodString;
         specialty: z.ZodString;
         description: z.ZodOptional<z.ZodString>;
-        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        provider: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
-        }>>>;
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
         model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         effort: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
             minimal: "minimal";
@@ -269,14 +270,14 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     id: z.ZodString;
     patch: z.ZodObject<{
         model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-        provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+        provider: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
-        }>>>;
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
         session: z.ZodOptional<z.ZodOptional<z.ZodNullable<z.ZodObject<{
             id: z.ZodString;
             name: z.ZodOptional<z.ZodString>;
@@ -326,35 +327,35 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 crash: "crash";
                 limit: "limit";
             }>>;
-            failedProvider: z.ZodOptional<z.ZodEnum<{
+            failedProvider: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
                 claude: "claude";
-                "claude-session": "claude-session";
                 codex: "codex";
+                gemini: "gemini";
+                "claude-session": "claude-session";
                 copilot: "copilot";
                 antigravity: "antigravity";
-                gemini: "gemini";
-            }>>;
+            }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>;
             managerId: z.ZodOptional<z.ZodString>;
             suggested: z.ZodOptional<z.ZodObject<{
-                provider: z.ZodEnum<{
+                provider: z.ZodUnion<readonly [z.ZodEnum<{
                     claude: "claude";
-                    "claude-session": "claude-session";
                     codex: "codex";
+                    gemini: "gemini";
+                    "claude-session": "claude-session";
                     copilot: "copilot";
                     antigravity: "antigravity";
-                    gemini: "gemini";
-                }>;
+                }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
                 model: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>>;
             switchTo: z.ZodOptional<z.ZodObject<{
-                provider: z.ZodNullable<z.ZodEnum<{
+                provider: z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
                     claude: "claude";
-                    "claude-session": "claude-session";
                     codex: "codex";
+                    gemini: "gemini";
+                    "claude-session": "claude-session";
                     copilot: "copilot";
                     antigravity: "antigravity";
-                    gemini: "gemini";
-                }>>;
+                }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>;
                 model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$strip>>;
             failedTaskId: z.ZodOptional<z.ZodString>;
@@ -373,14 +374,14 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"agent.switch">;
     id: z.ZodString;
-    provider: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
+    provider: z.ZodOptional<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
     model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     effort: z.ZodOptional<z.ZodNullable<z.ZodEnum<{
         minimal: "minimal";
@@ -393,22 +394,22 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     }>>>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"provider.switchAll">;
-    fromProvider: z.ZodEnum<{
+    fromProvider: z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>;
-    toProvider: z.ZodEnum<{
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
+    toProvider: z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
     toModel: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"agent.copyToProject">;
@@ -433,14 +434,14 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"settings.update">;
     settings: z.ZodObject<{
-        defaultProvider: z.ZodOptional<z.ZodDefault<z.ZodNullable<z.ZodEnum<{
+        defaultProvider: z.ZodOptional<z.ZodDefault<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
-        }>>>>;
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>>;
         defaultModel: z.ZodOptional<z.ZodDefault<z.ZodNullable<z.ZodString>>>;
         maxConcurrentRuns: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
         limitPolicy: z.ZodOptional<z.ZodDefault<z.ZodEnum<{
@@ -448,14 +449,14 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             manager: "manager";
             ask: "ask";
         }>>>;
-        failoverOrder: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodEnum<{
+        failoverOrder: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
-        }>>>>;
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>>;
         loungeBreaks: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
         preferCheapModels: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
         idleLoungeMinutes: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
@@ -468,6 +469,37 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             visitSeconds: z.ZodDefault<z.ZodNumber>;
         }, z.core.$strip>>>;
     }, z.core.$strip>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"provider.setKey">;
+    provider: z.ZodEnum<{
+        claude: "claude";
+        codex: "codex";
+        gemini: "gemini";
+    }>;
+    apiKey: z.ZodNullable<z.ZodString>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"provider.order">;
+    order: z.ZodArray<z.ZodString>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"customProvider.upsert">;
+    provider: z.ZodObject<{
+        apiKey: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        id: z.ZodString;
+        label: z.ZodString;
+        engine: z.ZodEnum<{
+            openai: "openai";
+            anthropic: "anthropic";
+        }>;
+        baseUrl: z.ZodString;
+        models: z.ZodDefault<z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>>;
+        defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
+    }, z.core.$strip>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"customProvider.remove">;
+    id: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"project.open">;
     path: z.ZodString;
@@ -490,14 +522,14 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         choose: "choose";
         dismiss: "dismiss";
     }>;
-    provider: z.ZodOptional<z.ZodEnum<{
+    provider: z.ZodOptional<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>;
     model: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"game.play">;
@@ -541,6 +573,17 @@ export interface PendingQuestionInfo {
     question: string;
 }
 export declare const SpaceNamesSchema: z.ZodRecord<z.ZodString, z.ZodString>;
+/** Global provider configuration the web needs. Never carries key values: only whether each is set. */
+export interface ProviderConfigInfo {
+    /** Custom (OpenAI-/Anthropic-compatible) providers in effect, without their keys. */
+    customProviders: CustomProviderInfo[];
+    /** The user's provider order, resolved over every provider in effect. */
+    providerOrder: Provider[];
+    /** Whether an API key is stored in AgenticView's config for each keyed built-in provider. */
+    providerKeys: Record<KeyedProvider, boolean>;
+    /** True when saved provider config differs from what this office started with (restart to apply). */
+    restartNeeded?: boolean;
+}
 export interface Snapshot {
     spaceNames?: Record<string, string>;
     world: WorldInfo;
@@ -550,6 +593,8 @@ export interface Snapshot {
     providers: ProviderStatus[];
     /** What "Automatic" resolves to right now (first available provider), or null when none is. */
     autoProvider?: Provider | null;
+    /** Provider config (custom providers, order, which keys are set). */
+    providerConfig?: ProviderConfigInfo;
     settings: ProjectSettings;
     permissions: PendingPermissionInfo[];
     questions: PendingQuestionInfo[];
@@ -621,6 +666,7 @@ export type ServerMessage = ({
     type: "providers.updated";
     providers: ProviderStatus[];
     autoProvider: Provider | null;
+    providerConfig?: ProviderConfigInfo;
 } | {
     type: "sessions.updated";
     sessions: WorkerSessionInfo[];

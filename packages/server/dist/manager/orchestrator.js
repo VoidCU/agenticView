@@ -57,9 +57,18 @@ export class Orchestrator {
         const s = this.deps.settings();
         return !agent.provider && !s.defaultProvider && !s.globalDefaultProvider;
     }
-    /** "Automatic": the first provider in PROVIDER_ORDER whose check() is ok, or null when none is. */
+    /** Provider order in effect: the user's order, else PROVIDER_ORDER; then any other registered runtime. */
+    providerOrder() {
+        const base = this.deps.settings().providerOrder ?? PROVIDER_ORDER;
+        const out = base.filter((p) => this.deps.runtimes.has(p));
+        for (const p of this.deps.runtimes.keys())
+            if (!out.includes(p))
+                out.push(p);
+        return out;
+    }
+    /** "Automatic": the first provider in the provider order whose check() is ok, or null when none is. */
     async autoProvider() {
-        for (const p of PROVIDER_ORDER) {
+        for (const p of this.providerOrder()) {
             const rt = this.deps.runtimes.get(p);
             if (rt && (await rt.check()).ok)
                 return p;
@@ -533,7 +542,7 @@ export class Orchestrator {
     /** "Limits now: codex limited until X; antigravity ok; ..." for the configured providers. */
     limitSummary() {
         const parts = [];
-        for (const p of PROVIDER_ORDER) {
+        for (const p of this.providerOrder()) {
             if (!this.deps.runtimes.has(p))
                 continue;
             const lim = this.deps.usageTracker?.getProviderLimit(p);

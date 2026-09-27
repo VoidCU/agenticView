@@ -1,12 +1,24 @@
-import type { PermissionMode, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
+import type { PermissionMode, Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
 import type { Codex as CodexClass, ThreadEvent, SandboxMode } from "@openai/codex-sdk";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 import { type Which } from "./which.js";
 export interface CodexSdk {
     Codex: typeof CodexClass;
 }
+export interface CodexCustomEndpoint {
+    /** Provider id this runtime serves ("custom:<slug>"). */
+    provider: Provider;
+    /** Display name (model_providers.<id>.name). */
+    name: string;
+    baseUrl: string;
+    apiKey?: string;
+    /** Model used when the agent sets none. */
+    defaultModel?: string | null;
+}
 export interface CodexRuntimeOptions {
     sdk?: CodexSdk;
+    /** Run against a custom OpenAI-compatible endpoint instead of OpenAI (engine "openai" custom providers). */
+    custom?: CodexCustomEndpoint;
     bridgeEntry: string;
     bridgeUrl: () => string;
     apiKey?: string;
@@ -22,7 +34,7 @@ export declare function sandboxFor(mode: PermissionMode, platform?: NodeJS.Platf
 export declare function mapCodexEvent(ev: ThreadEvent, started: Set<string>): RunEvent[];
 export declare class CodexRuntime implements Runtime {
     private readonly opts;
-    readonly provider: "codex";
+    readonly provider: Provider;
     private sdk?;
     private readonly which;
     constructor(opts: CodexRuntimeOptions);
@@ -32,3 +44,17 @@ export declare class CodexRuntime implements Runtime {
 }
 /** ThreadOptions for a run: sandbox, plus model and `modelReasoningEffort` when the agent sets them. */
 export declare function codexThreadOptions(req: RunRequest, platform: NodeJS.Platform): Record<string, unknown>;
+/** Env var a custom endpoint's key is passed in (model_providers.<id>.env_key); only ever in the child env. */
+export declare const CUSTOM_KEY_ENV = "AGENTICVIEW_CUSTOM_KEY";
+/** Codex config-table id for a custom provider ("custom:my-llm" -> "agenticview_my_llm"). */
+export declare function codexProviderId(provider: string): string;
+/**
+ * Child env and `--config` overrides for one Codex run. For a custom OpenAI-compatible endpoint the
+ * overrides define `model_providers.<id>` (Responses API; codex 0.156 dropped the chat wire API) and select
+ * it with `model_provider`, so the user's ~/.codex config and login stay untouched. Keys go to the child
+ * env only, never into this process's env.
+ */
+export declare function codexEnvAndConfig(base: NodeJS.ProcessEnv, opts: Pick<CodexRuntimeOptions, "apiKey" | "custom">): {
+    env: Record<string, string>;
+    config: Record<string, unknown>;
+};

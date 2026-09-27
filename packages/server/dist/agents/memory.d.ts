@@ -19,14 +19,14 @@ export declare const MemoryRecordSchema: z.ZodObject<{
     }>;
     outcome: z.ZodString;
     files: z.ZodArray<z.ZodString>;
-    provider: z.ZodNullable<z.ZodEnum<{
+    provider: z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>;
     model: z.ZodNullable<z.ZodString>;
     at: z.ZodString;
     sessionName: z.ZodOptional<z.ZodString>;

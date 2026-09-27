@@ -5,6 +5,7 @@ import { ProjectSettingsSchema, KnownProjectSchema } from "./settings.js";
 import { AgentSessionSchema, MAX_SESSION_CAPACITY } from "./session.js";
 import { LimitInfoSchema } from "./limits.js";
 import { MoveSchema } from "./games.js";
+import { CustomProviderUpsertSchema, KEYED_PROVIDERS } from "./providers.js";
 export const ProviderStatusSchema = z.object({
     provider: ProviderSchema,
     ok: z.boolean(),
@@ -68,6 +69,10 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     z.object({ type: z.literal("permission.respond"), id: z.string(), allow: z.boolean() }),
     z.object({ type: z.literal("question.respond"), id: z.string(), answer: z.string() }),
     z.object({ type: z.literal("settings.update"), settings: ProjectSettingsSchema.partial() }),
+    z.object({ type: z.literal("provider.setKey"), provider: z.enum(KEYED_PROVIDERS), apiKey: z.string().max(2000).nullable() }),
+    z.object({ type: z.literal("provider.order"), order: z.array(z.string().max(64)).max(64) }),
+    z.object({ type: z.literal("customProvider.upsert"), provider: CustomProviderUpsertSchema }),
+    z.object({ type: z.literal("customProvider.remove"), id: z.string().max(64) }),
     z.object({ type: z.literal("project.open"), path: z.string() }),
     z.object({ type: z.literal("session.rename"), id: z.string().min(1).max(64), name: z.string().trim().min(1).max(60) }),
     z.object({ type: z.literal("session.forget"), id: z.string().min(1).max(64) }),

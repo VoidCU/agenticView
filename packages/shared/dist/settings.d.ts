@@ -1,9 +1,8 @@
 import { z } from "zod";
-import { ProviderSchema } from "./agent.js";
 /** Default provider order for automatic failover when a run fails or crashes. */
 export declare const DEFAULT_FAILOVER_ORDER: readonly ["codex", "copilot", "antigravity", "claude-session"];
 /** Default model per provider used when the failover policy switches an agent. */
-export declare const FAILOVER_PROVIDER_MODELS: Partial<Record<z.infer<typeof ProviderSchema>, string>>;
+export declare const FAILOVER_PROVIDER_MODELS: Partial<Record<string, string>>;
 /**
  * Idle behaviour of workers (server-local randomness, never a model call). After `idleLoungeMinutes`
  * idle, a worker rolls every `minRollSeconds`..`maxRollSeconds`: stay at (or return to) a desk, take a
@@ -20,14 +19,14 @@ export declare const IdleBehaviourSchema: z.ZodObject<{
 export type IdleBehaviour = z.infer<typeof IdleBehaviourSchema>;
 export declare const DEFAULT_IDLE_BEHAVIOUR: IdleBehaviour;
 export declare const ProjectSettingsSchema: z.ZodObject<{
-    defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodEnum<{
+    defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
     defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     maxConcurrentRuns: z.ZodDefault<z.ZodNumber>;
     limitPolicy: z.ZodDefault<z.ZodEnum<{
@@ -35,14 +34,14 @@ export declare const ProjectSettingsSchema: z.ZodObject<{
         manager: "manager";
         ask: "ask";
     }>>;
-    failoverOrder: z.ZodDefault<z.ZodArray<z.ZodEnum<{
+    failoverOrder: z.ZodDefault<z.ZodArray<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
     loungeBreaks: z.ZodDefault<z.ZodBoolean>;
     preferCheapModels: z.ZodDefault<z.ZodBoolean>;
     idleLoungeMinutes: z.ZodDefault<z.ZodNumber>;
@@ -63,14 +62,14 @@ export declare const KnownProjectSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type KnownProject = z.infer<typeof KnownProjectSchema>;
 export declare const GlobalConfigSchema: z.ZodObject<{
-    defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodEnum<{
+    defaultProvider: z.ZodDefault<z.ZodNullable<z.ZodUnion<readonly [z.ZodEnum<{
         claude: "claude";
-        "claude-session": "claude-session";
         codex: "codex";
+        gemini: "gemini";
+        "claude-session": "claude-session";
         copilot: "copilot";
         antigravity: "antigravity";
-        gemini: "gemini";
-    }>>>;
+    }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>>>;
     defaultModel: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     maxConcurrentRuns: z.ZodDefault<z.ZodNumber>;
     providers: z.ZodPrefault<z.ZodObject<{
@@ -94,7 +93,20 @@ export declare const GlobalConfigSchema: z.ZodObject<{
             apiKey: z.ZodOptional<z.ZodString>;
             model: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>>;
+        custom: z.ZodPipe<z.ZodDefault<z.ZodArray<z.ZodUnknown>>, z.ZodTransform<{
+            id: string;
+            label: string;
+            engine: "openai" | "anthropic";
+            baseUrl: string;
+            models: {
+                id: string;
+                label?: string | undefined;
+            }[];
+            defaultModel: string | null;
+            apiKey?: string | undefined;
+        }[], unknown[]>>;
     }, z.core.$strip>>;
+    providerOrder: z.ZodDefault<z.ZodArray<z.ZodString>>;
     knownProjects: z.ZodDefault<z.ZodArray<z.ZodObject<{
         path: z.ZodString;
         name: z.ZodString;

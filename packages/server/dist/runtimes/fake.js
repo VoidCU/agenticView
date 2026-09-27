@@ -5,10 +5,14 @@
 export class FakeRuntime {
     script;
     provider;
+    extra;
     runs = [];
-    constructor(script, provider = "claude") {
+    constructor(script, provider = "claude", 
+    /** Extra result fields for a finished run (demo mode reports estimated usage). */
+    extra) {
         this.script = script;
         this.provider = provider;
+        this.extra = extra;
     }
     async check() {
         return { provider: this.provider, ok: true, version: "fake" };
@@ -54,7 +58,7 @@ export class FakeRuntime {
                     sink(value);
                 }
             }
-            return { text, stopReason: "done", sessionId: req.sessionId ?? `fake-${req.runId}` };
+            return { text, stopReason: "done", sessionId: req.sessionId ?? `fake-${req.runId}`, ...(this.extra?.(req, text) ?? {}) };
         }
         catch (e) {
             if (signal.aborted)

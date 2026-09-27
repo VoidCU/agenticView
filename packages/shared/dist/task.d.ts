@@ -63,14 +63,14 @@ export declare const TaskSchema: z.ZodObject<{
     readOnly: z.ZodOptional<z.ZodBoolean>;
     projectPath: z.ZodString;
     session: z.ZodOptional<z.ZodObject<{
-        provider: z.ZodEnum<{
+        provider: z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
-        }>;
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
         sessionId: z.ZodString;
     }, z.core.$strip>>;
     worker: z.ZodOptional<z.ZodObject<{
@@ -83,14 +83,14 @@ export declare const TaskSchema: z.ZodObject<{
     }, z.core.$strip>>;
     images: z.ZodArray<z.ZodString>;
     tier: z.ZodOptional<z.ZodObject<{
-        provider: z.ZodEnum<{
+        provider: z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
-        }>;
+        }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
         model: z.ZodOptional<z.ZodString>;
         effort: z.ZodOptional<z.ZodEnum<{
             minimal: "minimal";

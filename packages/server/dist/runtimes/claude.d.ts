@@ -1,4 +1,4 @@
-import type { ProviderStatus, RunEvent, RunResult } from "@agenticview/shared";
+import type { Provider, ProviderStatus, RunEvent, RunResult } from "@agenticview/shared";
 import type { query as sdkQuery, tool as sdkTool, createSdkMcpServer as sdkCreateServer } from "@anthropic-ai/claude-agent-sdk";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 export interface ClaudeSdk {
@@ -6,9 +6,20 @@ export interface ClaudeSdk {
     tool: typeof sdkTool;
     createSdkMcpServer: typeof sdkCreateServer;
 }
+export interface ClaudeCustomEndpoint {
+    /** Provider id this runtime serves ("custom:<slug>"). */
+    provider: Provider;
+    name: string;
+    /** Anthropic-compatible base URL, passed as ANTHROPIC_BASE_URL. */
+    baseUrl: string;
+    apiKey?: string;
+    defaultModel?: string | null;
+}
 export interface ClaudeRuntimeOptions {
     sdk?: ClaudeSdk;
     apiKey?: string;
+    /** Run against a custom Anthropic-compatible endpoint (engine "anthropic" custom providers). */
+    custom?: ClaudeCustomEndpoint;
 }
 export declare const CLAUDE_CREDENTIAL_ENV: readonly ["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS"];
 export declare const CLAUDE_MISSING_KEY_REASON = "Claude (API) needs ANTHROPIC_API_KEY (or a cloud provider env); it does not use the Claude Code login. Max/Pro subscribers: use the \"Claude Code session\" provider by running /agenticview-work in Claude Code.";
@@ -30,9 +41,10 @@ type ToolUseInfo = {
 /** Pure mapping from one SDK message to zero or more RunEvents. `pending` pairs tool results with their tool_use. */
 export declare function mapClaudeMessage(raw: unknown, pending: Map<string, ToolUseInfo>): RunEvent[];
 export declare class ClaudeRuntime implements Runtime {
-    readonly provider: "claude";
+    readonly provider: Provider;
     private sdk?;
     private readonly apiKey?;
+    private readonly custom?;
     constructor(opts?: ClaudeRuntimeOptions);
     private hasCredential;
     check(): Promise<ProviderStatus>;
@@ -44,4 +56,13 @@ export declare function claudeModelOptions(req: Pick<RunRequest, "model" | "effo
     model?: string;
     effort?: string;
 };
+/**
+ * Env for the Agent SDK subprocess, or undefined to inherit ours unchanged. A custom Anthropic-compatible
+ * endpoint gets ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY (and no routing env that would override them); the
+ * built-in provider gets its stored key only when the environment has none. Never mutates `base`.
+ */
+export declare function claudeChildEnv(base: NodeJS.ProcessEnv, opts: {
+    apiKey?: string;
+    custom?: Pick<ClaudeCustomEndpoint, "baseUrl" | "apiKey">;
+}): Record<string, string | undefined> | undefined;
 export {};

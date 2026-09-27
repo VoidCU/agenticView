@@ -1,4 +1,4 @@
-import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type ServerMessage, type Effort, type LimitsReport, type UsageReport, type GamesData } from "@agenticview/shared";
+import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type ServerMessage, type Effort, type LimitsReport, type UsageReport, type GamesData, type CustomProviderUpsert, type KeyedProvider } from "@agenticview/shared";
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { type SyncResult } from "./agents/subagents.js";
@@ -78,6 +78,13 @@ export interface World {
         ok: false;
         message: string;
     }>;
+    /** Store (or clear, with null/"") a built-in provider's API key in the global config. Never echoed to clients. */
+    setProviderKey: (provider: KeyedProvider, apiKey: string | null) => Promise<void>;
+    /** Save the provider order (Automatic, failover candidates, header chips). */
+    setProviderOrder: (order: string[]) => Promise<void>;
+    /** Add or edit a custom provider; `apiKey` undefined keeps the stored key, null/"" clears it. */
+    upsertCustomProvider: (entry: CustomProviderUpsert) => Promise<void>;
+    removeCustomProvider: (id: string) => Promise<void>;
     /** Wire decoration of outgoing messages (fills agent.sessionModel for claude-session agents). */
     decorate: (m: ServerMessage) => ServerMessage;
 }
