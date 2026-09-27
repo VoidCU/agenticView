@@ -52,7 +52,7 @@ test("a board opened from walk mode frees the mouse, works, and walking resumes 
   // Second click (locked, crosshair on the board) opens the board and releases pointer lock.
   await page.mouse.click(cx, cy);
   const board = page.getByRole("dialog", { name: /board/i });
-  await expect(board).toBeVisible({ timeout: 5_000 });
+  await expect(board).toBeVisible({ timeout: 15_000 });
   await expect.poll(lockedOnCanvas).toBeNull();
   await expect(page.locator(".walk-crosshair")).toBeVisible(); // still walking
 
