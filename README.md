@@ -126,16 +126,16 @@ Inside the office:
 
 | Provider | How agents run | What you need |
 |---|---|---|
-| **claude** | Claude Agent SDK (Claude Code as a library) | `ANTHROPIC_API_KEY` in your environment, or a cloud provider env such as `CLAUDE_CODE_USE_BEDROCK`. The Agent SDK does not reuse the Claude Code login. You can also put the key in `~/.agenticview/config.json` under `providers.claude.apiKey`. |
+| **claude** | Claude Agent SDK (Claude Code as a library) | `ANTHROPIC_API_KEY` in your environment, or a cloud provider env such as `CLAUDE_CODE_USE_BEDROCK`. The Agent SDK does not reuse the Claude Code login. Or store the key in **Settings > Providers** (see [Custom providers and API keys](#custom-providers-and-api-keys)). |
 | **claude-session** ("Claude Code session") | Your own Claude Code session running `/agenticview-work` pulls tasks from the office queue over the plugin's `agenticview-worker` MCP server and runs each in the agent's own background subagent (`.claude/agents/agenticview-<name>.md`). AgenticView never spawns `claude` for it. | A Claude Code login (Max/Pro works). Run `/agenticview-work` in a session for the project; it shows as available while at least one session is polling. Tasks wait in the queue until a session picks them up. |
-| **codex** | `@openai/codex-sdk` driving the installed `codex` CLI | `npm i -g @openai/codex`, then sign in (`codex login`) or set `CODEX_API_KEY`. |
+| **codex** | `@openai/codex-sdk` driving the installed `codex` CLI | `npm i -g @openai/codex`, then sign in (`codex login`), set `CODEX_API_KEY`, or store a key in **Settings > Providers**. |
 | **copilot** ("GitHub Copilot") | The installed GitHub Copilot CLI (`copilot -p ... --output-format json`) | `npm i -g @github/copilot`, then `copilot login`. Uses your GitHub Copilot subscription (premium requests / AI credits); no API key. |
 | **antigravity** | The installed Antigravity CLI (`agy -p ... --output-format stream-json`) | Install `agy` and run it once to sign in with your Antigravity account. Found on `PATH` or at `%LOCALAPPDATA%\agy\bin\agy.exe`. |
-| **gemini** | The installed `gemini` CLI in headless streaming mode | `npm i -g @google/gemini-cli`, then sign in or set `GEMINI_API_KEY`. |
+| **gemini** | The installed `gemini` CLI in headless streaming mode | `npm i -g @google/gemini-cli`, then sign in, set `GEMINI_API_KEY`, or store a key in **Settings > Providers**. |
 
-The settings panel in the office shows each provider's status and the reason when one is unavailable. Creating an agent on an unavailable provider is refused with that reason, except for *Claude Code session*, whose tasks simply wait until a worker session connects.
+**Settings** has four tabs: *General* (default provider and model, workers at once, limit policy, notifications), *Providers* (provider order and failover, keys, custom providers; each provider's status and the reason when one is unavailable), *Office life* (lounge breaks and idle wandering) and *Usage*. The Usage tab shows plan windows as bars with the percentage left and the reset time (Codex reports its 5-hour and weekly windows after each run; Claude Code sessions report theirs through the [status line relay](#rate-limit-status-line-promax-plans)), limits other providers hit, and input/output tokens per provider and model and per agent for this session, today and the last 7 days, with totals. It refreshes on demand or every 30 seconds. Creating an agent on an unavailable provider is refused with that reason, except for *Claude Code session*, whose tasks simply wait until a worker session connects.
 
-With the default provider on **Automatic**, agents without their own provider run on the first available provider in the order claude, claude-session, codex, copilot, antigravity, gemini. The settings panel shows the current choice, e.g. *Automatic (Codex)*.
+With the default provider on **Automatic**, agents without their own provider run on the first available provider in your provider order (default: claude, claude-session, codex, copilot, antigravity, gemini, then custom providers; change it in **Settings > Providers**). The settings panel shows the current choice, e.g. *Automatic (Codex)*.
 
 Each agent can set a model and an effort level. Claude offers the `opus`, `sonnet`, `haiku` and `fable` aliases with effort low–max (none for Haiku); Codex offers the models your CLI knows with effort low–max; GitHub Copilot offers *Auto* (Copilot picks the model per request; no effort) and the models `copilot help config` lists with effort minimal–max (which ones you can use depends on your Copilot plan; if a model refuses an effort level the run retries without it); Antigravity offers the models `agy models` lists (effort low, medium, high or max for models whose id does not already end in -high/-medium/-low); Gemini offers its model aliases and has no effort control. A *Claude Code session* agent's model is written into its subagent file, so it really runs on that model; without one it inherits the session's model. The effort is a hint for how thorough to be. *Custom…* accepts any model id.
 
@@ -156,6 +156,23 @@ GitHub Copilot takes extra MCP servers per session (`--additional-mcp-config`), 
 **Gemini vs Antigravity.** Both are Google agents but they sign in differently: the Gemini CLI needs a Gemini API key (`GEMINI_API_KEY`) or a Google account with a Google Cloud project (`GOOGLE_CLOUD_PROJECT`), while the Antigravity CLI uses your Antigravity sign-in and needs neither.
 
 An agent whose tools disallow both editing and shell (the Manager, for example) runs Codex in a `read-only` sandbox, GitHub Copilot with `write` and `shell` denied, Antigravity with the edit and shell tools denied by hooks, and Gemini with the write, shell and web tools excluded, regardless of its permission mode.
+
+## Custom providers and API keys
+
+**Settings > Providers** is where bring-your-own models and keys live. Everything there is global (saved in `~/.agenticview/config.json`) and applies to the next run in every office, with no restart.
+
+**Stored keys.** Claude, Codex and Gemini have a password field. A stored key is passed only to that provider's own process, as `ANTHROPIC_API_KEY`, `CODEX_API_KEY` or `GEMINI_API_KEY`; it is never put into the office server's environment (other CLIs inherit that), never logged, and never sent to the browser, which only learns whether a key is set. A variable already present in the environment that started AgenticView wins over the stored key. Leave the field empty to keep using the CLI login or the environment. GitHub Copilot and Antigravity are login-only (`copilot login`, `agy`), and Claude Code sessions use the session's own plan.
+
+**Custom providers.** Add any OpenAI- or Anthropic-compatible endpoint (a local server such as Ollama, LM Studio or vLLM, a company gateway, another vendor) with a name, an API type, a base URL, an optional key and a model list. Each gets the provider id `custom:<id>` and shows up everywhere built-in providers do: the agent form (under *Custom*, with its models plus *Custom…*), the header chips, the provider order and failover, the Manager's `create_agent` / `update_agent` tools, limit detection (generic 429 / quota errors) and the Usage tab. AgenticView does not add an agent loop of its own; custom endpoints run on an existing engine:
+
+| API type | Runs on | How it is wired |
+|---|---|---|
+| OpenAI-compatible | the Codex CLI (`@openai/codex-sdk`) | Per-run `--config` overrides define `model_providers.agenticview_<id>` (`base_url`, `wire_api = "responses"`, `env_key = "AGENTICVIEW_CUSTOM_KEY"`) and select it with `model_provider`; the key goes into the Codex child env only. Your `~/.codex/config.toml` and login are untouched. The endpoint must serve the **Responses API** (`POST <base>/responses`): Codex 0.156 removed the chat/completions wire API. |
+| Anthropic-compatible | the Claude Agent SDK | The SDK process gets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` (and none of the Bedrock/Vertex/`ANTHROPIC_AUTH_TOKEN` routing variables). A key is required. |
+
+Custom providers have no effort control and do not report plan windows. In `~/.agenticview/config.json` they sit under `providers.custom` (`{ id, label, engine: "openai" | "anthropic", baseUrl, apiKey?, models: [{ id, label? }], defaultModel }`); invalid entries are ignored.
+
+**Provider order.** One ordered list drives three things: *Automatic* picks the first available provider in it, failover tries the ticked providers in this order after the one that failed, and the header shows provider chips in this order (the first four, then a *+N more* chip whose dropdown lists every provider with its status, limit and models). The order is global (`providerOrder` in the config); the failover ticks are per project (`failoverOrder` in the project settings, unchanged format).
 
 ## Claude Code sessions as workers
 
