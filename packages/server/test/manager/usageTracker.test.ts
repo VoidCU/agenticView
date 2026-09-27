@@ -100,10 +100,11 @@ describe("UsageTracker", () => {
       expect(providerLim.errorType).toBe("quota");
     });
 
-    it("classifies auth errors as auth", () => {
+    it("an auth failure does not mark the provider limited (it says nothing about quota)", () => {
       const agent = fakeAgent();
       const lim = tracker.recordFailure(agent, "codex", "gpt-5.5", "401 Unauthorized: Invalid API key");
-      expect(lim.errorType).toBe("auth");
+      expect(lim).toBeUndefined();
+      expect(tracker.getProviderLimit("codex").limited).toBe(false);
     });
 
     it("classifies Individual quota reached as quota", () => {
