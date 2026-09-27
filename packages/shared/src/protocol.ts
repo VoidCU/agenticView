@@ -82,7 +82,8 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("agent.copyToProject"), id: z.string() }),
   z.object({ type: z.literal("agent.delete"), id: z.string() }),
   z.object({ type: z.literal("task.cancel"), id: z.string() }),
-  z.object({ type: z.literal("task.retry"), id: z.string() }),
+  /** Retry a failed task; one whose work is already covered is marked solved instead unless `force`. */
+  z.object({ type: z.literal("task.retry"), id: z.string(), force: z.boolean().optional() }),
   z.object({ type: z.literal("permission.respond"), id: z.string(), allow: z.boolean() }),
   z.object({ type: z.literal("question.respond"), id: z.string(), answer: z.string() }),
   z.object({ type: z.literal("settings.update"), settings: ProjectSettingsSchema.partial() }),

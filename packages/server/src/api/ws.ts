@@ -78,7 +78,8 @@ async function handle(msg: ClientMessage, world: World, opts: WsOptions, send: (
       await orchestrator.cancel(msg.id);
       return;
     case "task.retry":
-      await world.retryTask(msg.id);
+      // An already-covered task is marked solved instead (its task.updated shows it as Solved).
+      await world.retryTask(msg.id, { force: msg.force });
       return;
     case "permission.respond":
       orchestrator.respondPermission(msg.id, msg.allow);

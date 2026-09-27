@@ -179,16 +179,38 @@ describe("DELETE /api/tasks/:id/resolve", () => {
   });
 });
 
-describe("retryTask clears resolution", () => {
-  it("clears resolution when a resolved failed task is retried", async () => {
+describe("retryTask and resolutions", () => {
+  it("does not re-run a resolved failed task unless forced; a forced retry clears the resolution", async () => {
     const s = await boot();
     const failed = await makeFailedTask(s);
     await s.world.tasks.setResolution(failed.id, { note: "was resolved", at: new Date().toISOString() });
     const resolved = await s.world.tasks.get(failed.id);
     expect(resolved!.resolution).toBeDefined();
-    // Retry via the world method (retryTask).
-    const retried = await s.world.retryTask(failed.id);
-    expect(retried.status).toBe("queued");
-    expect(retried.resolution).toBeUndefined();
+    // Already covered: marked solved, not re-run.
+    const kept = await s.world.retryTask(failed.id);
+    expect(kept.rerun).toBe(false);
+    expect(kept.task.status).toBe("failed");
+    expect(kept.message).toContain("marked solved");
+    // Forced: re-run, and transition() clears the resolution.
+    const retried = await s.world.retryTask(failed.id, { force: true });
+    expect(retried.rerun).toBe(true);
+    expect(retried.task.status).toBe("queued");
+    expect(retried.task.resolution).toBeUndefined();
+  });
+
+  it("POST /api/tasks/:id/retry reports an already-covered task instead of re-running it", async () => {
+    const s = await boot();
+    const failed = await makeFailedTask(s);
+    await new Promise((r) => setTimeout(r, 5));
+    const replacement = await s.world.tasks.create({ kind: "work", title: "failing task", description: "again", createdBy: "user", assigneeId: "w_test", projectPath: proj });
+    await s.world.tasks.transition(replacement.id, "assigned");
+    await s.world.tasks.transition(replacement.id, "running");
+    await s.world.tasks.transition(replacement.id, "done", { result: "ok" });
+    const res = await apiPost(s, `/api/tasks/${failed.id}/retry`, {});
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; rerun: boolean; byTaskId: string; message: string; task: any };
+    expect(body).toMatchObject({ ok: true, rerun: false, byTaskId: replacement.id });
+    expect(body.message).toContain(`already covered by ${replacement.id}`);
+    expect(body.task.resolution.byTaskId).toBe(replacement.id);
   });
 });

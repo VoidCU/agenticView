@@ -249,9 +249,16 @@ export function apiRoutes(world: World): Hono {
 
   app.post("/api/tasks/:id/retry", async (c) => {
     const id = c.req.param("id");
+    // ?force=1 (or {"force": true}) re-runs even a task whose work is already covered.
+    let force = c.req.query("force") === "1" || c.req.query("force") === "true";
+    if (!force) {
+      const body = (await c.req.json().catch(() => undefined)) as { force?: unknown } | undefined;
+      force = body?.force === true;
+    }
     try {
-      const task = await world.retryTask(id);
-      return c.json({ ok: true, task });
+      const out = await world.retryTask(id, { force });
+      // rerun false: already covered by another task (or resolved), marked solved instead of re-run.
+      return c.json({ ok: true, task: out.task, rerun: out.rerun, message: out.message, ...(out.byTaskId ? { byTaskId: out.byTaskId } : {}) });
     } catch (e) {
       const msg = (e as Error).message;
       const status = msg.includes("Unknown task") ? 404 : 400;

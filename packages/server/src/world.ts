@@ -48,6 +48,7 @@ import { subagentNames, syncSubagents, writeSubagent, type SyncResult } from "./
 import { AgentMemory } from "./agents/memory.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
+import { coverInsteadOfRetry } from "./tasks/retryGuard.js";
 import { Orchestrator, type ResolvedSettings, type WorldDeps } from "./manager/orchestrator.js";
 import type { Runtime, BridgeTool } from "./runtimes/types.js";
 import type { ToolRegistry } from "./bridge/toolRegistry.js";
@@ -68,6 +69,15 @@ export interface WorldOptions {
   toolRegistry: ToolRegistry;
   bridgeUrl: () => string;
   workerTools?: (agent: Agent, task: Task) => BridgeTool[];
+}
+
+/** Outcome of World.retryTask: re-run, or already covered and marked solved. */
+export interface RetryResult {
+  task: Task;
+  rerun: boolean;
+  message: string;
+  /** The done task that covers it (rerun false). */
+  byTaskId?: string;
 }
 
 export interface World {
@@ -95,7 +105,12 @@ export interface World {
   usageTracker: UsageTracker;
   switchAgent: (id: string, patch: { provider?: Provider | null; model?: string | null; effort?: Effort | null }) => Promise<Agent>;
   switchProvider: (fromProvider: Provider, opts: { toProvider: Provider; toModel?: string | null }) => Promise<{ count: number; agents: Agent[] }>;
-  retryTask: (taskId: string) => Promise<Task>;
+  /**
+   * Retry a failed task. When its work is already covered (it has a resolution, or a done replacement:
+   * same assignee + title created after it) it is marked solved instead of re-run (`rerun: false`);
+   * `force` re-runs anyway (and clears any resolution).
+   */
+  retryTask: (taskId: string, opts?: { force?: boolean }) => Promise<RetryResult>;
   resolveTask: (taskId: string, byTaskId: string | undefined, note: string) => Promise<Task>;
   unresolveTask: (taskId: string) => Promise<Task>;
   getLimits: () => Promise<LimitsReport>;
@@ -710,7 +725,8 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       if ("provider" in patch) updatePatch.provider = patch.provider ?? null;
       if ("model" in patch) updatePatch.model = patch.model ?? null;
       if ("effort" in patch) updatePatch.effort = patch.effort ?? null;
-      updatePatch.limit = undefined;
+      // A provider change clears agent.limit in the registry (limits are per provider); a model or effort
+      // change on the same, still-limited provider keeps it.
       const updated = await registry.update(id, updatePatch);
       opts.bus.emit({ type: "agent.updated", agent: updated });
       if (updated.provider === "claude-session" || cur.provider === "claude-session") {
@@ -738,14 +754,18 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       }
       return { count: updatedAgents.length, agents: updatedAgents };
     },
-    retryTask: async (taskId) => {
+    retryTask: async (taskId, retryOpts) => {
       const cur = await tasks.get(taskId);
       if (!cur) throw new Error(`Unknown task ${taskId}`);
       if (cur.status !== "failed") throw new Error(`Only failed tasks can be retried (status is ${cur.status})`);
+      if (!retryOpts?.force) {
+        const cover = await coverInsteadOfRetry(tasks, taskId);
+        if (cover) return { task: cover.task, rerun: false, message: cover.message, ...(cover.byTaskId ? { byTaskId: cover.byTaskId } : {}) };
+      }
       // transition() clears the resolution automatically when moving to queued.
       const retried = await tasks.transition(taskId, "queued", { error: undefined, result: undefined });
       orchestrator.startTask(taskId);
-      return retried;
+      return { task: retried, rerun: true, message: `Retrying task ${taskId}` };
     },
     resolveTask: async (taskId, byTaskId, note) => {
       const task = await tasks.get(taskId);
