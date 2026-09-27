@@ -10,7 +10,7 @@ import { CommandBar } from "./hud/CommandBar";
 import { PermissionToast } from "./hud/PermissionToast";
 import { QuestionToast } from "./hud/QuestionToast";
 import { CreateAgentModal } from "./hud/CreateAgentModal";
-import { SettingsModal } from "./hud/SettingsModal";
+import { SettingsModal, type SettingsTab } from "./hud/SettingsModal";
 import { SessionsModal } from "./hud/sessions";
 import { Timeline } from "./hud/Timeline";
 import { ProjectsPanel } from "./hub/HubView";
@@ -97,6 +97,7 @@ function NoToken() {
 
 export function App() {
   const [modal, setModal] = useState<Modal>();
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>();
   const [playAgentId, setPlayAgentId] = useState<string | undefined>();
   const [tab, setTab] = useState<Tab>("office");
   const [showTimeline, setShowTimeline] = useState(false);
@@ -232,7 +233,14 @@ export function App() {
       <Office onCreate={() => setModal("create")} />
       <div className="hud">
         <TopBar
-          onSettings={() => setModal("settings")}
+          onSettings={() => {
+            setSettingsTab(undefined);
+            setModal("settings");
+          }}
+          onProviderSettings={() => {
+            setSettingsTab("providers");
+            setModal("settings");
+          }}
           onCreate={() => setModal("create")}
           onSessions={() => setModal("sessions")}
           onInbox={() => setModal("inbox")}
@@ -287,7 +295,7 @@ export function App() {
       <QuestionToast />
       <ErrorToasts />
       {modal === "create" && <CreateAgentModal onClose={() => setModal(undefined)} />}
-      {modal === "settings" && <SettingsModal onClose={() => setModal(undefined)} />}
+      {modal === "settings" && <SettingsModal initialTab={settingsTab} onClose={() => setModal(undefined)} />}
       {modal === "sessions" && <SessionsModal onClose={() => setModal(undefined)} />}
       {modal === "inbox" && <Inbox onClose={() => setModal(undefined)} />}
       {modal === "scoreboard" && (
