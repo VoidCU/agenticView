@@ -1,0 +1,20 @@
+[
+  { "id": "pod-a", "kind": "pod", "name": "Pod A", "q": 1, "r": 0 },
+  { "id": "pod-b", "kind": "pod", "name": "Frontend Den", "q": 0, "r": 1 },
+  { "id": "pod-c", "kind": "pod", "name": "Pod C", "q": 1, "r": -1 },
+  { "id": "pod-d", "kind": "pod", "name": "Pod D", "q": -1, "r": 1 },
+  { "id": "meeting", "kind": "meeting", "name": "Meeting Room", "q": 0, "r": -1 },
+  { "id": "lounge", "kind": "lounge", "name": "Lounge", "q": -1, "r": 0 },
+  { "id": "pod-e", "kind": "pod", "name": "Pod E", "q": 2, "r": 0 },
+  { "id": "pod-f", "kind": "pod", "name": "Pod F", "q": 1, "r": 1 },
+  { "id": "pod-g", "kind": "pod", "name": "Pod G", "q": 0, "r": 2 },
+  { "id": "pod-h", "kind": "pod", "name": "Pod H", "q": 2, "r": -1 },
+  { "id": "pod-i", "kind": "pod", "name": "Pod I", "q": 2, "r": -2 },
+  { "id": "pod-j", "kind": "pod", "name": "Pod J", "q": -1, "r": 2 },
+  { "id": "pod-k", "kind": "pod", "name": "Pod K", "q": -2, "r": 2 },
+  { "id": "pod-l", "kind": "pod", "name": "Pod L", "q": 1, "r": -2 },
+  { "id": "pod-m", "kind": "pod", "name": "Night Shift", "q": -2, "r": 1 },
+  { "id": "pod-n", "kind": "pod", "name": "Pod N", "q": 0, "r": -2 },
+  { "id": "pod-o", "kind": "pod", "name": "Pod O", "q": -2, "r": 0 },
+  { "id": "pod-p", "kind": "pod", "name": "Pod P", "q": -1, "r": -1 }
+]

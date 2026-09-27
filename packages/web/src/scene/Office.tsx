@@ -109,11 +109,18 @@ function useFloorMaterials(p: Palette) {
   return useMemo(() => {
     const edge = new THREE.MeshStandardMaterial({ color: p.floorEdge, roughness: 0.9 });
     const top = (map: THREE.Texture, roughness: number) => new THREE.MeshStandardMaterial({ map, roughness, color: "#ffffff" });
+    const office = [edge, top(woodTexture(p.walnut), 0.55), edge];
+    const meeting = [edge, top(carpetTexture(p.carpetMeeting), 0.95), edge];
+    const lounge = [edge, top(woodTexture(p.wood), 0.6), edge];
     return {
-      office: [edge, top(woodTexture(p.walnut), 0.55), edge],
+      office,
       pod: [edge, top(carpetTexture(p.carpetPod), 0.95), edge],
-      meeting: [edge, top(carpetTexture(p.carpetMeeting), 0.95), edge],
-      lounge: [edge, top(woodTexture(p.wood), 0.6), edge],
+      meeting,
+      lounge,
+      // Placeholder: reuse existing materials until the new rooms get their own floor finish.
+      myoffice: office,
+      production: meeting,
+      research: lounge,
     } satisfies Record<Space["kind"], THREE.Material[]>;
   }, [p]);
 }

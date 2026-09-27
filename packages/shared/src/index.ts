@@ -12,3 +12,5 @@ export * from "./limits.js";
 export * from "./games.js";
 export * from "./lounge.js";
 export * from "./providers.js";
+export * from "./migrations.js";
+export * from "./social.js";

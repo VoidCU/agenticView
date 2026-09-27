@@ -6,6 +6,7 @@ import type { RunEvent } from "./runtime.js";
 import { type WorkerSessionInfo } from "./session.js";
 import { type Match, type GamesData, type GameRoundResult } from "./games.js";
 import { type CustomProviderInfo, type KeyedProvider } from "./providers.js";
+import { type OfficeLayout } from "./office.js";
 export type { Match, GamesData, GameRoundResult };
 export declare const ProviderStatusSchema: z.ZodObject<{
     provider: z.ZodUnion<readonly [z.ZodEnum<{
@@ -43,6 +44,24 @@ export declare const WorldInfoSchema: z.ZodObject<{
         path: z.ZodString;
         name: z.ZodString;
         lastOpened: z.ZodString;
+    }, z.core.$strip>>;
+    layout: z.ZodOptional<z.ZodObject<{
+        version: z.ZodLiteral<1>;
+        rooms: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            kind: z.ZodEnum<{
+                office: "office";
+                pod: "pod";
+                meeting: "meeting";
+                lounge: "lounge";
+                myoffice: "myoffice";
+                production: "production";
+                research: "research";
+            }>;
+            name: z.ZodOptional<z.ZodString>;
+            q: z.ZodNumber;
+            r: z.ZodNumber;
+        }, z.core.$strip>>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type WorldInfo = z.infer<typeof WorldInfoSchema>;
@@ -608,6 +627,11 @@ export interface Snapshot {
     ringCount?: number;
     /** Rock-paper-scissors games: leaderboard and recent matches. */
     games?: GamesData;
+    /**
+     * The office floor plan (layout as data). Absent from older servers: the web then falls back to
+     * defaultLayout(worker count).
+     */
+    layout?: OfficeLayout;
 }
 export type MirrorEvent = {
     kind: string;
@@ -619,6 +643,11 @@ export type ServerMessage = ({
 } & Snapshot) | {
     type: "spaceNames.updated";
     spaceNames: Record<string, string>;
+}
+/** The floor plan changed (rooms moved, added, removed or re-kinded): the full new layout. */
+ | {
+    type: "layout.updated";
+    layout: OfficeLayout;
 } | {
     type: "agent.updated";
     agent: Agent;

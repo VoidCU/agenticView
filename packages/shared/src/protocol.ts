@@ -8,6 +8,7 @@ import { AgentSessionSchema, MAX_SESSION_CAPACITY, type WorkerSessionInfo } from
 import { LimitInfoSchema, type LimitInfo } from "./limits.js";
 import { MoveSchema, type Match, type GamesData, type GameRoundResult } from "./games.js";
 import { CustomProviderUpsertSchema, KEYED_PROVIDERS, type CustomProviderInfo, type KeyedProvider } from "./providers.js";
+import { OfficeLayoutSchema, type OfficeLayout } from "./office.js";
 
 export type { Match, GamesData, GameRoundResult };
 
@@ -25,6 +26,8 @@ export const WorldInfoSchema = z.object({
   name: z.string(),
   projectPath: z.string().nullable(),
   knownProjects: z.array(KnownProjectSchema),
+  /** The office floor plan; optional so older servers / payloads still parse. */
+  layout: OfficeLayoutSchema.optional(),
 });
 export type WorldInfo = z.infer<typeof WorldInfoSchema>;
 
@@ -175,6 +178,11 @@ export interface Snapshot {
   ringCount?: number;
   /** Rock-paper-scissors games: leaderboard and recent matches. */
   games?: GamesData;
+  /**
+   * The office floor plan (layout as data). Absent from older servers: the web then falls back to
+   * defaultLayout(worker count).
+   */
+  layout?: OfficeLayout;
 }
 
 export type MirrorEvent = { kind: string; text: string; ts: string };
@@ -182,6 +190,8 @@ export type MirrorEvent = { kind: string; text: string; ts: string };
 export type ServerMessage =
   | ({ type: "snapshot" } & Snapshot)
   | { type: "spaceNames.updated"; spaceNames: Record<string, string> }
+  /** The floor plan changed (rooms moved, added, removed or re-kinded): the full new layout. */
+  | { type: "layout.updated"; layout: OfficeLayout }
   | { type: "agent.updated"; agent: Agent }
   | { type: "agent.removed"; id: string }
   | { type: "task.updated"; task: Task }

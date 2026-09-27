@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSpaces, managerHome, seatLocal } from "@agenticview/shared";
+import { buildSpaces, managerHome, planOffice, seatLocal } from "@agenticview/shared";
 import { AWAY_CHAIR_SWIVEL, CHAIR_SEAT_TOP, Kit, MANAGER_DESK_CLEARANCE, SEATED_CHAIR_BACK, furnishSpace } from "../src/scene/kit";
 import { ROBOT_SEAT_CONTACT, SEATED_LIFT, awaySeatSignature, layoutFor } from "../src/scene/layout";
 import { ROBOT_SCALE } from "../src/scene/Robot";
@@ -24,7 +24,7 @@ describe("seated robots sit on the chair", () => {
   });
 
   it("the manager sits back far enough that the body clears the executive desk", () => {
-    const office = buildSpaces(1).find((s) => s.kind === "office")!;
+    const office = planOffice([manager]).spaces.find((s) => s.kind === "office")!;
     const home = managerHome(office);
     // Desk centre is 0.78 in front of home, 0.95 deep.
     const gap = 0.78 + MANAGER_DESK_CLEARANCE - 0.95 / 2;
