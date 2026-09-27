@@ -11,6 +11,13 @@ Run one command inside any project and a browser tab opens onto an isometric off
 - **Agents that can see.** Workers can take screenshots of a URL, and you can paste screenshots into any chat.
 - **Your own session, mirrored.** Plugin hooks show what your Claude Code terminal session is doing as a robot in the office too.
 
+## See it
+
+- **[Overview tour (76 s)](docs/media/agenticview-overview.mp4)** — fly through the office: delegation, desks and monitors, providers and failover, the Production and Research rooms, boards and walk mode.
+- **[Setup in 60 seconds](docs/media/agenticview-setup-60s.mp4)** — from `/plugin` install to the first task landing on a worker's desk.
+
+(Click a link and GitHub plays the video.)
+
 ## Requirements
 
 - **Claude Code** 2.x (the CLI, the desktop app, or the VS Code extension all work).
