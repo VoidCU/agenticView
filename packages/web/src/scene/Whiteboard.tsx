@@ -175,11 +175,12 @@ export function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Sp
     {space.kind === "pod" && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + ((i % cols) + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, BOARD_OVERLAY_Z + 0.001]} raycast={() => null}>
       <planeGeometry args={[1.12 / cols, 0.57 / rows]} /><meshBasicMaterial color={BOARD_COLORS[status]} side={THREE.DoubleSide} />
     </mesh>)}
-    <Html center position={[0, 1.9, 0]} distanceFactor={14} zIndexRange={[9, 0]}>
+    {/* Overview control only: in walk mode the board is read up close and opened with the crosshair. */}
+    {!walking && <Html center position={[0, 1.9, 0]} distanceFactor={14} zIndexRange={[9, 0]}>
       <button type="button" className={`board-open ${hovered ? "is-hover" : ""}`} aria-label={space.kind === "pod" ? `Open ${space.name} board` : `Open Manager board from ${space.name}`}
         onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} onClick={() => { setHovered(false); onOpen(space); }}>
         {space.kind === "pod" ? `Tasks · ${active.length}` : "Manager board"}
       </button>
-    </Html>
+    </Html>}
   </group>;
 }

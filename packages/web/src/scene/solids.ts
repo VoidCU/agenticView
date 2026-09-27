@@ -19,6 +19,7 @@ import {
   type Space,
 } from "@agenticview/shared";
 import type { OfficeLayout } from "./layout";
+import { ARMCHAIR_W, COUNTER_D, CREDENZA_SIZE, DESK_SIZE, EXEC_DESK_SIZE, PRIVACY_SCREEN, SHELF_SIZE, SOFA_D, TV_STAND, WHITEBOARD_STAND } from "./kit";
 
 export interface SolidBox {
   kind: string;
@@ -109,25 +110,25 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
           const l = seatLocal("pod", seat);
           const dz = l.z < 0 ? -0.36 : 0.36;
           const deskRot = l.z < 0 ? Math.PI : 0;
-          solids.push({ kind: "desk", x: s.x + l.x, z: s.z + dz, w: 1.18, d: 0.66, rot: deskRot });
+          solids.push({ kind: "desk", x: s.x + l.x, z: s.z + dz, w: DESK_SIZE.w, d: DESK_SIZE.d, rot: deskRot });
           solids.push({ kind: "chair", x: s.x + l.x, z: s.z + l.z + (l.z < 0 ? -0.1 : 0.1), w: CHAIR_W, d: CHAIR_D, rot: l.yaw });
         }
         // Felt privacy screen partition
-        solids.push({ kind: "partition", x: s.x, z: s.z, w: 3.8, d: 0.06, rot: 0 });
+        solids.push({ kind: "partition", x: s.x, z: s.z, w: PRIVACY_SCREEN.w, d: PRIVACY_SCREEN.d, rot: 0 });
 
         // Corners
         const b180 = cornerPose(s, 180);
-        solids.push({ kind: "shelf", x: b180.x, z: b180.z, w: 1.3, d: 0.36, rot: b180.rot });
+        solids.push({ kind: "shelf", x: b180.x, z: b180.z, w: SHELF_SIZE.w, d: SHELF_SIZE.d, rot: b180.rot });
         const w240 = cornerPose(s, 240, 4.4);
-        solids.push({ kind: "whiteboard", x: w240.x, z: w240.z, w: 1.7, d: 0.1, rot: w240.rot });
+        solids.push({ kind: "whiteboard", x: w240.x, z: w240.z, w: WHITEBOARD_STAND.w, d: WHITEBOARD_STAND.d, rot: w240.rot });
         const c300 = cornerPose(s, 300);
-        solids.push({ kind: "credenza", x: c300.x, z: c300.z, w: 1.6, d: 0.46, rot: c300.rot });
+        solids.push({ kind: "credenza", x: c300.x, z: c300.z, w: CREDENZA_SIZE.w, d: CREDENZA_SIZE.d, rot: c300.rot });
         const p0 = cornerPose(s, 0, 4.7);
         solids.push({ kind: "plant", x: p0.x, z: p0.z, r: potRadius(1.1) });
         const p120 = cornerPose(s, 120, 4.7);
         solids.push({ kind: "plant", x: p120.x, z: p120.z, r: potRadius(0.9) });
         const c60 = cornerPose(s, 60, 4.7);
-        solids.push({ kind: "credenza", x: c60.x, z: c60.z, w: 1.6, d: 0.46, rot: c60.rot });
+        solids.push({ kind: "credenza", x: c60.x, z: c60.z, w: CREDENZA_SIZE.w, d: CREDENZA_SIZE.d, rot: c60.rot });
         break;
       }
 
@@ -136,7 +137,7 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
         const toCam = { x: Math.cos(45 * DEG), z: Math.sin(45 * DEG) };
         const deskAt = { x: home.x + toCam.x * 0.78, z: home.z + toCam.z * 0.78 };
         const rot = yawToward(deskAt, home);
-        solids.push({ kind: "desk", x: s.x + deskAt.x, z: s.z + deskAt.z, w: 2.1, d: 0.95, rot });
+        solids.push({ kind: "desk", x: s.x + deskAt.x, z: s.z + deskAt.z, w: EXEC_DESK_SIZE.w, d: EXEC_DESK_SIZE.d, rot });
 
         const front = { x: deskAt.x + toCam.x * 1.05, z: deskAt.z + toCam.z * 1.05 };
         for (const side of [-0.62, 0.62]) {
@@ -145,13 +146,13 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
         }
 
         const b180 = cornerPose(s, 180, 4.5);
-        solids.push({ kind: "shelf", x: b180.x, z: b180.z, w: 1.3, d: 0.36, rot: b180.rot });
+        solids.push({ kind: "shelf", x: b180.x, z: b180.z, w: SHELF_SIZE.w, d: SHELF_SIZE.d, rot: b180.rot });
         const w240 = cornerPose(s, 240, 4.4);
-        solids.push({ kind: "whiteboard", x: w240.x, z: w240.z, w: 1.7, d: 0.1, rot: w240.rot });
+        solids.push({ kind: "whiteboard", x: w240.x, z: w240.z, w: WHITEBOARD_STAND.w, d: WHITEBOARD_STAND.d, rot: w240.rot });
         const c300 = cornerPose(s, 300);
-        solids.push({ kind: "credenza", x: c300.x, z: c300.z, w: 1.6, d: 0.46, rot: c300.rot });
+        solids.push({ kind: "credenza", x: c300.x, z: c300.z, w: CREDENZA_SIZE.w, d: CREDENZA_SIZE.d, rot: c300.rot });
         const a0 = cornerPose(s, 0, 4.4);
-        solids.push({ kind: "sofa", x: a0.x, z: a0.z, w: 0.95, d: 0.86, rot: a0.rot });
+        solids.push({ kind: "sofa", x: a0.x, z: a0.z, w: ARMCHAIR_W, d: SOFA_D, rot: a0.rot });
         const p60 = cornerPose(s, 60, 4.8);
         solids.push({ kind: "plant", x: p60.x, z: p60.z, r: potRadius(1.25) });
         const p120 = cornerPose(s, 120, 4.7);
@@ -170,11 +171,18 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
         }
 
         const t240 = cornerPose(s, 240, 4.5);
-        solids.push({ kind: "shelf", x: t240.x, z: t240.z, w: 1.9, d: 0.6, rot: t240.rot });
+        // TV stand as drawn: the thin screen plus its two feet. (It used to be one solid 1.9 x 0.6 block,
+        // an invisible wall 0.27 deep in front of and behind the open stand.)
+        solids.push({ kind: "tv", x: t240.x, z: t240.z, w: TV_STAND.w, d: TV_STAND.d, rot: t240.rot });
+        for (const lx of [-TV_STAND.legX, TV_STAND.legX]) {
+          const c = Math.cos(t240.rot);
+          const sn = Math.sin(t240.rot);
+          solids.push({ kind: "tv", x: t240.x + lx * c, z: t240.z - lx * sn, w: TV_STAND.footW, d: TV_STAND.footD, rot: t240.rot });
+        }
         const w180 = cornerPose(s, 180, 4.4);
-        solids.push({ kind: "whiteboard", x: w180.x, z: w180.z, w: 1.7, d: 0.1, rot: w180.rot });
+        solids.push({ kind: "whiteboard", x: w180.x, z: w180.z, w: WHITEBOARD_STAND.w, d: WHITEBOARD_STAND.d, rot: w180.rot });
         const c300 = cornerPose(s, 300);
-        solids.push({ kind: "credenza", x: c300.x, z: c300.z, w: 1.6, d: 0.46, rot: c300.rot });
+        solids.push({ kind: "credenza", x: c300.x, z: c300.z, w: CREDENZA_SIZE.w, d: CREDENZA_SIZE.d, rot: c300.rot });
         const p0 = cornerPose(s, 0, 4.7);
         solids.push({ kind: "plant", x: p0.x, z: p0.z, r: potRadius(1.1) });
         const p60 = cornerPose(s, 60, 4.8);
@@ -195,11 +203,11 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
           const wx = s.x + fp.x;
           const wz = s.z + fp.z;
           if (fp.kind === "sofa") {
-            solids.push({ kind: "sofa", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
+            solids.push({ kind: "sofa", x: wx, z: wz, w: fp.w, d: SOFA_D, rot: fp.yaw });
           } else if (fp.kind === "armchair") {
-            solids.push({ kind: "sofa", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
+            solids.push({ kind: "sofa", x: wx, z: wz, w: fp.w, d: SOFA_D, rot: fp.yaw });
           } else if (fp.kind === "counter") {
-            solids.push({ kind: "credenza", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
+            solids.push({ kind: "credenza", x: wx, z: wz, w: fp.w, d: COUNTER_D, rot: fp.yaw });
           } else if (fp.kind === "beanbag") {
             solids.push({ kind: "beanbag", x: wx, z: wz, w: fp.w, d: fp.d, rot: fp.yaw });
           }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useWalkOverlay } from "../state/pointerLock";
 import { PROVIDER_LABELS, type Provider, type ProviderStatus } from "@agenticview/shared";
 
 export const PROVIDER_LABEL: Record<string, string> = PROVIDER_LABELS;
@@ -32,6 +33,8 @@ export function ProviderChip({ status, compact = false }: { status: ProviderStat
 
 /** Modal shell: contain focus, restore the opener, and close on Escape or backdrop click. */
 export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  // Opened while walking: release pointer lock so the cursor works over the overlay (restored on close).
+  useWalkOverlay();
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;

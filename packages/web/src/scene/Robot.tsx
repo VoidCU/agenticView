@@ -11,8 +11,13 @@ import { dragPoint, livePositions, useDrag } from "./motion";
 import { agentActivityText } from "./selectors";
 import { useWalk } from "../state/walk";
 import { useHudPrefs } from "../state/hudPrefs";
-import { bonk, bonkedAt, bonkLooking, bonkState, bonkWobble } from "../state/bonk";
+import { WALK_BUBBLE_DISTANCE_FACTOR, bonk, bonkLooking, bonkState, bubbleAnchorY, interactionNod, interactionWobble } from "../state/bonk";
 import { ROBOT_SCALE, basicMat, physMat, robotGeoms, stdMat } from "./robotParts";
+
+/** Slap / greeting bubble: just over the head (robot-local). */
+const BUBBLE_HEAD_Y = 2.35 * ROBOT_SCALE + 0.1;
+/** Scratch for the camera direction (bubble placement); shared by all robots, no allocation. */
+const camDir = new THREE.Vector3();
 
 export { ROBOT_SCALE };
 
@@ -123,6 +128,8 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   const root = useRef<THREE.Group>(null);
   const yawG = useRef<THREE.Group>(null);
   const tilt = useRef<THREE.Group>(null);
+  /** Anchor of the slap / greeting bubble (moved into view when you stand next to the robot in walk mode). */
+  const bubbleAnchor = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
   const bodyMat = useRef<THREE.MeshPhysicalMaterial>(null);
   const glowMat = useRef<THREE.MeshBasicMaterial>(null);
@@ -258,6 +265,11 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
     const seatGoal = !held && st.path.length === 0 && Math.abs(target.x - st.x) + Math.abs(target.z - st.z) < 0.1 ? (target.yOffset ?? 0) : 0;
     st.seat += (seatGoal - st.seat) * Math.min(1, dt * 8);
     g.position.set(st.x, st.lift + st.seat, st.z);
+    const ba = bubbleAnchor.current;
+    if (ba) {
+      camera.getWorldDirection(camDir);
+      ba.position.y = bubbleAnchorY(BUBBLE_HEAD_Y, g.position.y, camera.position.y, Math.asin(Math.max(-1, Math.min(1, camDir.y))), Math.hypot(camera.position.x - st.x, camera.position.z - st.z), walking);
+    }
 
     // Walk cycle: feet step, arms swing, the body bobs and leans into the stride.
     const w = st.walk;
@@ -274,6 +286,10 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
       armL.current.rotation.x = -s * 0.7 * w + idleWave;
       armR.current.rotation.x = s * 0.7 * w + idleWave;
     }
+    // Last slap / greeting: the wobble after a slap, the nod after a greeting (0 when idle).
+    const lastHit = bonkState(agent.id);
+    const nowMs = Date.now();
+    const wob = interactionWobble(lastHit, nowMs);
     if (tilt.current) {
       if (fainted) {
         // Lying down: tilt forward ~90°, settle gently
@@ -282,8 +298,10 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
         tilt.current.rotation.z = 0;
         tilt.current.position.y = 0.05 + 0.28 * Math.max(0, Math.sin(faintTilt));
       } else {
-        tilt.current.rotation.x = 0.13 * w;
-        tilt.current.rotation.z = Math.sin(st.phase) * 0.05 * w;
+        // A greeted robot nods (two small forward dips); a slapped one jolts back and rocks sideways,
+        // readable even from right next to it in walk mode.
+        tilt.current.rotation.x = 0.13 * w + 0.3 * interactionNod(lastHit, nowMs) - 0.16 * Math.max(0, wob);
+        tilt.current.rotation.z = Math.sin(st.phase) * 0.05 * w + 0.1 * wob;
         tilt.current.position.y = 0.05;
       }
     }
@@ -305,9 +323,8 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
         b.position.y = Math.sin(t * 2.2 + seed) * 0.04 * idle + Math.abs(Math.cos(st.phase)) * 0.07 * w;
       }
       // Bonk wobble: squash-and-stretch on top of whatever the body is doing (no allocations).
-      const wob = bonkWobble(Date.now() - bonkedAt(agent.id));
       if (wob !== 0) {
-        const side = 1 + 0.14 * wob;
+        const side = 1 + 0.18 * wob;
         b.scale.set(b.scale.x * side, b.scale.y * (1 - 0.22 * wob), b.scale.z * side);
       }
     }
@@ -530,9 +547,11 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
       </Html>
       )}
       {!tagsVisible && bubble?.bonk && bubbleText && (
-        <Html center distanceFactor={10} position={[0, 2.35 * ROBOT_SCALE + 0.1, 0]} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
-          <div className="bubble bubble-text bubble-bonk" data-testid="bonk-bubble">{bubbleText}</div>
+        <group ref={bubbleAnchor} position={[0, BUBBLE_HEAD_Y, 0]}>
+        <Html center distanceFactor={walking ? WALK_BUBBLE_DISTANCE_FACTOR : 10} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
+          <div className={`bubble bubble-text bubble-bonk${bubble.greet ? " bubble-greet" : ""}`} data-testid={bubble.greet ? "greet-bubble" : "bonk-bubble"}>{bubbleText}</div>
         </Html>
+        </group>
       )}
       {fainted && tagsVisible && (
         <Html center position={[0, 2.2 * ROBOT_SCALE, 0]} distanceFactor={18} zIndexRange={[18, 0]} style={{ pointerEvents: "none" }}>

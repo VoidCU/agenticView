@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../state/store";
-import { borrowPointerFromWalk } from "../state/pointerLock";
 import { Modal } from "./ui";
 import type { Move, GameRoundResult } from "@agenticview/shared";
 
@@ -89,8 +88,6 @@ export function PlayRpsModal({ agentId, onClose }: { agentId: string; onClose: (
     lastRoundRef.current = undefined;
   };
 
-  // Walk mode holds pointer lock, which makes the buttons unclickable: take the mouse back while open.
-  useEffect(() => borrowPointerFromWalk(), []);
 
   // Keyboard play (works in walk and overview): 1/2/3 or R/P/S, Enter = play again when finished.
   const keyActions = useRef({ play, playAgain, done });

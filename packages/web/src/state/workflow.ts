@@ -26,6 +26,9 @@ export interface WorkflowStep {
   ok?: boolean;
   /** Tool calls worth mentioning (manager receiving a request). */
   tools?: string[];
+  /** Two-party steps: who acted and toward whom ("user" = you). Delegation: delegator -> assignee; reply: assignee -> delegator. */
+  fromId?: string;
+  toId?: string;
   /** A delegation that re-assigns work that failed before (retry / failover). */
   retry?: boolean;
 }
@@ -123,7 +126,7 @@ export function buildWorkflow(
 
   const userLine = root.log.find((l) => l.type === "user")?.text ?? root.description ?? root.title;
   const asked = shorten(userLine, 200);
-  steps.push({ id: `${root.id}:asked`, kind: "asked", ts: ms(root.createdAt), title: "You asked", summary: asked.summary, full: asked.full, taskId: root.id });
+  steps.push({ id: `${root.id}:asked`, kind: "asked", ts: ms(root.createdAt), title: "You asked", summary: asked.summary, full: asked.full, taskId: root.id, fromId: "user", toId: root.assigneeId });
 
   const pushTaskSignals = (t: Task) => {
     for (let i = 0; i < t.log.length; i++) {
@@ -158,7 +161,8 @@ export function buildWorkflow(
   const children = descendants(root, tasks);
   const seenTitles = new Map<string, Task>();
   for (const t of children) {
-    const from = name(t.createdBy === "user" ? root.assigneeId : t.createdBy);
+    const fromId = t.createdBy === "user" ? root.assigneeId : t.createdBy;
+    const from = name(fromId);
     const to = name(t.assigneeId);
     const earlier = seenTitles.get(t.title.trim().toLowerCase());
     const retry = !!earlier && (earlier.status === "failed" || earlier.status === "cancelled");
@@ -171,6 +175,8 @@ export function buildWorkflow(
       taskId: t.id,
       agentId: t.assigneeId,
       retry: retry || undefined,
+      fromId,
+      toId: t.assigneeId,
     });
     pushTaskSignals(t);
     const end = ms(t.finishedAt);
@@ -191,6 +197,8 @@ export function buildWorkflow(
         agentId: t.assigneeId,
         durationMs: Number.isNaN(start) ? undefined : Math.max(0, end - start),
         ok: !failed,
+        fromId: t.assigneeId,
+        toId: fromId,
       });
     }
   }

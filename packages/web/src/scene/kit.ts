@@ -127,6 +127,29 @@ export class Kit {
   }
 }
 
+// ---------- footprints shared with the walk-mode colliders (scene/solids.ts) ----------
+
+/** Pod desk top (width along the row, depth). */
+export const DESK_SIZE = { w: 1.18, d: 0.66 } as const;
+/** Manager's executive desk top. */
+export const EXEC_DESK_SIZE = { w: 2.1, d: 0.95 } as const;
+/** Open bookshelf footprint. */
+export const SHELF_SIZE = { w: 1.3, d: 0.36 } as const;
+/** Credenza body footprint. */
+export const CREDENZA_SIZE = { w: 1.6, d: 0.46 } as const;
+/** Sofa depth (every width). */
+export const SOFA_D = 0.86;
+/** Armchair width (a one-seat sofa). */
+export const ARMCHAIR_W = 0.95;
+/** Kitchenette counter depth (the walnut top overhangs the 0.62 body). */
+export const COUNTER_D = 0.66;
+/** Pod felt privacy screen along the cluster spine. */
+export const PRIVACY_SCREEN = { w: 3.8, d: 0.06 } as const;
+/** Whiteboard stand: posts at +-legX, board frame 1.66 wide. */
+export const WHITEBOARD_STAND = { w: 1.7, d: 0.1 } as const;
+/** Meeting-room TV stand: a 1.9 wide, 0.06 deep screen on two legs (at +-legX) with 0.6 deep feet. */
+export const TV_STAND = { w: 1.9, d: 0.06, legX: 0.7, footW: 0.08, footD: 0.6 } as const;
+
 // ---------- furniture (all built in a local frame: +z is "front") ----------
 
 const DEG = Math.PI / 180;
@@ -139,7 +162,7 @@ function hashColor(list: string[], n: number): string {
 /** A desk whose front (+z) faces the person sitting at it. */
 export function desk(k: Kit, screen?: string, seed = 0) {
   // Width 1.18 gives a comfortable 0.02 gap to adjacent desks at 1.2-unit column spacing.
-  k.rbox("deskTop", [0, DESK_H - 0.025, 0], [1.18, 0.05, 0.66]);
+  k.rbox("deskTop", [0, DESK_H - 0.025, 0], [DESK_SIZE.w, 0.05, DESK_SIZE.d]);
   for (const x of [-0.54, 0.54]) k.box("deskLeg", [x, (DESK_H - 0.05) / 2, 0], [0.05, DESK_H - 0.05, 0.58]);
   k.box("deskLeg", [0, 0.5, -0.22], [1.1, 0.16, 0.02]);
   // Monitor: bezel, glowing screen, neck, foot.
@@ -192,8 +215,8 @@ export function plant(k: Kit, size = 1, seed = 0) {
 
 /** Tall open bookshelf, 1.3 wide. */
 export function bookshelf(k: Kit, seed = 0, tall = 1.7) {
-  const w = 1.3;
-  const d = 0.36;
+  const w = SHELF_SIZE.w;
+  const d = SHELF_SIZE.d;
   for (const x of [-w / 2, w / 2]) k.box("shelf", [x, tall / 2, 0], [0.04, tall, d]);
   const shelves = Math.round(tall / 0.42);
   for (let i = 0; i <= shelves; i++) k.box("shelf", [0, (i * tall) / shelves, 0], [w, 0.035, d]);
@@ -218,7 +241,7 @@ export function bookshelf(k: Kit, seed = 0, tall = 1.7) {
 
 /** Low sideboard with a few objects on top. */
 export function credenza(k: Kit, seed = 0) {
-  k.rbox("shelf", [0, 0.34, 0], [1.6, 0.62, 0.46]);
+  k.rbox("shelf", [0, 0.34, 0], [CREDENZA_SIZE.w, 0.62, CREDENZA_SIZE.d]);
   k.box("deskLeg", [0, 0.02, 0], [1.5, 0.04, 0.4]);
   for (const x of [-0.4, 0.4]) k.box("walnut", [x, 0.34, 0.232], [0.76, 0.56, 0.006]);
   k.cyl("pot", [-0.5, 0.75, 0], 0.16, 0.22);
@@ -243,7 +266,7 @@ export function floorLamp(k: Kit) {
 }
 
 export function sofa(k: Kit, mat: "sofa" | "sofa2" = "sofa", width = 1.9) {
-  k.rbox(mat, [0, 0.24, 0], [width, 0.3, 0.86]);
+  k.rbox(mat, [0, 0.24, 0], [width, 0.3, SOFA_D]);
   k.rbox(mat, [0, 0.6, -0.33], [width, 0.56, 0.22]);
   for (const x of [-width / 2 + 0.1, width / 2 - 0.1]) k.rbox(mat, [x, 0.44, 0], [0.2, 0.36, 0.86]);
   const seats = width > 1.5 ? [-width / 4 + 0.05, width / 4 - 0.05] : [0];
@@ -253,13 +276,13 @@ export function sofa(k: Kit, mat: "sofa" | "sofa2" = "sofa", width = 1.9) {
 }
 
 export function armchair(k: Kit, mat: "sofa" | "sofa2" = "sofa2") {
-  sofa(k, mat, 0.95);
+  sofa(k, mat, ARMCHAIR_W);
 }
 
 /** Coffee point: counter, machine, mugs. */
 export function kitchenette(k: Kit, counterW = 1.9) {
   k.rbox("deskTop", [0, 0.46, 0], [counterW, 0.9, 0.62]);
-  k.box("walnut", [0, 0.92, 0], [counterW + 0.04, 0.04, 0.66]);
+  k.box("walnut", [0, 0.92, 0], [counterW + 0.04, 0.04, COUNTER_D]);
   k.rbox("bezel", [-0.5, 1.13, -0.05], [0.34, 0.38, 0.3]);
   k.box("lampGlow", [-0.5, 1.2, 0.101], [0.08, 0.04, 0.004]);
   for (let i = 0; i < 3; i++) k.cyl("pot", [0.1 + i * 0.16, 0.99, 0.12], 0.08, 0.1, { color: ["#ffffff", "#e4b04a", "#3f6f8f"][i] });
@@ -269,11 +292,11 @@ export function kitchenette(k: Kit, counterW = 1.9) {
 
 /** A standing TV for the meeting room. */
 export function tvStand(k: Kit) {
-  for (const x of [-0.7, 0.7]) {
+  for (const x of [-TV_STAND.legX, TV_STAND.legX]) {
     k.box("deskLeg", [x, 0.7, 0], [0.05, 1.4, 0.05]);
-    k.box("deskLeg", [x, 0.02, 0], [0.08, 0.04, 0.6]);
+    k.box("deskLeg", [x, 0.02, 0], [TV_STAND.footW, 0.04, TV_STAND.footD]);
   }
-  k.box("bezel", [0, 1.35, 0], [1.9, 1.1, 0.06]);
+  k.box("bezel", [0, 1.35, 0], [TV_STAND.w, 1.1, TV_STAND.d]);
   k.box("screen", [0, 1.35, 0.032], [1.8, 1.0, 0.004], { color: "#2d5fd1" });
   // Slide content: a title bar and three bars of a chart.
   k.box("lampGlow", [-0.45, 1.7, 0.036], [0.7, 0.07, 0.003]);
@@ -320,8 +343,8 @@ function podRoom(k: Kit, s: Space, occ: RoomOccupancy, seed: number) {
     else chair(k.frame(l.x, l.z + back * SEATED_CHAIR_BACK, l.yaw), { id, pushable: false });
   }
   // Felt privacy screen along the spine of the cluster, with an aluminium cap.
-  k.rbox("felt", [0, DESK_H + 0.2, 0], [3.8, 0.4, 0.05]);
-  k.box("alu", [0, DESK_H + 0.405, 0], [3.8, 0.015, 0.06]);
+  k.rbox("felt", [0, DESK_H + 0.2, 0], [PRIVACY_SCREEN.w, 0.4, 0.05]);
+  k.box("alu", [0, DESK_H + 0.405, 0], [PRIVACY_SCREEN.w, 0.015, PRIVACY_SCREEN.d]);
   k.box("deskLeg", [0, 0.36, 0], [0.06, 0.72, 0.06]);
   // Corners: tall pieces at the back (away from the camera), low ones at the front.
   bookshelf(corner(k, 180), seed);
@@ -340,7 +363,7 @@ function officeRoom(k: Kit, s: Space, occ: RoomOccupancy = { seats: new Map() })
   const toCam = { x: Math.cos(45 * DEG), z: Math.sin(45 * DEG) };
   const deskAt = { x: home.x + toCam.x * 0.78, z: home.z + toCam.z * 0.78 };
   const dk = k.frame(deskAt.x, deskAt.z, yawToward(deskAt, home));
-  dk.rbox("walnut", [0, 0.75, 0], [2.1, 0.07, 0.95]);
+  dk.rbox("walnut", [0, 0.75, 0], [EXEC_DESK_SIZE.w, 0.07, EXEC_DESK_SIZE.d]);
   dk.rbox("walnut", [-0.82, 0.37, 0], [0.42, 0.72, 0.85]);
   dk.box("deskLeg", [0.95, 0.37, 0], [0.05, 0.72, 0.85]);
   dk.box("walnut", [0.1, 0.45, -0.44], [1.5, 0.5, 0.03]);

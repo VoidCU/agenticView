@@ -19,10 +19,13 @@ import { spaceAt, type Space } from "@agenticview/shared";
 import { useWalk } from "../state/walk";
 import { useStore } from "../state/store";
 import { isWalkable, movePlayer, walkDelta, clampPitch, applyVelocity, BOB_FREQ, bobWeightStep, headBobSide, headBobY } from "./walkPhysics";
-import { PLAYER_RADIUS, type Solid } from "./colliders";
+import { MAX_DEPEN_PER_FRAME, PLAYER_RADIUS, type Solid } from "./colliders";
 import { chairField } from "./pushChairs";
 import { usePositions } from "../state/positions";
-import { bonk, BONK_RANGE } from "../state/bonk";
+import { bonk, BONK_RANGE, greet, GREET_RANGE } from "../state/bonk";
+import { SLAP_HIT_MS, triggerHand } from "./handGesture";
+import { WalkHand, updateWalkHand } from "./WalkHand";
+import { openOverlayFromWalk } from "../state/pointerLock";
 
 // ---- Constants ----
 
@@ -65,6 +68,16 @@ export function WalkModeController({
   onBoard,
 }: WalkControllerProps) {
   const { camera, gl, scene } = useThree();
+  const setEvents = useThree((s) => s.setEvents);
+
+  // While walking, the crosshair raycast below is the only way to interact with the scene. R3F's own
+  // pointer events would fire at the (frozen, off-centre) mouse position: a click that only meant to
+  // capture the mouse used to open a whiteboard's board BEHIND a pointer lock that then kept the
+  // cursor hidden and spun the camera behind the board.
+  useEffect(() => {
+    setEvents({ enabled: false });
+    return () => setEvents({ enabled: true });
+  }, [setEvents]);
   const setWalking = useWalk((s) => s.setWalking);
   const select = useStore((s) => s.select);
 
@@ -82,6 +95,7 @@ export function WalkModeController({
     clickPending: false, // user pressed primary button while locked
     bonkPending: false,  // user pressed E: bonk the agent under the crosshair if close
     challengePending: false, // user pressed G: challenge the agent under the crosshair to RPS
+    greetPending: false, // user pressed H: say hi to the agent under the crosshair
   });
 
   const keys = useRef(new Set<string>());
@@ -98,15 +112,22 @@ export function WalkModeController({
 
   // ---- Test hook: teleport walk position ----
   useEffect(() => {
-    const teleport = (x: number, z: number, yaw = 0) => {
+    const teleport = (x: number, z: number, yaw = 0, pitch = 0) => {
       st.current.x = x;
       st.current.z = z;
       st.current.yaw = yaw;
+      st.current.pitch = clampPitch(pitch);
       st.current.vx = 0;
       st.current.vz = 0;
     };
-    (window as unknown as Record<string, unknown>).__teleportWalk = teleport;
-    return () => { delete (window as unknown as Record<string, unknown>).__teleportWalk; };
+    const w = window as unknown as Record<string, unknown>;
+    w.__teleportWalk = teleport;
+    // Read-only: where the walker stands (Playwright walk tests).
+    w.__walkPos = () => ({ x: st.current.x, z: st.current.z, yaw: st.current.yaw });
+    return () => {
+      delete w.__teleportWalk;
+      delete w.__walkPos;
+    };
   }, []);
 
   // ---- Pointer lock setup ----
@@ -123,16 +144,23 @@ export function WalkModeController({
         st.current.clickPending = true;
       }
     };
-
     // Lock acquired.
     const onLockChange = () => {
       st.current.locked = isLocked(canvas);
+      useWalk.getState().setLocked(st.current.locked);
+      // Re-locked by a click on the view (after a chat or board freed the mouse): walking resumes.
+      if (st.current.locked && document.querySelector('[role="dialog"]')) {
+        // The lock landed while an overlay is open (a late grant): hand the mouse straight back.
+        useWalk.getState().setPaused(true);
+        document.exitPointerLock();
+        return;
+      }
+      if (st.current.locked && useWalk.getState().paused) useWalk.getState().setPaused(false);
       if (!st.current.locked && !useWalk.getState().paused) {
         // Pointer lock released (user pressed Esc, or browser forced unlock).
         setWalking(false);
       }
     };
-
     // Mouse look (only runs while locked).
     const onMouseMove = (e: MouseEvent) => {
       if (!isLocked(canvas)) return;
@@ -141,7 +169,6 @@ export function WalkModeController({
         st.current.pitch - e.movementY * MOUSE_SENSITIVITY,
       );
     };
-
     canvas.addEventListener("click", onCanvasClick);
     document.addEventListener("pointerlockchange", onLockChange);
     document.addEventListener("mousemove", onMouseMove);
@@ -170,6 +197,7 @@ export function WalkModeController({
       }
       if (e.code === "KeyE" && !e.repeat) st.current.bonkPending = true;
       if (e.code === "KeyG" && !e.repeat) st.current.challengePending = true;
+      if (e.code === "KeyH" && !e.repeat) st.current.greetPending = true;
       keys.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
@@ -184,6 +212,7 @@ export function WalkModeController({
   // ---- Raycaster for screen-centre interaction ----
 
   const raycaster = useRef(new THREE.Raycaster());
+  const hand = useRef<THREE.Group>(null);
   const scratch = useRef({ euler: new THREE.Euler(0, 0, 0, "YXZ"), centre: new THREE.Vector2(0, 0), world: new THREE.Vector3() });
 
   // ---- Per-frame update ----
@@ -191,6 +220,8 @@ export function WalkModeController({
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.08);
     const cur = st.current;
+    // An overlay freed the mouse: drop held keys so the walker does not keep drifting behind it.
+    if (keys.current.size > 0 && useWalk.getState().paused) keys.current.clear();
 
     // Movement direction from keys.
     const { dx, dz } = walkDelta(keys.current, cur.yaw);
@@ -201,8 +232,12 @@ export function WalkModeController({
     cur.vz = vel.vz;
 
     const moveDist = Math.hypot(cur.vx, cur.vz) * dt;
-    if (moveDist > 1e-4) {
-      const next = movePlayer(spaces, cur.x, cur.z, cur.vx * dt, cur.vz * dt, solids);
+    {
+      // Always resolve, even standing still: a walker left overlapping furniture (a chair shoved them,
+      // a long frame) is eased out through the nearest face a little per frame instead of being
+      // thrown across the obstacle on the next step.
+      const still = moveDist <= 1e-4;
+      const next = movePlayer(spaces, cur.x, cur.z, still ? 0 : cur.vx * dt, still ? 0 : cur.vz * dt, solids);
       cur.x = next.x;
       cur.z = next.z;
     }
@@ -212,7 +247,7 @@ export function WalkModeController({
       const w = walker.current;
       w.x = cur.x;
       w.z = cur.z;
-      chairField.interact(w, PLAYER_RADIUS, dt, chairClear, performance.now());
+      chairField.interact(w, PLAYER_RADIUS, dt, chairClear, performance.now(), MAX_DEPEN_PER_FRAME);
       if ((w.x !== cur.x || w.z !== cur.z) && isWalkable(spaces, w.x, w.z)) {
         cur.x = w.x;
         cur.z = w.z;
@@ -247,24 +282,35 @@ export function WalkModeController({
     const euler = scratch.current.euler.set(cur.pitch, cur.yaw, 0, "YXZ");
     camera.quaternion.setFromEuler(euler);
 
-    // Screen-centre raycast: fire when a click or E press is pending.
-    if (cur.clickPending || cur.bonkPending || cur.challengePending) {
-      const intent: WalkIntent = cur.clickPending ? "click" : cur.bonkPending ? "bonk" : "challenge";
+    // Screen-centre raycast: fire when a click, E, G or H press is pending.
+    if (cur.clickPending || cur.bonkPending || cur.challengePending || cur.greetPending) {
+      const intent: WalkIntent = cur.clickPending ? "click" : cur.bonkPending ? "bonk" : cur.challengePending ? "challenge" : "greet";
       cur.clickPending = false;
       cur.bonkPending = false;
       cur.challengePending = false;
+      cur.greetPending = false;
       raycaster.current.setFromCamera(scratch.current.centre, camera);
       const hits = raycaster.current.intersectObjects(scene.children, true);
       const action = walkInteraction(hits, camera.position, scratch.current.world, intent);
-      if (action?.kind === "bonk") bonk(action.id);
-      else if (action?.kind === "select") select(action.id);
+      if (action?.kind === "bonk") {
+        // The hand swings in; the agent's wobble starts when it lands (SLAP_HIT_MS later).
+        if (bonk(action.id, Date.now() + SLAP_HIT_MS) !== undefined) triggerHand("slap", performance.now());
+      } else if (action?.kind === "greet") {
+        if (greet(action.id) !== undefined) triggerHand("wave", performance.now());
+      } else if (action?.kind === "select") {
+        // The agent's chat opens beside the view: free the mouse so it can be used (click the view to walk on).
+        openOverlayFromWalk();
+        select(action.id);
+      }
       else if (action?.kind === "board") onBoard?.(action.id);
       else if (action?.kind === "challenge") window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: action.id } }));
     }
+    // First-person hand: posed after the camera moved this frame (hidden and skipped when idle).
+    updateWalkHand(hand.current, camera, performance.now());
   });
 
-  // No visual avatar in first-person mode.
-  return null;
+  // No avatar body in first-person mode: only the hand, while it slaps or waves.
+  return <WalkHand ref={hand} />;
 }
 
 // ---- Public mount point ----
@@ -298,9 +344,9 @@ export function WalkMode({ spaces, startX, startZ, solids, onBoard }: WalkModePr
   );
 }
 
-export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge"; id: string };
-/** What triggered the crosshair raycast: a click, E (bonk) or G (challenge to rock-paper-scissors). */
-export type WalkIntent = "click" | "bonk" | "challenge";
+export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge" | "greet"; id: string };
+/** What triggered the crosshair raycast: a click, E (bonk), G (challenge to rock-paper-scissors) or H (say hi). */
+export type WalkIntent = "click" | "bonk" | "challenge" | "greet";
 /** Walk mode: challenge an agent to RPS from this close (anywhere: desk, corridor, lounge). */
 export const CHALLENGE_RANGE = 3;
 
@@ -328,6 +374,7 @@ export function walkInteraction(
         const dist = Math.hypot(tmp.x - cam.x, tmp.z - cam.z);
         const id = ud.robotAgentId as string;
         if (intent === "challenge") return dist <= CHALLENGE_RANGE ? { kind: "challenge", id } : undefined;
+        if (intent === "greet") return dist <= GREET_RANGE ? { kind: "greet", id } : undefined;
         if (dist <= BONK_RANGE) return { kind: "bonk", id };
         return clickOnly ? undefined : { kind: "select", id };
       }

@@ -19,7 +19,8 @@ export const BONK_RANGE = 2;
 /** An idle agent looks at whoever bonked it for this long; a busy one only glances during the wobble. */
 export const BONK_LOOK_MS = 1600;
 
-export interface BonkState { at: number; busy: boolean }
+/** Last playful interaction with an agent: a slap (bonk) or a greeting. */
+export interface BonkState { at: number; busy: boolean; kind: "bonk" | "greet" }
 
 /** agentId -> last bonk. Read every frame by robots, so a plain Map (no store churn); entries are reused. */
 const lastBonk = new Map<string, BonkState>();
@@ -57,7 +58,7 @@ export function isBusyAgent(agentId: string): boolean {
 export function bonk(agentId: string, now = Date.now(), rand: () => number = Math.random, busy = isBusyAgent(agentId)): string | undefined {
   if (now - bonkedAt(agentId) < BONK_COOLDOWN_MS) return undefined;
   const prev = lastBonk.get(agentId);
-  if (prev) { prev.at = now; prev.busy = busy; } else lastBonk.set(agentId, { at: now, busy });
+  if (prev) { prev.at = now; prev.busy = busy; prev.kind = "bonk"; } else lastBonk.set(agentId, { at: now, busy, kind: "bonk" });
   const lines: readonly string[] = busy ? BONK_BUSY_LINES : BONK_LINES;
   const line = lines[Math.min(lines.length - 1, Math.floor(rand() * lines.length))]!;
   useStore.setState((s) => ({ bubbles: { ...s.bubbles, [agentId]: { text: line, until: now + BONK_BUBBLE_MS, bonk: true } } }));
@@ -74,7 +75,72 @@ export function bonkWobble(elapsedMs: number): number {
   return Math.sin(k * Math.PI * 3) * (1 - k) * (1 - k);
 }
 
+
+// ---- Greeting (walk mode H): a friendly wave, the agent nods and says hi ----
+
+/** Replies from an idle agent. */
+export const GREET_LINES = ["Hi!", "Hey boss!", "All good here."] as const;
+/** Replies from an agent busy on a task: short, polite. */
+export const GREET_BUSY_LINES = ["Hi! Busy, sorry.", "Hey — deep in a task.", "Hi boss, shipping!"] as const;
+/** Walk mode: say hi from this close (a little farther than a slap). */
+export const GREET_RANGE = 3;
+/** Length of the agent's nod. */
+export const GREET_NOD_MS = 700;
+
+/**
+ * Greet an agent. Shares the 2 s cooldown with bonk. Returns the reply, or undefined while on cooldown.
+ * `rand` is injectable for tests.
+ */
+export function greet(agentId: string, now = Date.now(), rand: () => number = Math.random, busy = isBusyAgent(agentId)): string | undefined {
+  if (now - bonkedAt(agentId) < BONK_COOLDOWN_MS) return undefined;
+  const prev = lastBonk.get(agentId);
+  if (prev) { prev.at = now; prev.busy = busy; prev.kind = "greet"; } else lastBonk.set(agentId, { at: now, busy, kind: "greet" });
+  const lines: readonly string[] = busy ? GREET_BUSY_LINES : GREET_LINES;
+  const line = lines[Math.min(lines.length - 1, Math.floor(rand() * lines.length))]!;
+  useStore.setState((s) => ({ bubbles: { ...s.bubbles, [agentId]: { text: line, until: now + BONK_BUBBLE_MS, bonk: true, greet: true } } }));
+  return line;
+}
+
+/** Nod for a greeting: 0 outside the animation, else a forward head dip in [0, 1] (two small nods). */
+export function greetNod(elapsedMs: number): number {
+  if (!(elapsedMs >= 0) || elapsedMs >= GREET_NOD_MS) return 0;
+  const k = elapsedMs / GREET_NOD_MS;
+  const s = Math.sin(k * Math.PI * 2);
+  return s * s * (1 - k);
+}
+
+/** Squash-and-stretch for the agent's last interaction: the wobble after a slap, none after a greeting. */
+export function interactionWobble(b: BonkState | undefined, now: number): number {
+  return b && b.kind === "bonk" ? bonkWobble(now - b.at) : 0;
+}
+
+/** Nod for the agent's last interaction (greetings only). */
+export function interactionNod(b: BonkState | undefined, now: number): number {
+  return b && b.kind === "greet" ? greetNod(now - b.at) : 0;
+}
+
 /** Test helper. */
 export function resetBonks() {
   lastBonk.clear();
+}
+
+// ---- Reaction bubble placement in walk mode ----
+
+/** Walk mode: within this distance the reaction bubble is pulled down into view. */
+export const WALK_BUBBLE_NEAR = 2.5;
+/** ...to this angle above the centre of the view (radians, ~7 degrees): the upper part of the view. */
+export const WALK_BUBBLE_ABOVE = 0.12;
+/** Walk mode: bubbles use this Html distanceFactor (overview: 10), so a close-up one is not screen-sized. */
+export const WALK_BUBBLE_DISTANCE_FACTOR = 5;
+
+/**
+ * Local height (above the robot's root) of the slap / greeting bubble. Normally just over the head;
+ * in walk mode, standing next to the robot, the head is above the top of the view at eye height, so the
+ * bubble comes down to a little above the centre of the view (`camPitch`: radians, + looking up) and
+ * stays on screen.
+ */
+export function bubbleAnchorY(headY: number, rootY: number, camY: number, camPitch: number, dist: number, walking: boolean): number {
+  if (!walking || !(dist < WALK_BUBBLE_NEAR)) return headY;
+  const d = Math.max(0.4, dist);
+  return Math.min(headY, camY + d * Math.tan(Math.max(-1.2, Math.min(1.2, camPitch + WALK_BUBBLE_ABOVE))) - rootY);
 }

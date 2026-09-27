@@ -22,6 +22,7 @@ import { keyToRoom } from "./roomKeys";
 
 import { MiniMap } from "./MiniMap";
 import { WalkMode } from "./WalkMode";
+import { handState } from "./handGesture";
 import { Whiteboard, whiteboardPose } from "./Whiteboard";
 import { AllDeskMonitors } from "./DeskMonitor";
 import { useWalk } from "../state/walk";
@@ -312,7 +313,11 @@ function Furniture({ spaces, layout, agents, palette, away = "" }: { spaces: Spa
   }, [signature, palette]);
   // Pushed chairs: move their instances in place (only chairs that changed; no allocations).
   const registry = useMemo<InstanceRegistry>(() => new Map(), []);
-  useFrame(() => applyChairOffsets(items, registry));
+  useFrame(() => {
+    // Pushed chairs left alone glide home (checked about once a second; advanced only while gliding).
+    chairField.tick(performance.now());
+    applyChairOffsets(items, registry);
+  });
   return <Batches items={items} materials={materials} registry={registry} />;
 }
 
@@ -327,8 +332,9 @@ function applyChairOffsets(items: Item[], registry: InstanceRegistry) {
   for (const c of chairField.chairs) {
     if (!c.dirty) continue;
     let done = true;
-    const ox = c.x - c.baseX;
-    const oz = c.z - c.baseZ;
+    // Drawn pose = base pose swivelled by spin about the seat centre, then moved to (x, z).
+    const cs = Math.cos(c.spin);
+    const sn = Math.sin(c.spin);
     for (let i = c.first; i < c.first + c.count; i++) {
       const it = items[i];
       const slot = registry.get(i);
@@ -336,9 +342,11 @@ function applyChairOffsets(items: Item[], registry: InstanceRegistry) {
         done = false;
         continue;
       }
-      chairEuler.set(it.rx, it.yaw, it.rz, "YXZ");
+      const lx = it.x - c.baseX;
+      const lz = it.z - c.baseZ;
+      chairEuler.set(it.rx, it.yaw + c.spin, it.rz, "YXZ");
       chairQuat.setFromEuler(chairEuler);
-      chairMatrix.compose(chairPos.set(it.x + ox, it.y, it.z + oz), chairQuat, chairScale.set(it.sx, it.sy, it.sz));
+      chairMatrix.compose(chairPos.set(c.x + lx * cs + lz * sn, it.y, c.z - lx * sn + lz * cs), chairQuat, chairScale.set(it.sx, it.sy, it.sz));
       slot.mesh.setMatrixAt(slot.index, chairMatrix);
       slot.mesh.instanceMatrix.needsUpdate = true;
     }
@@ -901,7 +909,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
             onBodyClick={isLounging ? (agentId) => window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId } })) : undefined}
             fainted={isFainted}
           >
-            {a.role === "worker" && <FileChips agentId={a.id} />}
+            {a.role === "worker" && !walking && <FileChips agentId={a.id} />}
           </Robot>
         );
       })}
@@ -978,7 +986,13 @@ export function Office({ onCreate }: { onCreate: () => void }) {
       store: useStore,
       inject: (msg: ServerMessage) => ingestMessage(useStore, msg),
       agentPos: (id: string) => livePositions.get(id),
-      chairs: () => chairField.chairs.map((c) => ({ id: c.id, x: c.x, z: c.z, baseX: c.baseX, baseZ: c.baseZ, yaw: c.yaw, pushable: c.pushable })),
+      hand: handState,
+      chairs: () => chairField.chairs.map((c) => ({ id: c.id, x: c.x, z: c.z, baseX: c.baseX, baseZ: c.baseZ, yaw: c.yaw, spin: c.spin, pushable: c.pushable, touchedAt: c.touchedAt, gliding: !Number.isNaN(c.glideT0) })),
+      chairField,
+      spaces: () => {
+        const state = useStore.getState();
+        return layoutFor(Object.values(state.agents), state.spaceNames).spaces.map((s) => ({ id: s.id, kind: s.kind, x: s.x, z: s.z }));
+      },
       boardPose: (spaceId: string) => {
         const state = useStore.getState();
         const space = layoutFor(Object.values(state.agents), state.spaceNames).spaces.find((s) => s.id === spaceId);

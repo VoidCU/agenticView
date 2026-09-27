@@ -84,7 +84,7 @@ function Feed({ items }: { items: FeedItem[] }) {
   );
 }
 
-function Header({ agent }: { agent: Agent }) {
+function Header({ agent, onCollapse }: { agent: Agent; onCollapse?: () => void }) {
   const status = useAgentStatus(agent.id);
   const providers = useStore((s) => s.providers);
   const settings = useStore((s) => s.settings);
@@ -126,7 +126,11 @@ function Header({ agent }: { agent: Agent }) {
           <span className="xp-num">{agent.stats.tasksDone} done</span>
         </div>
       </div>
-      <AgentMenu agent={agent} />
+      {/* One flex row, never stacked: actions menu, then Collapse at the far right. */}
+      <div className="chat-head-actions">
+        <AgentMenu agent={agent} />
+        {onCollapse && <button type="button" className="chat-collapse btn btn-ghost btn-xs" onClick={onCollapse} aria-label="Collapse chat">Collapse</button>}
+      </div>
       {switchOpen && (
         <SwitchAgentModal
           agentId={agent.id}
@@ -226,8 +230,7 @@ export function ChatPanel({ collapsed = false, onCollapseChange }: { collapsed?:
   const uploading = attachments.some((a) => !a.path && !a.error);
   return (
     <aside className="panel panel-chat" aria-label={`Chat with ${agent.name}`} onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
-      <button type="button" className="chat-collapse btn btn-ghost btn-xs" onClick={() => onCollapseChange?.(true)} aria-label="Collapse chat">Collapse</button>
-      <Header agent={agent} />
+      <Header agent={agent} onCollapse={() => onCollapseChange?.(true)} />
       <SessionNotice agent={agent} />
       <WorkLog agent={agent} />
       <Feed items={items} />
