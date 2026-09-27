@@ -211,7 +211,12 @@ export async function nextTask(args) {
     if (state.office && !isSameInstance(state.office, discovered))
         dropRunsForOldOffice(discovered);
     state.office = discovered;
-    const deadline = Date.now() + Math.min(3600, Math.max(1, args.wait_seconds ?? 600)) * 1000;
+    const started = Date.now();
+    let deadline = started + Math.min(3600, Math.max(1, args.wait_seconds ?? 600)) * 1000;
+    // Doze cap when the office has no claude-session agents at all: polling every few minutes would
+    // burn the coordinator session for nothing, so one call quietly waits up to this long instead.
+    const idleCapMs = Math.max(1, Number(process.env.AGENTICVIEW_IDLE_WAIT_SECONDS ?? 3600)) * 1000;
+    let dozing = false;
     const session = { model: state.model, cwd: startDir(args.project), agent: state.agent };
     const max = typeof args.max_tasks === "number" ? Math.max(0, Math.floor(args.max_tasks)) : undefined;
     for (;;) {
@@ -234,6 +239,16 @@ export async function nextTask(args) {
             }
             if (notice)
                 return reply(`${notice}\n\n${status}`);
+            // Nothing this session could ever serve (no bound agents, no unbound claude-session agents):
+            // stretch this same call toward the idle cap instead of returning for a pointless re-poll.
+            if (res.servable === 0 && state.runs.size === 0) {
+                dozing = true;
+                deadline = Math.min(started + idleCapMs, Math.max(deadline, Date.now() + Math.min(idleCapMs, 25_000)));
+            }
+            else if (dozing) {
+                dozing = false;
+                deadline = started + Math.min(3600, Math.max(1, args.wait_seconds ?? 600)) * 1000;
+            }
             // max_tasks 0: only a check for cancellations, never a wait.
             if (max === 0)
                 return reply(`No cancellations. ${status}`);
@@ -254,7 +269,9 @@ export async function nextTask(args) {
     const running = heldRuns();
     return reply(running.length
         ? `No new task yet. Still running: ${running.map((id) => `${id} (${state.runs.get(id).agent})`).join(", ")}. Call agenticview_next_task again (short wait_seconds while subagents run).`
-        : "No task arrived yet. Call agenticview_next_task again to keep waiting (the office shows this session as a connected worker while you poll).");
+        : dozing
+            ? "No claude-session agents exist in this office right now, so there is nothing this session could serve. Call agenticview_next_task again: it will doze in long waits until such an agent is created or moved to this provider."
+            : "No task arrived yet. Call agenticview_next_task again to keep waiting (the office shows this session as a connected worker while you poll).");
 }
 function ackText(ack, okText, runId) {
     if (ack.ok)

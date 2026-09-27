@@ -42,7 +42,12 @@ export declare class UsageTracker {
     getSessionModelLimits(sessionId: string): Record<string, ProviderModelLimits>;
     /** Aggregate claude-session limits across all sessions: most recently updated entry per model. */
     private getClaudeSessionAggregateModels;
-    recordFailure(agent: Agent, provider: Provider, model: string, errorText: string): LimitInfo;
+    /**
+     * Records a failed run. Only quota and rate-limit failures mark the provider (and the agent's
+     * chip) as LIMITED: a crash or auth error says nothing about the provider's remaining quota, and
+     * marking those limited left "LIMITED" chips stuck on agents after unrelated failures.
+     */
+    recordFailure(agent: Agent, provider: Provider, model: string, errorText: string): LimitInfo | undefined;
     recordSuccess(agent: Agent, provider: Provider, model: string): void;
     getProviderLimit(provider: Provider): LimitInfo;
     clearProviderLimit(provider: Provider): void;

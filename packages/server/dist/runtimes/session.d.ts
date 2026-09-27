@@ -128,6 +128,12 @@ export interface ClaimResult {
     capacity: number;
     /** Runs this session holds after the claim. */
     held: number;
+    /**
+     * How many claude-session agents this session could ever serve (its bound agents plus every
+     * unbound one). 0 means polling is pointless until an agent is created or moved to this
+     * provider, so the worker dozes with hour-long waits instead of its normal cadence.
+     */
+    servable?: number;
 }
 /** What the office records about a run as it is claimed, reported on and finished. */
 export interface RunAttribution {
@@ -159,6 +165,8 @@ export interface SessionHooks {
     }>;
     /** A run was claimed, or its subagent id / changed files became known. */
     attribute?(info: RunAttribution): void | Promise<void>;
+    /** Ids of every claude-session agent in this world (for the claim reply's `servable` count). */
+    sessionAgentIds?(): Promise<string[]>;
 }
 /** Session record as persisted (capacity may be missing in files written by older versions). */
 export type WorkerSessionRecord = WorkerSession;

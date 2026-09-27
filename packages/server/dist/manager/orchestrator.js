@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { effectiveEffort, isTerminal, newId, ProviderSchema, PROVIDER_ORDER, WORK_COMMAND, FAILOVER_PROVIDER_MODELS, } from "@agenticview/shared";
 import { classifyError } from "../runtimes/errors.js";
+import { coverInsteadOfRetry } from "../tasks/retryGuard.js";
 import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { buildRosterPreamble } from "./preamble.js";
 import { SessionRuntime } from "../runtimes/session.js";
@@ -388,10 +389,11 @@ export class Orchestrator {
                 revive: { phase: "done", failedTaskId, ...(cause ? { cause } : {}), ...(failedProvider ? { failedProvider } : {}), switchTo: { provider: provider ?? null, model: model ?? null } },
             });
             this.emitAgent(updated);
-            // Retry the task.
+            // Retry the task, unless its work is already covered (resolved, or a done replacement exists):
+            // then it is marked solved instead of re-run.
             if (failedTaskId) {
                 const task = await tasks.get(failedTaskId);
-                if (task && task.status === "failed") {
+                if (task && task.status === "failed" && !(await coverInsteadOfRetry(tasks, failedTaskId))) {
                     await tasks.transition(failedTaskId, "queued", { error: undefined, result: undefined });
                     this.startTask(failedTaskId);
                 }
@@ -492,7 +494,9 @@ export class Orchestrator {
             const target = this.deps.world.kind === "hub" && task.projectPath ? `\n\nTarget project: ${task.projectPath} (pass this as projectPath to assign_task)` : "";
             const notes = this.takeProviderNotes();
             const notesBlock = notes.length ? `\n\n## Provider notes\n${notes.map((n) => `- ${n}`).join("\n")}` : "";
-            text = `${preamble}${target}${notesBlock}\n\n## User request\n${task.description}`;
+            // The request's own id: tasks assigned now get it as parentId (the closing rule's failed children).
+            const self = `\n\nThis request is task ${task.id}; the tasks you assign are its children (parentId ${task.id}).`;
+            text = `${preamble}${target}${notesBlock}${self}\n\n## User request\n${task.description}`;
         }
         else {
             const body = task.kind === "work" ? `${task.title}\n\n${task.description}` : task.description;
@@ -760,9 +764,11 @@ export class Orchestrator {
                 final = await this.finish(task, "failed", { error: errorText, result: result.text || undefined, session });
                 if (this.deps.usageTracker) {
                     const lim = this.deps.usageTracker.recordFailure(agent, provider, req.model ?? agent.model ?? "default", errorText);
-                    const updatedAgent = await registry.update(agent.id, { limit: lim });
-                    this.emitAgent(updatedAgent);
-                    await this.deps.emitProviders?.();
+                    if (lim) {
+                        const updatedAgent = await registry.update(agent.id, { limit: lim });
+                        this.emitAgent(updatedAgent);
+                        await this.deps.emitProviders?.();
+                    }
                     // Trigger revive for workers whose provider hit a quota, rate-limit, or crash.
                     const cls = classifyError(errorText ?? "");
                     if (agent.role === "worker" && (cls === "quota" || cls === "rate-limit" || cls === "crash")) {
@@ -792,9 +798,11 @@ export class Orchestrator {
             final = await this.finish(task, "failed", { error: errorText });
             if (this.deps.usageTracker && runAgent && runProvider) {
                 const lim = this.deps.usageTracker.recordFailure(runAgent, runProvider, runAgent.model ?? "default", errorText);
-                const updatedAgent = await registry.update(runAgent.id, { limit: lim });
-                this.emitAgent(updatedAgent);
-                await this.deps.emitProviders?.();
+                if (lim) {
+                    const updatedAgent = await registry.update(runAgent.id, { limit: lim });
+                    this.emitAgent(updatedAgent);
+                    await this.deps.emitProviders?.();
+                }
                 const cls = classifyError(errorText ?? "");
                 if (runAgent.role === "worker" && (cls === "quota" || cls === "rate-limit" || cls === "crash")) {
                     void this.triggerRevive(runAgent, runProvider, task.id, errorText ?? "", cls === "crash" ? "crash" : "limit");

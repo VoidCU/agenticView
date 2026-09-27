@@ -7,6 +7,7 @@ import { subagentNames, syncSubagents, writeSubagent } from "./agents/subagents.
 import { AgentMemory } from "./agents/memory.js";
 import { AgentRegistry } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
+import { coverInsteadOfRetry } from "./tasks/retryGuard.js";
 import { Orchestrator } from "./manager/orchestrator.js";
 import { readJsonFile, writeJsonFile } from "./store/jsonStore.js";
 import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.js";
@@ -405,6 +406,7 @@ export async function createWorld(ref, opts) {
                 return a ? { id: a.id, name: a.name } : undefined;
             },
             save: (list) => writeJsonFile(sessionsFile, { sessions: list }),
+            sessionAgentIds: async () => (await sessionAgents()).map((a) => a.id),
             prepare: async (req) => {
                 const task = req.taskId ? await tasks.get(req.taskId) : undefined;
                 // A brainstorm must not inherit the saved subagent's editing tools or instructions.
@@ -615,7 +617,8 @@ export async function createWorld(ref, opts) {
                 updatePatch.model = patch.model ?? null;
             if ("effort" in patch)
                 updatePatch.effort = patch.effort ?? null;
-            updatePatch.limit = undefined;
+            // A provider change clears agent.limit in the registry (limits are per provider); a model or effort
+            // change on the same, still-limited provider keeps it.
             const updated = await registry.update(id, updatePatch);
             opts.bus.emit({ type: "agent.updated", agent: updated });
             if (updated.provider === "claude-session" || cur.provider === "claude-session") {
@@ -643,16 +646,21 @@ export async function createWorld(ref, opts) {
             }
             return { count: updatedAgents.length, agents: updatedAgents };
         },
-        retryTask: async (taskId) => {
+        retryTask: async (taskId, retryOpts) => {
             const cur = await tasks.get(taskId);
             if (!cur)
                 throw new Error(`Unknown task ${taskId}`);
             if (cur.status !== "failed")
                 throw new Error(`Only failed tasks can be retried (status is ${cur.status})`);
+            if (!retryOpts?.force) {
+                const cover = await coverInsteadOfRetry(tasks, taskId);
+                if (cover)
+                    return { task: cover.task, rerun: false, message: cover.message, ...(cover.byTaskId ? { byTaskId: cover.byTaskId } : {}) };
+            }
             // transition() clears the resolution automatically when moving to queued.
             const retried = await tasks.transition(taskId, "queued", { error: undefined, result: undefined });
             orchestrator.startTask(taskId);
-            return retried;
+            return { task: retried, rerun: true, message: `Retrying task ${taskId}` };
         },
         resolveTask: async (taskId, byTaskId, note) => {
             const task = await tasks.get(taskId);

@@ -529,6 +529,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
           return a ? { id: a.id, name: a.name } : undefined;
         },
         save: (list) => writeJsonFile(sessionsFile, { sessions: list }),
+        sessionAgentIds: async () => (await sessionAgents()).map((a) => a.id),
         prepare: async (req) => {
           const task = req.taskId ? await tasks.get(req.taskId) : undefined;
           // A brainstorm must not inherit the saved subagent's editing tools or instructions.

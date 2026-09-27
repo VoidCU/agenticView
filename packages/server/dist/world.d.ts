@@ -16,6 +16,14 @@ export interface WorldOptions {
     bridgeUrl: () => string;
     workerTools?: (agent: Agent, task: Task) => BridgeTool[];
 }
+/** Outcome of World.retryTask: re-run, or already covered and marked solved. */
+export interface RetryResult {
+    task: Task;
+    rerun: boolean;
+    message: string;
+    /** The done task that covers it (rerun false). */
+    byTaskId?: string;
+}
 export interface World {
     ref: WorldRef;
     root: string;
@@ -51,7 +59,14 @@ export interface World {
         count: number;
         agents: Agent[];
     }>;
-    retryTask: (taskId: string) => Promise<Task>;
+    /**
+     * Retry a failed task. When its work is already covered (it has a resolution, or a done replacement:
+     * same assignee + title created after it) it is marked solved instead of re-run (`rerun: false`);
+     * `force` re-runs anyway (and clears any resolution).
+     */
+    retryTask: (taskId: string, opts?: {
+        force?: boolean;
+    }) => Promise<RetryResult>;
     resolveTask: (taskId: string, byTaskId: string | undefined, note: string) => Promise<Task>;
     unresolveTask: (taskId: string) => Promise<Task>;
     getLimits: () => Promise<LimitsReport>;

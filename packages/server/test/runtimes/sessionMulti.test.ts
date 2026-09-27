@@ -132,3 +132,23 @@ describe("SessionRuntime: several runs per session", () => {
     expect(rt.sessionList()[0]!.capacity).toBe(1);
   });
 });
+
+describe("claim servable count", () => {
+  it("counts bound-to-me plus unbound agents; agents bound to another live session are excluded", async () => {
+    const { rt, hooks } = setup();
+    const [a, b, c] = [mk("A"), mk("B"), mk("C")];
+    hooks.sessionAgentIds = async () => [a.id, b.id, c.id];
+    // Register both sessions.
+    await rt.claimMany("s1", { waitMs: 0, holding: [], max: 0 });
+    await rt.claimMany("s2", { waitMs: 0, holding: [], max: 0 });
+    hooks.bindings.set(a.id, "s1");
+    hooks.bindings.set(b.id, "s2");
+    // For s1: A (bound to me) + C (unbound) = 2; B is bound to the live s2.
+    const r1 = await rt.claimMany("s1", { waitMs: 0, holding: [], max: 0 });
+    expect(r1.servable).toBe(2);
+    // No session agents at all -> 0.
+    hooks.sessionAgentIds = async () => [];
+    const r0 = await rt.claimMany("s1", { waitMs: 0, holding: [], max: 0 });
+    expect(r0.servable).toBe(0);
+  });
+});

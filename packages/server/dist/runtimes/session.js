@@ -447,7 +447,17 @@ export class SessionRuntime {
         this.touch(workerId, info);
         if (info?.agent)
             await this.bindNamed(workerId, info.agent);
+        // Agents this session could serve: its bound ones plus every unbound claude-session agent.
+        let servable;
+        if (this.hooks.sessionAgentIds) {
+            const ids = await this.hooks.sessionAgentIds().catch(() => undefined);
+            if (ids) {
+                const bindings = await Promise.all(ids.map((id) => this.hooks.bindingOf(id)));
+                servable = ids.filter((_, i) => !bindings[i] || bindings[i] === workerId || !this.sessions.has(bindings[i])).length;
+            }
+        }
         const result = (tasks) => ({
+            servable,
             tasks,
             cancelled: holding ? holding.filter((id) => this.runs.get(id)?.workerId !== workerId && this.cancelled.has(id)) : [],
             gone: holding ? holding.filter((id) => this.runs.get(id)?.workerId !== workerId && !this.cancelled.has(id)) : [],

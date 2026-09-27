@@ -119,6 +119,12 @@ export interface ClaimResult {
   capacity: number;
   /** Runs this session holds after the claim. */
   held: number;
+  /**
+   * How many claude-session agents this session could ever serve (its bound agents plus every
+   * unbound one). 0 means polling is pointless until an agent is created or moved to this
+   * provider, so the worker dozes with hour-long waits instead of its normal cadence.
+   */
+  servable?: number;
 }
 
 /** What the office records about a run as it is claimed, reported on and finished. */
@@ -143,6 +149,8 @@ export interface SessionHooks {
   prepare?(req: RunRequest): Promise<{ subagent: string | null; recentWork: RecentWork[] }>;
   /** A run was claimed, or its subagent id / changed files became known. */
   attribute?(info: RunAttribution): void | Promise<void>;
+  /** Ids of every claude-session agent in this world (for the claim reply's `servable` count). */
+  sessionAgentIds?(): Promise<string[]>;
 }
 
 /** Session record as persisted (capacity may be missing in files written by older versions). */
@@ -608,7 +616,17 @@ export class SessionRuntime implements Runtime {
     const { waitMs = 25_000, signal, info, holding } = opts;
     this.touch(workerId, info);
     if (info?.agent) await this.bindNamed(workerId, info.agent);
+    // Agents this session could serve: its bound ones plus every unbound claude-session agent.
+    let servable: number | undefined;
+    if (this.hooks.sessionAgentIds) {
+      const ids = await this.hooks.sessionAgentIds().catch(() => undefined);
+      if (ids) {
+        const bindings = await Promise.all(ids.map((id) => this.hooks.bindingOf(id)));
+        servable = ids.filter((_, i) => !bindings[i] || bindings[i] === workerId || !this.sessions.has(bindings[i]!)).length;
+      }
+    }
     const result = (tasks: SessionTask[]): ClaimResult => ({
+      servable,
       tasks,
       cancelled: holding ? holding.filter((id) => this.runs.get(id)?.workerId !== workerId && this.cancelled.has(id)) : [],
       gone: holding ? holding.filter((id) => this.runs.get(id)?.workerId !== workerId && !this.cancelled.has(id)) : [],

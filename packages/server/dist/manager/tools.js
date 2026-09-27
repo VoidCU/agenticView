@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EffortSchema, catalogueFor, isCustomProvider, getCustomProviders, effortsFor, findModel, isTerminal, ProviderSchema, ToolAllowanceSchema, PermissionModeSchema, } from "@agenticview/shared";
+import { coverInsteadOfRetry } from "../tasks/retryGuard.js";
 import { brainstormTool } from "./brainstorm.js";
 import { officeTools } from "./officeTools.js";
 export const MANAGER_SYSTEM_PROMPT = `You are the Manager of an AgenticView office: a team of AI coding agents ("workers") that edit a real software project.
@@ -10,7 +11,8 @@ Rules:
 - Prefer existing workers whose specialty fits. Create a new worker with create_agent only when nobody on the roster fits. When preferCheapModels is on (the default), create_agent without an explicit provider/model automatically picks the cheapest available provider — the result will tell you which one was chosen. Use update_agent to change them later if needed.
 - Split work into self-contained assignments. Each assign_task description must stand alone: what to change, where (files or folders), how to verify. Never assign the same file to two workers at once.
 - assign_task returns immediately. Call await_tasks with every task id you started before you report. Workers may fail; read their result and decide whether to reassign, retry with a clearer description, or report the failure.
-- When a task fails and a later task (by you or another worker) completes the same work, call resolve_task with the failing task id and the succeeding task id. This marks the failure as solved in the history without changing its status. If no retry is possible and the failure is acceptable, call resolve_task with just a note.
+- When a task fails and a later task (by you or another worker) completes the same work, call resolve_task with the failing task id and the succeeding task id. This marks the failure as solved in the history without changing its status. If no retry is possible and the failure is acceptable, call resolve_task with just a note. retry_task never re-runs work that is already covered: it marks such a task solved and says so.
+- When await_tasks returns failedUnresolved, those failures are still open; handle each before you finish (see the closing rule).
 - Use ask_user only when a decision truly needs the user.
 - The office is a honeycomb of rooms. list_spaces shows who sits where and whose designated desk each seat is. Every worker has one designated desk (its workSeat, never shared): it sits there whenever it works and may wander while idle. move_worker / arrange_workers change designated desks (group a team in one pod) when the user asks or when it clearly helps; taking another worker's desk swaps the two. Designated desks exist only in work rooms (pods, Production Room, Research Room): moving a worker to the meeting room or lounge only seats it there for a while and keeps its designated desk. My Office is the user's own room and has no worker seats. The Production Room and Research Room hold the Producer and the Research team; set_layout / move_room / set_room_kind reshape rooms, but only when the user asks for a layout change.
 - Group agents by role and name their rooms with rename_space. Move collaborators next to each other while they work on the same task.
@@ -21,7 +23,8 @@ Rules:
 - Workers keep a memory of their recent tasks that survives provider and model switches, so a task retried on another provider continues where it left off; you do not need to repeat earlier context.
 - "## Provider notes" in the preamble report agents that hit a provider limit (quota or rate limit): either failed over automatically already, or with no failover available. Review each with proper analysis: how hard the task is, what limits remain (usage/limit status), and which provider/model/session fits. Then move the agent to the next suitable provider and model: update_agent {provider, model} (a model from that provider's catalogue: the cheap tier unless the task is hard) or, for claude-session, update_agent {provider: "claude-session"} plus assign_session to the session whose model fits (never set a model for claude-session). Then retry the failed task with retry_task if it still needs doing; that clears the limit and closes the user's Inbox item. If the failover already retried it, leave it running unless the placement is clearly wrong.
 - You never edit files yourself.
-- End with a short report for the user: what was done, by whom, and anything left open.`;
+- Closing rule: before writing the final report, call list_tasks with includeDone and look at this request's failed children (parentId is this request). Never silently abandon a failure: for each failed child without a resolution, either retry it with retry_task (after moving the agent to another provider/model with update_agent if needed) and await it, or mark it solved with resolve_task (byTaskId of the task that did the work, or a note why the failure is acceptable).
+- End with a short report for the user: what was done, by whom, and anything left open. Say what was done about each failed task (retried and its outcome, or resolved and why).`;
 export function workerSystemPrompt(agent, projectPath) {
     return [
         `You are ${agent.name}, a ${agent.specialty || "generalist"} engineer on an AgenticView team.`,
@@ -133,6 +136,23 @@ export function resolveAssignmentTarget(ctx, agent, projectPath) {
     if (agent.scope !== "global")
         return { ok: false, error: `ERROR: scope: ${agent.name} is not a global agent` };
     return { ok: true, projectPath };
+}
+export const FAILED_UNRESOLVED_HINT = "failedUnresolved lists awaited tasks that failed and are not resolved. Do not abandon them: before your final report, retry_task each one (after update_agent to another provider/model if it hit a limit) or resolve_task it (byTaskId of the task that completed the work, or a note why the failure is acceptable), and say in the report what you did about each.";
+/** Ids of failed tasks without a resolution. */
+export function failedUnresolved(tasks) {
+    return tasks.filter((t) => t.status === "failed" && !t.resolution).map((t) => t.id);
+}
+/**
+ * await_tasks reply once every task finished: the plain array, or, when some failed without a resolution,
+ * {tasks, failedUnresolved, message} so the Manager sees the open failures in-band. Failed tasks are re-read:
+ * a failover may have re-queued one, or a resolution landed, since it settled.
+ */
+async function finishedReply(ctx, settled, line) {
+    const fresh = await Promise.all(settled.map(async (t) => (t.status === "failed" ? ((await ctx.tasks.get(t.id)) ?? t) : t)));
+    const failed = failedUnresolved(fresh);
+    if (failed.length === 0)
+        return JSON.stringify(fresh.map(line), null, 2);
+    return JSON.stringify({ tasks: fresh.map(line), failedUnresolved: failed, message: FAILED_UNRESOLVED_HINT }, null, 2);
 }
 export function managerTools(ctx) {
     return [
@@ -280,7 +300,9 @@ export function managerTools(ctx) {
                 if (problem) {
                     // Revert only the fields this patch changed: restoring the whole stale agent could put back a
                     // desk (workSeat/placement) that changed hands meanwhile.
-                    await ctx.registry.update(cur.id, Object.fromEntries(Object.keys(patch).map((k) => [k, cur[k]])));
+                    // A provider change cleared agent.limit; the revert puts it back with the old provider.
+                    const keys = "provider" in patch ? [...Object.keys(patch), "limit"] : Object.keys(patch);
+                    await ctx.registry.update(cur.id, Object.fromEntries(keys.map((k) => [k, cur[k]])));
                     return `ERROR: ${problem}`;
                 }
                 ctx.emitAgent(next);
@@ -339,7 +361,7 @@ export function managerTools(ctx) {
         },
         {
             name: "await_tasks",
-            description: "Block until every listed task is finished, then return each task's status and result or error. With maxWaitSeconds, returns early with the tasks still running; call it again with those ids.",
+            description: "Block until every listed task is finished, then return each task's status and result or error (a JSON array). With maxWaitSeconds, returns early with the tasks still running; call it again with those ids. When any awaited task FAILED and has no resolution, the reply is instead an object {tasks, failedUnresolved: [ids], message}: before your final report, retry_task each of those (after moving the agent/model if needed) or resolve_task it (byTaskId of the task that did the work, or a note), and say in the report what you did about each.",
             schema: {
                 taskIds: z.array(z.string()).min(1),
                 maxWaitSeconds: z.number().int().min(1).max(86_400).optional().describe("Return after this long even if tasks are still running (default: wait until all finish)"),
@@ -362,27 +384,29 @@ export function managerTools(ctx) {
                         return `ERROR: waiting would deadlock.\n${blocked.join("\n")}`;
                     }
                 }
-                const line = (t) => ({ id: t.id, title: t.title, status: t.status, result: t.result, error: t.error });
+                const line = (t) => ({ id: t.id, title: t.title, status: t.status, result: t.result, error: t.error, ...(t.resolution ? { resolution: t.resolution } : {}) });
                 const maxMs = typeof args.maxWaitSeconds === "number" ? args.maxWaitSeconds * 1000 : undefined;
                 // A Manager waiting on its own workers is still working: the request stays "running". Only a
                 // question or permission for the user moves it to "waiting" (shown as "Waiting on you").
                 {
                     const all = Promise.all(ids.map((id) => ctx.awaitTask(id)));
                     if (maxMs === undefined)
-                        return JSON.stringify((await all).map(line), null, 2);
+                        return finishedReply(ctx, await all, line);
                     let timer;
                     const timedOut = new Promise((r) => (timer = setTimeout(() => r(null), maxMs)));
                     const results = await Promise.race([all, timedOut]);
                     clearTimeout(timer);
                     if (results)
-                        return JSON.stringify(results.map(line), null, 2);
+                        return finishedReply(ctx, results, line);
                     const now = await Promise.all(ids.map((id) => ctx.tasks.get(id)));
                     const finished = now.filter((t) => Boolean(t && isTerminal(t.status)));
                     const running = now.filter((t) => Boolean(t && !isTerminal(t.status)));
+                    const failed = failedUnresolved(finished);
                     return JSON.stringify({
                         stillRunning: running.map((t) => ({ id: t.id, title: t.title, status: t.status })),
                         finished: finished.map(line),
-                        message: `Not finished after ${Math.round(maxMs / 1000)}s. Call await_tasks again with taskIds ${JSON.stringify(running.map((t) => t.id))} to keep waiting.`,
+                        ...(failed.length ? { failedUnresolved: failed } : {}),
+                        message: `Not finished after ${Math.round(maxMs / 1000)}s. Call await_tasks again with taskIds ${JSON.stringify(running.map((t) => t.id))} to keep waiting.${failed.length ? ` ${FAILED_UNRESOLVED_HINT}` : ""}`,
                     }, null, 2);
                 }
             },
@@ -397,16 +421,16 @@ export function managerTools(ctx) {
         ...officeTools(ctx),
         {
             name: "resolve_task",
-            description: "Mark a failed (or cancelled) task as solved without changing its history. Use when a later task completed the same work, or when the failure is acceptable. Retrying a resolved task clears the resolution.",
+            description: "Mark a failed (or cancelled) task as solved without changing its history (the office shows it as Solved, and await_tasks stops listing it under failedUnresolved). Use when a later task completed the same work (byTaskId), or when the failure is acceptable (note). retry_task never re-runs a resolved task.",
             schema: {
                 taskId: z.string().describe("Id of the failed task to mark as resolved"),
                 byTaskId: z.string().optional().describe("Id of the task that completed the same work (must be done)"),
-                note: z.string().min(1).describe("Short explanation of why this failure is considered resolved"),
+                note: z.string().optional().describe("Short explanation of why this failure is considered resolved"),
             },
             handler: async (args) => {
                 const taskId = String(args.taskId);
-                const byTaskId = args.byTaskId;
-                const note = String(args.note);
+                const byTaskId = typeof args.byTaskId === "string" && args.byTaskId.trim() ? args.byTaskId.trim() : undefined;
+                const note = typeof args.note === "string" && args.note.trim() ? args.note.trim() : byTaskId ? `Completed by ${byTaskId}` : "Marked solved by the Manager";
                 const task = await ctx.tasks.get(taskId);
                 if (!task)
                     return `ERROR: unknown task ${taskId}`;
@@ -426,7 +450,7 @@ export function managerTools(ctx) {
         },
         {
             name: "retry_task",
-            description: "Retry a failed task on its assignee's current provider/model/session (same as Retry in the office). The agent's memory carries its earlier attempt, so it continues where it left off.",
+            description: "Retry a failed task on its assignee's current provider/model/session (same as Retry in the office). The agent's memory carries its earlier attempt, so it continues where it left off. A task whose work is already covered (already resolved, or a later task of the same assignee and title is done) is not re-run: it is marked solved and the reply says \"already covered by <task>: marked solved\".",
             schema: { taskId: z.string() },
             handler: async (args) => {
                 const taskId = String(args.taskId);
@@ -435,10 +459,20 @@ export function managerTools(ctx) {
                     return `ERROR: unknown task ${taskId}`;
                 if (task.status !== "failed")
                     return `ERROR: only failed tasks can be retried (status is ${task.status})`;
+                // Work already done by another task (a done replacement, or already resolved): mark solved, never re-run.
+                const cover = await coverInsteadOfRetry(ctx.tasks, taskId);
+                const assignee = await ctx.registry.get(task.assigneeId);
+                const reviving = assignee?.revive && assignee.revive.phase !== "done" && assignee.revive.failedTaskId === taskId && ctx.reviveAgent;
+                if (cover) {
+                    // Still land a pending limit decision (agent on its current provider, Inbox item closed); the
+                    // revive sees the resolution and does not re-run the task either.
+                    if (reviving)
+                        await ctx.reviveAgent(assignee.id, assignee.provider ?? undefined, assignee.model ?? undefined);
+                    return cover.message;
+                }
                 // The task an agent hit a limit on: this is the Manager's decision landing. Revive on the
                 // agent's current (just updated) provider/model: clears the limit, closes the Inbox item, retries.
-                const assignee = await ctx.registry.get(task.assigneeId);
-                if (assignee?.revive && assignee.revive.phase !== "done" && assignee.revive.failedTaskId === taskId && ctx.reviveAgent) {
+                if (reviving) {
                     await ctx.reviveAgent(assignee.id, assignee.provider ?? undefined, assignee.model ?? undefined);
                     return `Retrying task ${taskId} on ${assignee.provider ?? "the default provider"}/${assignee.model ?? "default"} (limit cleared); call await_tasks with it to collect the result`;
                 }
