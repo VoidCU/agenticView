@@ -15,7 +15,9 @@
  *    DeskMonitor or whiteboard within MAX_INTERACT_DIST; E (or a click) on a robot within
  *    BONK_RANGE gives it a playful bonk (state/bonk.ts); clicking the My Office wall screen
  *    (userData.wallScreenKind === "myoffice") opens Settings on the Connections tab.
- *  - Keys ignored while typing in inputs or a modal is open.
+ *  - C on a robot within CHAT_RANGE opens its chat, expanded, mouse freed, message box focused
+ *    (state/walkChat.ts); Esc then closes it and walking resumes (click the view to look around).
+ *  - Keys ignored while typing in inputs or a modal is open (and C ignored with Ctrl/Cmd/Alt: copy).
  */
 import { useRef, useEffect, useMemo } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -33,6 +35,7 @@ import { bonk, BONK_RANGE, greet, GREET_RANGE } from "../state/bonk";
 import { SLAP_HIT_MS, triggerHand } from "./handGesture";
 import { WalkHand, updateWalkHand } from "./WalkHand";
 import { openOverlayFromWalk } from "../state/pointerLock";
+import { endWalkChat, installWalkChatEscape, isTypingTarget, isWalkChatKey, openWalkChat, useWalkChat } from "../state/walkChat";
 
 // ---- Constants ----
 
@@ -138,6 +141,7 @@ export function WalkModeController({
     bonkPending: false,  // user pressed E: bonk the agent under the crosshair if close
     challengePending: false, // user pressed G: challenge the agent under the crosshair to RPS
     greetPending: false, // user pressed H: say hi to the agent under the crosshair
+    chatPending: false,  // user pressed C: open a chat with the agent under the crosshair
   });
 
   const keys = useRef(new Set<string>());
@@ -147,6 +151,10 @@ export function WalkModeController({
   const lastPlayerPosition = useRef<{ x: number; z: number; yaw: number; spaceId: string; at: number } | null>(null);
 
   useEffect(() => () => {
+    // Leaving walk mode ends a walk chat as it stands (the panel's collapsed state is left as it is).
+    const chat = useWalkChat.getState().session;
+    endWalkChat();
+    chat?.release();
     usePositions.getState().setPlayer(undefined);
     // Remember where we stopped so the 'You' robot can walk home from here.
     useWalk.getState().setExitAt({ x: st.current.x, z: st.current.z });
@@ -197,6 +205,8 @@ export function WalkModeController({
         document.exitPointerLock();
         return;
       }
+      // Clicking back into the view ends a walk chat (the chat column hides with the walk HUD again).
+      if (st.current.locked) endWalkChat();
       if (st.current.locked && useWalk.getState().paused) useWalk.getState().setPaused(false);
       if (!st.current.locked && !useWalk.getState().paused) {
         // Pointer lock released (user pressed Esc, or browser forced unlock).
@@ -226,9 +236,10 @@ export function WalkModeController({
   // ---- Keyboard input ----
 
   useEffect(() => {
+    // Esc while a walk chat is open closes the chat instead of leaving walk mode (capture phase).
+    const uninstallChatEscape = installWalkChatEscape();
     const onKeyDown = (e: KeyboardEvent) => {
-      const el = document.activeElement;
-      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      if (isTypingTarget(document.activeElement) || isTypingTarget(e.target instanceof Element ? e.target : null)) return;
       if (document.querySelector('[role="dialog"]')) return;
       if (e.key === "Escape") {
         // Esc: release pointer lock → onLockChange fires → setWalking(false).
@@ -240,12 +251,15 @@ export function WalkModeController({
       if (e.code === "KeyE" && !e.repeat) st.current.bonkPending = true;
       if (e.code === "KeyG" && !e.repeat) st.current.challengePending = true;
       if (e.code === "KeyH" && !e.repeat) st.current.greetPending = true;
+      // C: chat. Never with a modifier (Ctrl/Cmd+C is copy), and not while an overlay has the mouse.
+      if (isWalkChatKey(e)) st.current.chatPending = true;
       keys.current.add(e.code);
     };
     const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     return () => {
+      uninstallChatEscape();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
@@ -324,13 +338,14 @@ export function WalkModeController({
     const euler = scratch.current.euler.set(cur.pitch, cur.yaw, 0, "YXZ");
     camera.quaternion.setFromEuler(euler);
 
-    // Screen-centre raycast: fire when a click, E, G or H press is pending.
-    if (cur.clickPending || cur.bonkPending || cur.challengePending || cur.greetPending) {
-      const intent: WalkIntent = cur.clickPending ? "click" : cur.bonkPending ? "bonk" : cur.challengePending ? "challenge" : "greet";
+    // Screen-centre raycast: fire when a click, E, G, H or C press is pending.
+    if (cur.clickPending || cur.bonkPending || cur.challengePending || cur.greetPending || cur.chatPending) {
+      const intent: WalkIntent = cur.clickPending ? "click" : cur.bonkPending ? "bonk" : cur.challengePending ? "challenge" : cur.greetPending ? "greet" : "chat";
       cur.clickPending = false;
       cur.bonkPending = false;
       cur.challengePending = false;
       cur.greetPending = false;
+      cur.chatPending = false;
       raycaster.current.setFromCamera(scratch.current.centre, camera);
       const hits = raycaster.current.intersectObjects(scene.children, true);
       const action = walkInteraction(hits, camera.position, scratch.current.world, intent);
@@ -344,6 +359,7 @@ export function WalkModeController({
         openOverlayFromWalk();
         select(action.id);
       }
+      else if (action?.kind === "chat") openWalkChat(action.id);
       else if (action?.kind === "board") onBoard?.(action.id);
       else if (action?.kind === "challenge") window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: action.id } }));
       else if (action?.kind === "settings") {
@@ -391,11 +407,15 @@ export function WalkMode({ spaces, startX, startZ, solids, onBoard }: WalkModePr
   );
 }
 
-export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge" | "greet" | "settings"; id: string };
-/** What triggered the crosshair raycast: a click, E (bonk), G (challenge to rock-paper-scissors) or H (say hi). */
-export type WalkIntent = "click" | "bonk" | "challenge" | "greet";
+export type WalkAction = { kind: "bonk" | "select" | "board" | "challenge" | "greet" | "settings" | "chat"; id: string };
+/** What triggered the crosshair raycast: a click, E (bonk), G (challenge to rock-paper-scissors), H (say hi) or C (chat). */
+export type WalkIntent = "click" | "bonk" | "challenge" | "greet" | "chat";
 /** Walk mode: challenge an agent to RPS from this close (anywhere: desk, corridor, lounge). */
 export const CHALLENGE_RANGE = 3;
+/** Walk mode: C opens the chat of an agent under the crosshair this close (same targeting as E/H/G). */
+export const CHAT_RANGE = 3;
+/** The walk-mode key hint shown at the bottom of the view (App.tsx). */
+export const WALK_HINT_KEYS = "E slap · H say hi · G play RPS · C chat · Esc exit";
 
 /**
  * What a screen-centre click (or E press, `bonkOnly`) does, given the raycast hits (nearest first).
@@ -423,6 +443,7 @@ export function walkInteraction(
         const id = ud.robotAgentId as string;
         if (intent === "challenge") return dist <= CHALLENGE_RANGE ? { kind: "challenge", id } : undefined;
         if (intent === "greet") return dist <= GREET_RANGE ? { kind: "greet", id } : undefined;
+        if (intent === "chat") return dist <= CHAT_RANGE ? { kind: "chat", id } : undefined;
         if (dist <= BONK_RANGE) return { kind: "bonk", id };
         return clickOnly ? undefined : { kind: "select", id };
       }

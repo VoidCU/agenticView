@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from "react";
 import { EFFORT_LABELS, effectiveEffort, modelLabel, type Agent, type RunEvent } from "@agenticview/shared";
 import { useStore, useAgentStatus, type FeedItem } from "../state/store";
+import { useWalkChat } from "../state/walkChat";
 import { uploadImage } from "../net/ws";
 import { AgentMenu } from "./AgentMenu";
 import { LimitChip, SwitchAgentModal } from "./LimitChip";
@@ -152,10 +153,20 @@ export function ChatPanel({ collapsed = false, onCollapseChange }: { collapsed?:
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+  const messageBox = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     setText("");
     setAttachments([]);
   }, [selectedId]);
+  // C in walk mode (state/walkChat.ts): focus the message box once it is on screen, so you can type
+  // right away. Each open is handled once, whichever of expand / select / request renders first.
+  const focusSeq = useWalkChat((s) => s.focusSeq);
+  const focusedSeq = useRef(0);
+  useEffect(() => {
+    if (focusSeq === focusedSeq.current || collapsed || !messageBox.current || !useWalkChat.getState().session) return;
+    focusedSeq.current = focusSeq;
+    messageBox.current.focus();
+  }, [focusSeq, collapsed, agent?.id]);
 
   const addFiles = useCallback((files: File[]) => {
     const images = files.filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(f.name));
@@ -256,6 +267,7 @@ export function ChatPanel({ collapsed = false, onCollapseChange }: { collapsed?:
         )}
         <div className="composer-row">
           <textarea
+            ref={messageBox}
             aria-label={`Message ${agent.name}`}
             placeholder={agent.role === "manager" ? `Ask ${agent.name} to plan something…` : `Message ${agent.name}…`}
             value={text}

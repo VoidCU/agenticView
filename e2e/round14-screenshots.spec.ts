@@ -1,7 +1,8 @@
 /**
  * Round 14 review screenshots, light and dark, 1440x900:
  *  - walk-mode whiteboards drawn as the popup's pinned notes (Pod A's tasks, the Manager board's requests);
- *  - the Manager board popup's "View timeline" rows, and the request's workflow swapped into the dialog.
+ *  - the Manager board popup's "View timeline" rows, and the request's workflow swapped into the dialog;
+ *  - C near an agent in walk mode: its chat opens expanded and focused; Esc collapses it and walking resumes.
  *
  * Runs when AGENTICVIEW_SCREENSHOTS=1 npm run test:e2e. Saved to e2e/screenshots/ (gitignored).
  */
@@ -66,5 +67,52 @@ for (const theme of ["light", "dark"] as const) {
     await expect(page.getByRole("dialog", { name: "Manager board" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
+  test(`${theme}: C near an agent in walk mode opens its chat, typed into at once; Esc returns to walking`, async ({ page }) => {
+    test.setTimeout(180_000);
+    mkdirSync("e2e/screenshots", { recursive: true });
+    await page.emulateMedia({ colorScheme: theme });
+    // Start with the chat panel collapsed: C expands it, Esc collapses it again.
+    await page.addInitScript(() => localStorage.setItem("av:hud:chat-collapsed", "true"));
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: "Expand chat" })).toBeVisible();
+    type Probe = { store: { getState(): { agents: Record<string, { id: string; name: string }>; selectedAgentId?: string } }; agentPos(id: string): { x: number; z: number; walking?: boolean } | undefined };
+    type W = Win & { __agenticviewTest?: Probe; __teleportWalk?: (x: number, z: number, yaw?: number, pitch?: number) => void };
+    await page.evaluate(() => (window as unknown as W).__setWalking?.(true));
+    await expect.poll(() => page.evaluate(() => typeof (window as unknown as W).__teleportWalk)).toBe("function");
+    await expect(page.getByTestId("walk-hint")).toContainText("C chat");
+    // Stand about 1.4 units from Atlas (as the bonk shot does), looking at it.
+    await expect.poll(() => page.evaluate(() => {
+      const w = window as unknown as W;
+      const atlas = Object.values(w.__agenticviewTest!.store.getState().agents).find((a) => a.name === "Atlas")!;
+      return w.__agenticviewTest!.agentPos(atlas.id)?.walking;
+    }), { timeout: 120_000 }).toBe(false);
+    await page.evaluate(() => {
+      const w = window as unknown as W;
+      const atlas = Object.values(w.__agenticviewTest!.store.getState().agents).find((a) => a.name === "Atlas")!;
+      const p = w.__agenticviewTest!.agentPos(atlas.id)!;
+      const x = p.x + 1.0, z = p.z + 1.0;
+      w.__teleportWalk!(x, z, Math.atan2(-(p.x - x), -(p.z - z)));
+    });
+    await page.waitForTimeout(300);
+    await page.keyboard.press("c");
+    const box = page.getByRole("textbox", { name: "Message Atlas" });
+    await expect(box).toBeFocused({ timeout: 5_000 });
+    await page.keyboard.type("can you check the sign-in flow?");
+    await expect(box).toHaveValue("can you check the sign-in flow?");
+    await page.screenshot({ path: `e2e/screenshots/r14-walk-chat-open-${theme}-1440x900.png` });
+    await expect(page.locator(".app-walk-chat")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    // The chat column hides with the walk HUD again, and the panel is back to collapsed.
+    await expect(page.locator(".app-walk-chat")).toHaveCount(0);
+    await expect(box).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem("av:hud:chat-collapsed"))).toBe("true");
+    await expect(page.locator(".panel-tab-chat")).toHaveCount(1);
+    await expect(page.locator(".walk-crosshair")).toBeVisible(); // still walking
+    await expect(page.getByTestId("walk-hint")).toContainText("Click the view to look around");
+    await page.screenshot({ path: `e2e/screenshots/r14-walk-chat-closed-${theme}-1440x900.png` });
+    await page.evaluate(() => (window as unknown as W).__setWalking?.(false));
   });
 }

@@ -17,6 +17,8 @@ import { ProjectsPanel } from "./hub/HubView";
 import { CloseIcon } from "./hud/ui";
 import { useDesktopNotifications } from "./hud/useNotifications";
 import { useWalk } from "./state/walk";
+import { WALK_HINT_KEYS } from "./scene/WalkMode";
+import { useWalkChat } from "./state/walkChat";
 import { useWalkOverlay } from "./state/pointerLock";
 import { useMapOpen } from "./state/map";
 import { ScoreboardModal } from "./hud/ScoreboardModal";
@@ -27,7 +29,6 @@ import { useHudPrefs } from "./state/hudPrefs";
 type Modal = "create" | "settings" | "sessions" | "inbox" | "scoreboard" | undefined;
 type Tab = "office" | "tasks" | "chat";
 const SETTINGS_TABS: readonly SettingsTab[] = ["general", "providers", "office", "layout", "connections", "usage"];
-
 /** Keyboard shortcuts hint overlay */
 function ShortcutsHint({ onClose }: { onClose: () => void }) {
   useWalkOverlay();
@@ -113,6 +114,8 @@ export function App() {
   const connected = useStore((s) => s.connected);
   const selected = useStore((s) => s.selectedAgentId);
   const { walking, setWalking, locked: walkLocked } = useWalk();
+  // C in walk mode: the chat column shows over the walk view until Esc (or a click back into the view).
+  const walkChatOpen = useWalkChat((s) => s.session !== undefined);
   const { toggle: toggleMap } = useMapOpen();
 
   // Desktop notifications
@@ -236,7 +239,7 @@ export function App() {
 
   const hub = world?.kind === "hub";
   return (
-    <div className={`app${walking ? " app-walking" : ""}`} data-tab={tab} data-tags={showTags ? "on" : "off"} onPointerDownCapture={(event) => {
+    <div className={`app${walking ? " app-walking" : ""}${walking && walkChatOpen ? " app-walk-chat" : ""}`} data-tab={tab} data-tags={showTags ? "on" : "off"} onPointerDownCapture={(event) => {
       if (event.button === 0 && event.target instanceof Element && event.target.closest(".office canvas")) {
         document.body.style.userSelect = "none";
         window.getSelection()?.removeAllRanges();
@@ -278,7 +281,7 @@ export function App() {
         )}
         {walking && (
           <div className="walk-hint" role="status" aria-live="polite" data-testid="walk-hint">
-            {!walkLocked && <strong className="walk-hint-relock">Click the view to look around · </strong>}E slap · H say hi · G play RPS · Esc exit
+            {!walkLocked && <strong className="walk-hint-relock">Click the view to look around · </strong>}{WALK_HINT_KEYS}
           </div>
         )}
         {walking && <div className="walk-crosshair" aria-hidden="true" />}

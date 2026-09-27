@@ -3448,6 +3448,8 @@ kbd {
 .app-walking .toast,
 .app-walking .walk-hint { display: none !important; }
 .app-walking .walk-hint { display: block !important; position: fixed; top: auto; bottom: 26px; left: 50%; transform: translateX(-50%); }
+/* Walk chat (C near an agent): the chat column comes back over the walk view until Esc. */
+.app-walking.app-walk-chat .hud-right { display: flex !important; }
 .walk-crosshair { position: fixed; z-index: 80; left: 50%; top: 50%; width: 16px; height: 16px; transform: translate(-50%, -50%); pointer-events: none; }
 .walk-crosshair::before, .walk-crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,.9); box-shadow: 0 1px 3px #000; }
 .walk-crosshair::before { width: 2px; height: 16px; left: 7px; }

@@ -84,7 +84,7 @@ test("walk mode: hand mid-slap, greeting, board with a free mouse", async ({ pag
   }, pitch);
   await face();
   await page.waitForTimeout(400);
-  await expect(page.getByTestId("walk-hint")).toContainText("E slap · H say hi · G play RPS · Esc exit");
+  await expect(page.getByTestId("walk-hint")).toContainText("E slap · H say hi · G play RPS · C chat · Esc exit");
 
   // Slap: freeze the hand on its hit frame, press E, shoot while the agent's bubble is up.
   await pinHand(page, "slap", 130);
