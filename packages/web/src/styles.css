@@ -4884,3 +4884,24 @@ kbd {
     grid-column: 2 / -1;
   }
 }
+
+/* Header chips stay on one line; the "+N more" chip takes the rest. */
+.topbar-mid {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.provider-more-panel {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.setting-row .setting-control input.pct-input {
+  width: 68px;
+  flex: none;
+  text-align: right;
+}
+/* The "+N more" dropdown hangs below the top bar and must paint over the side panels. */
+.topbar {
+  position: relative;
+  z-index: 26;
+}

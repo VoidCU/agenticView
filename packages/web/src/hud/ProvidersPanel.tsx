@@ -17,9 +17,9 @@ import { providerLabel } from "./ui";
 const AUTH_NOTES: Record<string, string> = {
   claude: "Claude Agent SDK with an Anthropic API key. Not the Claude Code login.",
   "claude-session": "Your own Claude Code session: run /agenticview-work in it. Uses that session's plan (Max/Pro); no key.",
-  codex: "Codex CLI. Uses `codex login` unless a key is set here or CODEX_API_KEY is in the environment.",
-  copilot: "GitHub Copilot CLI. Login only: run `copilot` and sign in. No API key.",
-  antigravity: "Antigravity CLI (agy). Login only: run `agy` and sign in. No API key.",
+  codex: "Codex CLI. Uses the codex login unless a key is set here or CODEX_API_KEY is in the environment.",
+  copilot: "GitHub Copilot CLI. Login only: run copilot once and sign in. No API key.",
+  antigravity: "Antigravity CLI (agy). Login only: run agy once and sign in. No API key.",
   gemini: "Gemini CLI. Uses its Google login unless a key is set here or GEMINI_API_KEY is in the environment.",
 };
 
@@ -95,7 +95,7 @@ function KeyField({ provider, hasKey }: { provider: KeyedProvider; hasKey: boole
               setValue(e.target.value);
               setSaved(null);
             }}
-            placeholder={hasKey ? "•••••••• (stored; type to replace)" : `Paste a key, or leave empty for the ${PROVIDER_KEY_ENV[provider]} env / login`}
+            placeholder={hasKey ? "•••••••• stored" : "not set: login or env is used"}
             autoComplete="off"
             spellCheck={false}
             aria-label={`${label} API key`}

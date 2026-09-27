@@ -2,14 +2,16 @@ import { useEffect, useId, useRef, useState } from "react";
 import { catalogueFor, isCustomProvider, type ProviderStatus } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { ProviderChip, providerLabel } from "./ui";
-import { splitHeaderChips } from "./headerChips";
+import { chipsThatFit, splitHeaderChips } from "./headerChips";
 
 /** "Opus, Sonnet, Haiku +1" for the dropdown's model line. */
 function modelsLine(p: ProviderStatus): string {
   const models = catalogueFor(p.provider).models;
   if (models.length === 0) return isCustomProvider(p.provider) ? "any model id" : "provider default";
-  const names = models.slice(0, 3).map((m) => m.label.replace(/\s*\(.*\)$/, ""));
-  return models.length > 3 ? `${names.join(", ")} +${models.length - 3}` : names.join(", ");
+  // Variants of one model ("Gemini 3.8 Flash (High)", "(Low)") collapse to one name.
+  const unique = [...new Set(models.map((m) => m.label.replace(/\s*\(.*\)$/, "")))];
+  const names = unique.slice(0, 3);
+  return unique.length > 3 ? `${names.join(", ")} +${unique.length - 3}` : names.join(", ");
 }
 
 function CompactChip({ p }: { p: ProviderStatus }) {
@@ -28,7 +30,20 @@ function CompactChip({ p }: { p: ProviderStatus }) {
 export function ProviderChips({ onSettings }: { onSettings?: () => void }) {
   const providers = useStore((s) => s.providers);
   const order = useStore((s) => s.providerConfig?.providerOrder);
-  const { all, visible, hidden } = splitHeaderChips(providers, order);
+  const mid = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = mid.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    setWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  const ordered = splitHeaderChips(providers, order).all;
+  // Up to four chips, fewer when the header is too narrow for them on one line.
+  const fit = chipsThatFit(ordered.map((p) => ({ label: providerLabel(p.provider), limited: p.limit?.limited })), width);
+  const { all, visible, hidden } = splitHeaderChips(providers, order, fit);
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -45,18 +60,22 @@ export function ProviderChips({ onSettings }: { onSettings?: () => void }) {
   }, [open]);
   useEffect(() => () => clearTimeout(closeTimer.current), []);
 
+  // A click right after the hover opened the panel must not close it again (pointer users click what they hover).
+  const pinnedByHover = useRef(false);
   const hoverOpen = () => {
     clearTimeout(closeTimer.current);
+    if (!open) pinnedByHover.current = true;
     setOpen(true);
   };
   const hoverClose = () => {
+    pinnedByHover.current = false;
     clearTimeout(closeTimer.current);
     closeTimer.current = setTimeout(() => setOpen(false), 250);
   };
   const limitedHidden = hidden.filter((p) => p.limit?.limited).length;
 
   return (
-    <div className="topbar-mid" aria-label="Providers" role="group">
+    <div className="topbar-mid" aria-label="Providers" role="group" ref={mid}>
       {visible.map((p) => (
         <CompactChip key={p.provider} p={p} />
       ))}
@@ -82,7 +101,12 @@ export function ProviderChips({ onSettings }: { onSettings?: () => void }) {
             aria-controls={panelId}
             aria-label={`${hidden.length} more providers${limitedHidden ? `, ${limitedHidden} limited` : ""}`}
             data-testid="provider-more"
-            onClick={() => setOpen((o) => !o)}
+            onClick={() => {
+              if (pinnedByHover.current) {
+                pinnedByHover.current = false;
+                setOpen(true);
+              } else setOpen((o) => !o);
+            }}
           >
             +{hidden.length} more
           </button>

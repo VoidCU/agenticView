@@ -234,3 +234,16 @@ describe("custom providers in the agent form", () => {
     expect([...model.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Provider default", "Qwen 3", "Custom…"]);
   });
 });
+
+describe("header chips fit", () => {
+  it("shows up to four, fewer when the header is narrow, all when they fit", async () => {
+    const { chipsThatFit, estimateChipWidth } = await import("../src/hud/headerChips");
+    const labels = ["Claude", "Claude Code session", "Codex", "GitHub Copilot", "Antigravity", "Gemini"].map((label) => ({ label }));
+    expect(chipsThatFit(labels, 0)).toBe(4);
+    expect(chipsThatFit(labels, 5000)).toBe(4);
+    expect(chipsThatFit(labels.slice(0, 3), 5000)).toBe(3);
+    const two = 78 + estimateChipWidth("Claude") + estimateChipWidth("Claude Code session") + 12;
+    expect(chipsThatFit(labels, two)).toBe(2);
+    expect(chipsThatFit(labels, 10)).toBe(1);
+  });
+});
