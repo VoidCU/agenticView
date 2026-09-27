@@ -327,6 +327,7 @@ export const useStore = create<Store>()((set, get) => ({
         set({
           lastGameRound: {
             matchId: msg.matchId,
+            opponentId: msg.opponentId,
             round: msg.round,
             userMove: msg.userMove,
             agentMove: msg.agentMove,

@@ -198,7 +198,7 @@ export type ServerMessage =
   | { type: "limit.request"; id: string; agentId: string; taskId: string; suggested?: { provider: Provider; model?: string }; resetAt?: string; reason?: string }
   | { type: "limit.resolved"; id: string }
   | { type: "brainstorm.updated"; managerId: string; requestTaskId: string; topic: string; participants: BrainstormParticipant[]; skipped: { agentId: string; name: string; reason: string }[]; complete: boolean; error?: string }
-  | { type: "game.round"; matchId: string; round: number; userMove: Match["moves"][0]; agentMove: Match["moves"][1]; winner: "you" | "agent" | null; score: { you: number; agent: number }; done: boolean }
+  | { type: "game.round"; matchId: string; opponentId: string; round: number; userMove: Match["moves"][0]; agentMove: Match["moves"][1]; winner: "you" | "agent" | null; score: { you: number; agent: number }; done: boolean }
   /**
    * Agent auto-match about to be played. The scene walks `players[i]` from its
    * lounge seat `seatSpotIds[i]` to game spot `spotIds[i]` (LoungeLayout.gameSpots ids,

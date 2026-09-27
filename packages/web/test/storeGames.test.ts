@@ -120,7 +120,7 @@ describe("store game.result", () => {
 
 describe("store game.round", () => {
   it("stores the latest round result", () => {
-    fresh().apply({ type: "game.round", matchId: "m_42", round: 2, userMove: "paper", agentMove: "rock", winner: "you", score: { you: 2, agent: 0 }, done: true });
+    fresh().apply({ type: "game.round", matchId: "m_42", opponentId: "a1", round: 2, userMove: "paper", agentMove: "rock", winner: "you", score: { you: 2, agent: 0 }, done: true });
     const r = fresh().lastGameRound;
     expect(r?.matchId).toBe("m_42");
     expect(r?.round).toBe(2);
@@ -130,8 +130,8 @@ describe("store game.round", () => {
   });
 
   it("overwrites the previous round result", () => {
-    fresh().apply({ type: "game.round", matchId: "m_1", round: 1, userMove: "rock", agentMove: "scissors", winner: "you", score: { you: 1, agent: 0 }, done: false });
-    fresh().apply({ type: "game.round", matchId: "m_1", round: 2, userMove: "scissors", agentMove: "rock",    winner: "agent", score: { you: 1, agent: 1 }, done: false });
+    fresh().apply({ type: "game.round", matchId: "m_1", opponentId: "a1", round: 1, userMove: "rock", agentMove: "scissors", winner: "you", score: { you: 1, agent: 0 }, done: false });
+    fresh().apply({ type: "game.round", matchId: "m_1", opponentId: "a1", round: 2, userMove: "scissors", agentMove: "rock",    winner: "agent", score: { you: 1, agent: 1 }, done: false });
     expect(fresh().lastGameRound?.round).toBe(2);
   });
 });

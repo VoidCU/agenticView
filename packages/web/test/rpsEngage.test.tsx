@@ -126,7 +126,7 @@ describe("PlayRpsModal reveals every round with an emote", () => {
     vi.useFakeTimers();
     useStore.setState({ send: vi.fn(), agents: { [worker.id]: worker }, lastGameRound: undefined, bubbles: {} } as never);
     const { container } = render(<PlayRpsModal agentId={worker.id} onClose={() => {}} />);
-    act(() => useStore.setState({ lastGameRound: { matchId: "m1", round: 1, userMove: "rock", agentMove: "scissors", winner: "you", score: { you: 1, agent: 0 }, done: false } } as never));
+    act(() => useStore.setState({ lastGameRound: { matchId: "m1", opponentId: worker.id, round: 1, userMove: "rock", agentMove: "scissors", winner: "you", score: { you: 1, agent: 0 }, done: false } } as never));
     expect(useStore.getState().bubbles[worker.id]?.text).toBe("Scissors!");
     act(() => vi.advanceTimersByTime(800));
     expect(container.ownerDocument.querySelector(".rps-round-revealed")).not.toBeNull();

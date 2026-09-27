@@ -700,6 +700,7 @@ export type ServerMessage = ({
 } | {
     type: "game.round";
     matchId: string;
+    opponentId: string;
     round: number;
     userMove: Match["moves"][0];
     agentMove: Match["moves"][1];

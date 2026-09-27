@@ -336,6 +336,7 @@ export class GameService {
 
     const result: GameRoundResult = {
       matchId: state.matchId,
+      opponentId: state.opponentId,
       round: state.round,
       userMove: move,
       agentMove,

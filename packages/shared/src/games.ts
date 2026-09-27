@@ -35,6 +35,8 @@ export type GamesData = z.infer<typeof GamesDataSchema>;
 /** Result of one round in a user best-of-3 match. */
 export interface GameRoundResult {
   matchId: string;
+  /** The agent the user is playing against; lets the client ignore rounds left over from an earlier opponent. */
+  opponentId: string;
   round: number;
   userMove: Move;
   agentMove: Move;

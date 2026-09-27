@@ -131,6 +131,7 @@ async function handle(msg, world, opts, send) {
             send({
                 type: "game.round",
                 matchId: result.matchId,
+                opponentId: result.opponentId,
                 round: result.round,
                 userMove: result.userMove,
                 agentMove: result.agentMove,

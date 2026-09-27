@@ -281,6 +281,7 @@ export class GameService {
         const done = state.score.you >= 2 || state.score.agent >= 2 || state.round >= 3;
         const result = {
             matchId: state.matchId,
+            opponentId: state.opponentId,
             round: state.round,
             userMove: move,
             agentMove,
