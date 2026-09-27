@@ -49,15 +49,16 @@ describe("office bridge tools", () => {
     const reg = new ToolRegistry();
     const { token } = reg.register("run1", officeTools(ctx));
     const out = await reg.call("run1", token, "move_worker", { agent: "W3", space: "Meeting Room" });
-    expect(out).toBe("Moved W3 to Meeting Room seat 0");
+    expect(out).toBe("Moved W3 to Meeting Room seat 0 (its designated desk)");
     expect(byId.get("w_3")!.placement).toEqual({ space: "meeting", seat: 0 });
+    expect(byId.get("w_3")!.workSeat).toEqual({ space: "meeting", seat: 0 });
     expect(emitted.map((a) => a.id)).toEqual(["w_3"]);
   });
 
-  it("swaps desks when the target seat is taken", async () => {
+  it("moves an idle worker who merely sits at the destination (no designated desk) elsewhere", async () => {
     const { ctx, byId } = fakeWorld(roster());
     const out = await moveWorker(ctx, "w_3", "pod-a", 0);
-    expect(out).toMatch(/W1 swapped to pod-a seat 2/);
+    expect(out).toMatch(/W1 got up from there and moved to pod-a seat 2/);
     expect(byId.get("w_3")!.placement).toEqual({ space: "pod-a", seat: 0 });
     expect(byId.get("w_1")!.placement).toEqual({ space: "pod-a", seat: 2 });
     const plan = planOffice([...byId.values()]);

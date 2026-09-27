@@ -2,7 +2,13 @@ import {
   AgentSchema,
   defaultAgent,
   MANAGER_TOOLS,
+  buildSpacesFromLayout,
+  defaultLayout,
+  designatedSeats,
+  nextPlacement,
   planOffice,
+  placementKey,
+  seatLabel,
   type OfficeLayout,
   type Agent,
   type Effort,
@@ -12,6 +18,7 @@ import {
   type ToolAllowance,
   type PermissionMode,
   type Appearance,
+  type Placement,
 } from "@agenticview/shared";
 import { join } from "node:path";
 import { JsonStore } from "../store/jsonStore.js";
@@ -114,9 +121,13 @@ export class AgentRegistry {
     );
     if (agent.role === "worker") {
       await this.ensureDesk?.((await this.list()).filter((a) => a.role === "worker").length + 1);
-      // Take the next free desk now so the seat is stable even as the roster changes around it.
-      const seat = planOffice([...(await this.list()), agent], this.layout?.()).placements[agent.id];
-      if (seat) agent.placement = seat;
+      // Take the next free desk now (nobody sits there and it is nobody's designated desk): it becomes
+      // the new worker's workSeat, so the seat is stable even as the roster changes around it.
+      const seat = nextPlacement(await this.list(), this.layout?.());
+      if (seat) {
+        agent.placement = { ...seat };
+        agent.workSeat = { ...seat };
+      }
     }
     await store.write(agent.id, agent);
     return agent;
@@ -125,6 +136,7 @@ export class AgentRegistry {
   async update(id: string, patch: Partial<Agent>): Promise<Agent> {
     const cur = await this.get(id);
     if (!cur) throw new Error(`Unknown agent ${id}`);
+    if (patch.workSeat) await this.assertDeskFree(id, patch.workSeat);
     const next = normalizeAgent(AgentSchema.parse({
       ...cur,
       ...patch,
@@ -138,14 +150,29 @@ export class AgentRegistry {
     return next;
   }
 
+  /** The office-wide invariant: two agents never share a designated desk (workSeat). */
+  async assertDeskFree(id: string, seat: Placement): Promise<void> {
+    const owner = designatedSeats(await this.list(), id).get(placementKey(seat));
+    if (!owner) return;
+    const layout = this.layout?.() ?? defaultLayout((await this.list()).filter((a) => a.role === "worker").length);
+    throw new Error(`${seatLabel(buildSpacesFromLayout(layout), seat)} is ${owner.name}'s designated desk`);
+  }
+
   /** Clone a global agent into this project with fresh id and stats, remembering its origin. */
   async copyToProject(id: string): Promise<Agent> {
     if (this.world.kind !== "project" || !this.project) throw new ScopeError("copyToProject requires a project world");
     const src = await this.get(id);
     if (!src) throw new Error(`Unknown agent ${id}`);
     if (src.scope !== "global") throw new ScopeError("Only global agents can be copied into a project");
-    const { id: _id, stats: _stats, createdAt: _c, updatedAt: _u, originId: _o, placement: _p, ...rest } = src;
+    const { id: _id, stats: _stats, createdAt: _c, updatedAt: _u, originId: _o, placement: _p, workSeat: _w, ...rest } = src;
     const copy = defaultAgent({ ...rest, scope: "project", originId: src.id });
+    if (copy.role === "worker") {
+      const seat = nextPlacement(await this.list(), this.layout?.());
+      if (seat) {
+        copy.placement = { ...seat };
+        copy.workSeat = { ...seat };
+      }
+    }
     await this.project.write(copy.id, copy);
     return copy;
   }

@@ -535,12 +535,51 @@ export function firstFreeSeat(spaces: Space[], taken: Set<string>): Placement | 
   return undefined;
 }
 
-/** The seat a newly created worker would take. */
+/** The seat a newly created worker would take: a pod desk nobody sits at and nobody has as their workSeat. */
 export function nextPlacement(agents: Agent[], layout?: OfficeLayout | null): Placement | undefined {
   const plan = planOffice(agents, layout);
-  const taken = new Set(Object.values(plan.placements).map((p) => `${p.space}#${p.seat}`));
+  const taken = new Set(Object.values(plan.placements).map(placementKey));
+  for (const k of designatedSeats(agents).keys()) taken.add(k);
   const base = layout ?? defaultLayout(agents.filter((a) => a.role === "worker").length);
   return firstFreeSeat(plan.spaces, taken) ?? firstFreeSeat(buildSpacesFromLayout(growLayout(base, taken.size)), taken);
+}
+
+/** "pod-a#2": the key two placements share when they are the same desk. */
+export function placementKey(p: Placement): string {
+  return `${p.space}#${p.seat}`;
+}
+
+/** Every worker's designated desk (workSeat) by seat key, optionally leaving one agent out. */
+export function designatedSeats(agents: readonly Agent[], exceptId?: string): Map<string, Agent> {
+  const out = new Map<string, Agent>();
+  for (const a of agents) {
+    if (a.role !== "worker" || !a.workSeat || a.id === exceptId) continue;
+    const k = placementKey(a.workSeat);
+    if (!out.has(k)) out.set(k, a);
+  }
+  return out;
+}
+
+/**
+ * Where a worker who must give up its desk goes (a squatter whose desk's owner starts working, or an idle
+ * worker on a desk the Manager just designated to someone else): its own workSeat when nobody sits there,
+ * else the first free desk of `seats` that is nobody's workSeat, else any free desk. Undefined = none is
+ * free (the caller sends it to the lounge). `placements` must already hold the desk being taken.
+ */
+export function freeDeskFor(agentId: string, seats: readonly Placement[], placements: Record<string, Placement>, agents: readonly Agent[]): Placement | undefined {
+  const taken = new Set(Object.entries(placements).filter(([id]) => id !== agentId).map(([, p]) => placementKey(p)));
+  const own = agents.find((a) => a.id === agentId)?.workSeat;
+  if (own && !taken.has(placementKey(own))) return { space: own.space, seat: own.seat };
+  const designated = designatedSeats(agents, agentId);
+  const free = seats.filter((s) => !taken.has(placementKey(s)));
+  const pick = free.find((s) => !designated.has(placementKey(s))) ?? free[0];
+  return pick && { space: pick.space, seat: pick.seat };
+}
+
+/** Human label of a desk for tool messages: "Seat 2 in Pod A". */
+export function seatLabel(spaces: readonly Space[], p: Placement, spaceNames: Record<string, string> = {}): string {
+  const s = spaces.find((x) => x.id === p.space);
+  return `Seat ${p.seat} in ${spaceNames[p.space] ?? s?.name ?? p.space}`;
 }
 
 /** Find a space by id or (case-insensitive) name. */
@@ -571,9 +610,19 @@ export function planOfficeWithSpaces(spaces: Space[], agents: Agent[]): OfficePl
     placements[w.id] = { space: p.space, seat: p.seat };
     taken.add(key(p));
   }
+  // Auto-seated workers keep off other workers' designated desks while one is free.
+  const designated = designatedSeats(workers);
   for (const w of workers) {
     if (placements[w.id]) continue;
-    const free = firstFreeSeat(spaces, taken);
+    const own = w.workSeat && byId.get(w.workSeat.space);
+    if (w.workSeat && own && w.workSeat.seat < own.seats && !taken.has(key(w.workSeat))) {
+      placements[w.id] = { ...w.workSeat };
+      taken.add(key(w.workSeat));
+      continue;
+    }
+    const avoid = new Set(taken);
+    for (const [k, owner] of designated) if (owner.id !== w.id) avoid.add(k);
+    const free = firstFreeSeat(spaces, avoid) ?? firstFreeSeat(spaces, taken);
     if (!free) continue;
     placements[w.id] = free;
     taken.add(key(free));

@@ -5,6 +5,8 @@ import {
   buildSpaces,
   buildSpacesFromLayout,
   defaultRoomName,
+  firstFreeSeat,
+  placementKey,
   growLayout,
   hexDistance,
   nextGrowthHex,
@@ -14,6 +16,7 @@ import {
   type ExplicitRoom,
   type LayoutRoom,
   type OfficeLayout,
+  type Space,
 } from "./office.js";
 
 export interface LegacyLayoutInput {
@@ -141,4 +144,106 @@ function remapSeats(layout: OfficeLayout, spaceNames: Record<string, string>, wo
     if (p && next && (p.space !== next.space || p.seat !== next.seat)) out[w.id] = next;
   }
   return out;
+}
+
+export interface WorkSeatMove {
+  agentId: string;
+  name: string;
+  /** The desk the agent had (its old workSeat, else its placement); absent when it had neither. */
+  from?: Placement;
+  to: Placement;
+  /**
+   * adopted: the agent's current seat became its workSeat (first run on an older office);
+   * duplicate: that desk was already another (earlier) agent's, so it got a free desk;
+   * missing: it had no seat, or its seat no longer exists in the layout.
+   */
+  reason: "adopted" | "duplicate" | "missing";
+}
+
+export interface WorkSeatMigration {
+  /** Every worker's designated desk after the migration (agent id → seat). */
+  workSeats: Record<string, Placement>;
+  /** The workers whose workSeat is new or changed, with why. */
+  moves: WorkSeatMove[];
+  /** Workers no desk was left for (the caller grows the layout and runs it again). */
+  unseated: string[];
+  /** True when any workSeat must be written back. */
+  changed: boolean;
+}
+
+const seatOrder = (a: Agent, b: Agent) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
+
+/**
+ * Give every worker a unique designated desk (workSeat) on `spaces`.
+ *
+ * - A valid workSeat is kept (earliest created agent wins a contested one).
+ * - A worker without one adopts its current placement when that desk exists and is not somebody's yet.
+ * - Everyone left (duplicates, seats that no longer exist, no seat at all) gets a free desk: in the same
+ *   pod when it has one, else the first free pod desk, else any free desk of a seated room.
+ *
+ * Pure and idempotent: run on its own output it changes nothing.
+ */
+export function migrateWorkSeats(agents: readonly Agent[], spaces: readonly Space[]): WorkSeatMigration {
+  const workers = agents.filter((a) => a.role === "worker").sort(seatOrder);
+  const byId = new Map(spaces.map((s) => [s.id, s]));
+  const valid = (p: Placement | undefined): p is Placement => {
+    const s = p && byId.get(p.space);
+    return Boolean(p && s && p.seat >= 0 && p.seat < s.seats);
+  };
+  const taken = new Set<string>();
+  const out: Record<string, Placement> = {};
+  // 1. Existing valid workSeats.
+  for (const w of workers) {
+    if (!valid(w.workSeat) || taken.has(placementKey(w.workSeat))) continue;
+    out[w.id] = { space: w.workSeat.space, seat: w.workSeat.seat };
+    taken.add(placementKey(w.workSeat));
+  }
+  // 2. Workers without one (or whose one is gone or contested) adopt their current desk when it is free.
+  for (const w of workers) {
+    if (out[w.id] || !valid(w.placement) || taken.has(placementKey(w.placement))) continue;
+    out[w.id] = { space: w.placement.space, seat: w.placement.seat };
+    taken.add(placementKey(w.placement));
+  }
+  // 3. Everyone else: a free desk, preferring the pod they were in.
+  const unseated: string[] = [];
+  const freeIn = (s: Space): Placement | undefined => {
+    for (let seat = 0; seat < s.seats; seat++) if (!taken.has(`${s.id}#${seat}`)) return { space: s.id, seat };
+    return undefined;
+  };
+  for (const w of workers) {
+    if (out[w.id]) continue;
+    const had = w.workSeat ?? w.placement;
+    const home = had && byId.get(had.space);
+    const pick =
+      (home && home.kind === "pod" ? freeIn(home) : undefined) ??
+      firstFreeSeat([...spaces], taken) ??
+      spaces.filter((s) => s.kind !== "lounge" && s.kind !== "meeting").map(freeIn).find(Boolean) ??
+      spaces.map(freeIn).find(Boolean);
+    if (!pick) {
+      unseated.push(w.id);
+      continue;
+    }
+    out[w.id] = pick;
+    taken.add(placementKey(pick));
+  }
+  const moves: WorkSeatMove[] = [];
+  for (const w of workers) {
+    const to = out[w.id];
+    if (!to || (w.workSeat && placementKey(w.workSeat) === placementKey(to))) continue;
+    const from = w.workSeat ?? w.placement;
+    moves.push({
+      agentId: w.id,
+      name: w.name,
+      ...(from ? { from: { space: from.space, seat: from.seat } } : {}),
+      to,
+      reason: !w.workSeat && from && placementKey(from) === placementKey(to) ? "adopted" : valid(from) ? "duplicate" : "missing",
+    });
+  }
+  return { workSeats: out, moves, unseated, changed: moves.length > 0 };
+}
+
+/** One log line per workSeat move, for the office start log. */
+export function describeWorkSeatMoves(moves: readonly WorkSeatMove[]): string[] {
+  const at = (p: Placement) => `${p.space}#${p.seat}`;
+  return moves.map((m) => `${m.name}: ${m.reason}${m.from ? ` ${at(m.from)}` : ""} -> ${at(m.to)}`);
 }

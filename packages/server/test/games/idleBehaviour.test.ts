@@ -203,3 +203,86 @@ describe("idle behaviour rolls (server RNG only)", () => {
     }
   });
 });
+
+describe("designated desks (workSeat) and work", () => {
+  it("a worker that starts work walks to its workSeat (from the lounge or another desk)", async () => {
+    const { svc, registry } = setup();
+    const [a, b] = await workers(registry, 2);
+    expect(a!.workSeat).toEqual({ space: "pod-a", seat: 0 });
+    await registry.update(a!.id, { placement: { space: "pod-a", seat: 4 }, lounging: true });
+    await registry.update(b!.id, { placement: { space: "pod-a", seat: 5 }, visiting: { spaceId: "meeting", until: new Date(Date.now() + 60_000).toISOString() } });
+    await svc.onBusy(a!.id, { toDesk: true });
+    await svc.onBusy(b!.id, { toDesk: true });
+    const na = (await registry.get(a!.id))!;
+    const nb = (await registry.get(b!.id))!;
+    expect(na.placement).toEqual({ space: "pod-a", seat: 0 });
+    expect(na.lounging).toBeUndefined();
+    expect(nb.placement).toEqual({ space: "pod-a", seat: 1 });
+    expect(nb.visiting).toBeUndefined();
+  });
+
+  it("brainstorm work (no toDesk) leaves the worker's seat alone", async () => {
+    const { svc, registry } = setup();
+    const [a] = await workers(registry, 1);
+    await registry.update(a!.id, { placement: { space: "meeting", seat: 2 } });
+    await svc.onBusy(a!.id, { toDesk: false });
+    expect((await registry.get(a!.id))!.placement).toEqual({ space: "meeting", seat: 2 });
+    expect((await registry.get(a!.id))!.workSeat).toEqual({ space: "pod-a", seat: 0 });
+  });
+
+  it("squatter rule: an idle worker at the owner's desk gets up when the owner starts working", async () => {
+    const { svc, registry, msgs } = setup();
+    const [owner, squatter, third] = await workers(registry, 3);
+    // The squatter left its own desk (pod-a#1) and third now sits there; the squatter took pod-a#0.
+    await registry.update(owner!.id, { placement: { space: "pod-a", seat: 3 }, lounging: true });
+    await registry.update(third!.id, { placement: { space: "pod-a", seat: 1 } });
+    await registry.update(squatter!.id, { placement: { space: "pod-a", seat: 0 } });
+    // Designated: pod-a#0 owner, #1 squatter, #2 third. The first free desk nobody owns is pod-a#3 (the
+    // owner just left it), so the squatter moves there rather than onto third's empty pod-a#2.
+    await svc.onBusy(owner!.id, { toDesk: true });
+    const o = (await registry.get(owner!.id))!;
+    const s = (await registry.get(squatter!.id))!;
+    expect(o.placement).toEqual({ space: "pod-a", seat: 0 });
+    expect(s.placement).toEqual({ space: "pod-a", seat: 3 });
+    // Workseats never move.
+    expect(o.workSeat).toEqual({ space: "pod-a", seat: 0 });
+    expect(s.workSeat).toEqual({ space: "pod-a", seat: 1 });
+    expect(msgs.filter((m) => m.type === "agent.updated").map((m) => (m as { agent: { id: string } }).agent.id).slice(-2)).toEqual([squatter!.id, owner!.id]);
+  });
+
+  it("a squatter goes back to its own desk when that is free", async () => {
+    const { svc, registry } = setup();
+    const [owner, squatter] = await workers(registry, 2);
+    await registry.update(owner!.id, { placement: { space: "pod-a", seat: 5 } });
+    await registry.update(squatter!.id, { placement: { space: "pod-a", seat: 0 } });
+    await svc.onBusy(owner!.id, { toDesk: true });
+    expect((await registry.get(squatter!.id))!.placement).toEqual({ space: "pod-a", seat: 1 });
+    expect((await registry.get(owner!.id))!.placement).toEqual({ space: "pod-a", seat: 0 });
+  });
+
+  it("with every desk taken the squatter goes to the lounge", async () => {
+    const seats: Placement[] = [0, 1].map((seat) => ({ space: "pod-a", seat }));
+    const { svc, registry } = setup({ seats });
+    const [owner, squatter, third] = await workers(registry, 3, [...seats, { space: "pod-a", seat: 2 }]);
+    await registry.update(owner!.id, { placement: { space: "meeting", seat: 0 } });
+    await registry.update(squatter!.id, { placement: { space: "pod-a", seat: 0 } });
+    await registry.update(third!.id, { placement: { space: "pod-a", seat: 1 } });
+    await svc.onBusy(owner!.id, { toDesk: true });
+    const s = (await registry.get(squatter!.id))!;
+    expect(s.lounging).toBe(true);
+    expect(s.placement).toBeUndefined();
+    expect((await registry.get(owner!.id))!.placement).toEqual({ space: "pod-a", seat: 0 });
+  });
+
+  it("toWorkSeat is idempotent and idle rolls never change a workSeat", async () => {
+    const { svc, registry } = setup({ rng: seeded(3) });
+    const ws = await workers(registry, 3);
+    const before = Object.fromEntries(ws.map((w) => [w!.id, w!.workSeat]));
+    for (let i = 0; i < 60; i++) await svc.roll(ws[i % 3]!.id);
+    expect(Object.fromEntries((await registry.list()).filter((a) => a.role === "worker").map((a) => [a.id, a.workSeat]))).toEqual(before);
+    await svc.onBusy(ws[0]!.id, { toDesk: true });
+    const once = (await registry.get(ws[0]!.id))!;
+    await svc.toWorkSeat(ws[0]!.id);
+    expect((await registry.get(ws[0]!.id))!.updatedAt).toBe(once.updatedAt);
+  });
+});

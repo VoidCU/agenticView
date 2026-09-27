@@ -94,3 +94,39 @@ describe("AgentRegistry", () => {
     await expect(h.create({ name: "X", specialty: "", scope: "project" })).rejects.toThrow(ScopeError);
   });
 });
+
+describe("AgentRegistry designated desks (workSeat)", () => {
+  it("a new worker's first desk becomes its workSeat, and never someone else's designated desk", async () => {
+    const r = new AgentRegistry({ kind: "project", projectPath: proj });
+    await r.ensureManager();
+    const a = await r.create({ name: "Nova", specialty: "frontend" });
+    expect(a.workSeat).toEqual({ space: "pod-a", seat: 0 });
+    expect(a.placement).toEqual({ space: "pod-a", seat: 0 });
+    // Nova wanders off to pod-b while idle: pod-a#0 is empty but still hers.
+    await r.update(a.id, { placement: { space: "pod-b", seat: 2 } });
+    const b = await r.create({ name: "Bolt", specialty: "tests" });
+    expect(b.workSeat).toEqual({ space: "pod-a", seat: 1 });
+    const c = await r.create({ name: "Cleo", specialty: "docs" });
+    expect(c.workSeat).toEqual({ space: "pod-a", seat: 2 });
+    const desks = (await r.list()).filter((x) => x.workSeat).map((x) => `${x.workSeat!.space}#${x.workSeat!.seat}`);
+    expect(new Set(desks).size).toBe(3);
+  });
+
+  it("refuses to give two agents the same workSeat", async () => {
+    const r = new AgentRegistry({ kind: "project", projectPath: proj });
+    const a = await r.create({ name: "Nova", specialty: "frontend" });
+    const b = await r.create({ name: "Bolt", specialty: "tests" });
+    await expect(r.update(b.id, { workSeat: a.workSeat })).rejects.toThrow("Seat 0 in Pod A is Nova's designated desk");
+    // Re-saving your own desk is fine; so is a free one.
+    await r.update(a.id, { workSeat: a.workSeat });
+    expect((await r.update(b.id, { workSeat: { space: "pod-b", seat: 0 } })).workSeat).toEqual({ space: "pod-b", seat: 0 });
+  });
+
+  it("older agent JSON without workSeat still loads", async () => {
+    const r = new AgentRegistry({ kind: "project", projectPath: proj });
+    const a = await r.create({ name: "Nova", specialty: "frontend" });
+    const legacy = await r.update(a.id, { workSeat: undefined });
+    expect(legacy.workSeat).toBeUndefined();
+    expect((await r.get(a.id))!.name).toBe("Nova");
+  });
+});

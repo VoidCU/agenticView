@@ -54,7 +54,8 @@ import type { ToolRegistry } from "./bridge/toolRegistry.js";
 import type { EventBus } from "./events/bus.js";
 import { readJsonFile, writeJsonFile } from "./store/jsonStore.js";
 import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.js";
-import { isTerminal, type Agent, type Task } from "@agenticview/shared";
+import { describeWorkSeatMoves, isTerminal, migrateWorkSeats, type Agent, type Placement, type Task } from "@agenticview/shared";
+import { moveWorker } from "./manager/officeTools.js";
 import { cleanupGeminiSettings } from "./runtimes/gemini.js";
 import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
 import { cleanupCopilotTemp } from "./runtimes/copilot.js";
@@ -122,6 +123,11 @@ export interface World {
   removeCustomProvider: (id: string) => Promise<void>;
   /** Wire decoration of outgoing messages (fills agent.sessionModel for claude-session agents). */
   decorate: (m: ServerMessage) => ServerMessage;
+  /**
+   * The user dragged a worker to a desk: an owner action, so it becomes the worker's designated desk
+   * (move_worker semantics, including the designated-desk swap). Returns the tool message ("ERROR: ..." on refusal).
+   */
+  moveDesk: (agentId: string, desk: Placement) => Promise<string>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -222,6 +228,25 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   }
   for (const [id, placement] of Object.entries(migrated.placements)) await registry.update(id, { placement });
   if (!savedLayout) console.info(`[agenticview] layout migration: dropped ${migrated.dropped.length} rooms (${migrated.dropped.join(", ") || "none"}); moved ${Object.keys(migrated.placements).length} seats`);
+  /**
+   * Every worker gets a unique designated desk (workSeat): on office start (older offices adopt their
+   * current seat; duplicates and seats that no longer exist move to a free desk) and after a layout change
+   * that removed a room. Desks that change hands are released first, so none is ever shared.
+   */
+  const syncWorkSeats = async (why: string, emit: boolean): Promise<void> => {
+    const agents = await registry.list();
+    const result = migrateWorkSeats(agents, buildSpacesFromLayout(layout, spaceNames));
+    if (result.unseated.length) console.warn(`[agenticview] workSeat migration (${why}): no free desk for ${result.unseated.join(", ")}`);
+    if (!result.changed) return;
+    const byId = new Map(agents.map((a) => [a.id, a]));
+    for (const m of result.moves) if (byId.get(m.agentId)?.workSeat) await registry.update(m.agentId, { workSeat: undefined });
+    for (const m of result.moves) {
+      const a = await registry.update(m.agentId, { workSeat: m.to });
+      if (emit) opts.bus.emit({ type: "agent.updated", agent: a });
+    }
+    console.info(`[agenticview] workSeat migration (${why}): ${describeWorkSeatMoves(result.moves).join("; ")}`);
+  };
+  await syncWorkSeats("office start", false);
   let layoutWrites = Promise.resolve();
   const serializeLayout = <T>(fn: () => Promise<T>): Promise<T> => {
     const work = layoutWrites.then(fn);
@@ -255,6 +280,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
         opts.bus.emit({ type: "agent.updated", agent: moved });
       }
     }
+    if (changed) await syncWorkSeats("layout change", true);
     if (changed) opts.bus.emit({ type: "layout.updated", layout });
     if (namesChanged) opts.bus.emit({ type: "spaceNames.updated", spaceNames: { ...spaceNames } });
     return layout;
@@ -327,7 +353,10 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       const { task } = m;
       const agentId = task.assigneeId;
       if (task.status === "running" || task.status === "assigned" || task.status === "waiting" || task.status === "queued") {
-        if (!idle.isBusy(agentId)) void idle.onBusy(agentId).catch(() => undefined);
+        // Working means sitting at the designated desk; brainstorm (meeting) work keeps the Meeting Room.
+        const toDesk = task.status !== "queued" && !task.meeting;
+        if (!idle.isBusy(agentId)) void idle.onBusy(agentId, { toDesk }).catch(() => undefined);
+        else if (toDesk) void idle.toWorkSeat(agentId).catch(() => undefined);
       } else if (isTerminal(task.status)) {
         void hasOpenWork(agentId).then((open) => {
           if (!open) idle.onIdle(agentId);
@@ -336,8 +365,16 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     }
   });
   {
-    const open = new Set((await tasks.list()).filter((t) => !isTerminal(t.status)).map((t) => t.assigneeId));
-    idle.start((await registry.list()).filter((a) => a.role === "worker" && !open.has(a.id)).map((a) => a.id));
+    const openTasks = (await tasks.list()).filter((t) => !isTerminal(t.status));
+    const open = new Set(openTasks.map((t) => t.assigneeId));
+    const workers = (await registry.list()).filter((a) => a.role === "worker");
+    idle.start(workers.filter((a) => !open.has(a.id)).map((a) => a.id));
+    // Workers with work in progress sit at their designated desk from the start.
+    for (const a of workers) {
+      if (!open.has(a.id)) continue;
+      const toDesk = openTasks.some((t) => t.assigneeId === a.id && t.status !== "queued" && !t.meeting);
+      void idle.onBusy(a.id, { toDesk }).catch(() => undefined);
+    }
   }
 
   let emitProvidersFn: () => Promise<void> = async () => undefined;
@@ -764,6 +801,19 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
         cfg.providerOrder = cfg.providerOrder.filter((p) => p !== customRef(id));
       }),
     removeRoom: removeRoomFn,
+    moveDesk: (agentId, desk) =>
+      moveWorker(
+        {
+          registry,
+          emitAgent: (agent) => opts.bus.emit({ type: "agent.updated", agent }),
+          spaceNames: () => ({ ...spaceNames }),
+          spaces: () => buildSpacesFromLayout(layout, spaceNames),
+          layout: () => layout,
+        },
+        agentId,
+        desk.space,
+        desk.seat,
+      ),
     decorate,
     snapshot,
   };
