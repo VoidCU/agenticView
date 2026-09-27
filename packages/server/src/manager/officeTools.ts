@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { assignableSpaces, findSpace, planOffice, planOfficeWithSpaces, type Agent, type Placement, type Space } from "@agenticview/shared";
+import { assignableSpaces, findSpace, planOffice, planOfficeWithSpaces, applyLayoutMoves, setRoomKind, defaultRoomName, SpaceKindSchema, type OfficeLayout, type Agent, type Placement, type Space } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry } from "../agents/registry.js";
 
@@ -8,11 +8,11 @@ export interface OfficeToolContext {
   emitAgent: (agent: Agent) => void;
   spaceNames?: () => Record<string, string>;
   renameSpace?: (id: string, name: string) => Promise<void>;
-  /**
-   * When the world has an explicit room layout (from addRoom), returns those spaces.
-   * When absent the office tools fall back to planOffice (auto-grow from worker count).
-   */
+  /** Spaces built from the world's persisted layout; tests without a world use planOffice. */
   spaces?: () => Space[];
+  layout?: () => OfficeLayout;
+  updateLayout?: (layout: OfficeLayout) => Promise<OfficeLayout>;
+  editLayout?: (edit: (current: OfficeLayout) => OfficeLayout) => Promise<OfficeLayout>;
 }
 
 function findWorker(agents: Agent[], ref: string): Agent | undefined {
@@ -23,7 +23,7 @@ function findWorker(agents: Agent[], ref: string): Agent | undefined {
 /** Seat map of the office: every space with its free desks and who sits where. */
 export async function describeSpaces(ctx: OfficeToolContext): Promise<string> {
   const agents = await ctx.registry.list();
-  const plan = ctx.spaces ? planOfficeWithSpaces(ctx.spaces(), agents) : planOffice(agents);
+  const plan = ctx.spaces ? planOfficeWithSpaces(ctx.spaces(), agents) : planOffice(agents, ctx.layout?.(), ctx.spaceNames?.());
   const who = new Map<string, Agent>();
   for (const a of agents) {
     const p = plan.placements[a.id];
@@ -32,7 +32,7 @@ export async function describeSpaces(ctx: OfficeToolContext): Promise<string> {
   const rows = plan.spaces.map((s) => ({
     id: s.id,
     name: ctx.spaceNames?.()[s.id] ?? s.name,
-    defaultName: s.name,
+    defaultName: ctx.layout?.().rooms.find((r) => r.id === s.id)?.name ?? defaultRoomName(s.kind, s.id),
     kind: s.kind,
     seats: Array.from({ length: s.seats }, (_, seat) => {
       const a = who.get(`${s.id}#${seat}`);
@@ -50,11 +50,11 @@ export async function moveWorker(ctx: OfficeToolContext, agentRef: string, space
   const agents = await ctx.registry.list();
   const worker = findWorker(agents, agentRef);
   if (!worker) return `ERROR: unknown worker ${agentRef} (use list_agents)`;
-  const spaces = ctx.spaces ? ctx.spaces().filter((s) => s.seats > 0) : assignableSpaces(agents);
+  const spaces = ctx.spaces ? ctx.spaces().filter((s) => s.seats > 0) : assignableSpaces(agents, ctx.layout?.());
   const room = spaces.find(s => s.id === spaceRef) ?? spaces.find(s => ctx.spaceNames?.()[s.id]?.toLowerCase() === spaceRef.trim().toLowerCase()) ?? findSpace(spaces, spaceRef);
   const space = room && { ...room, name: ctx.spaceNames?.()[room.id] ?? room.name };
   if (!space) return `ERROR: unknown space ${spaceRef}; pick one of: ${spaces.map((s) => s.id).join(", ")}`;
-  const plan = ctx.spaces ? planOfficeWithSpaces(ctx.spaces(), agents) : planOffice(agents);
+  const plan = ctx.spaces ? planOfficeWithSpaces(ctx.spaces(), agents) : planOffice(agents, ctx.layout?.(), ctx.spaceNames?.());
   const occupant = (n: number) => agents.find((a) => a.id !== worker.id && plan.placements[a.id]?.space === space.id && plan.placements[a.id]?.seat === n);
   let target: number;
   if (seat === undefined) {
@@ -94,7 +94,7 @@ export function officeTools(ctx: OfficeToolContext): BridgeTool[] {
       description: "Name a room after its role. Empty name restores the default; use the id or current name.",
       schema: { space: z.string().min(1), name: z.string().trim().max(40) },
       handler: async (args) => {
-        const spaces = planOffice(await ctx.registry.list()).spaces;
+        const spaces = ctx.spaces?.() ?? planOffice(await ctx.registry.list(), ctx.layout?.()).spaces;
         const ref = String(args.space).trim();
         const space = spaces.find(s => s.id === ref) ?? spaces.find(s => ctx.spaceNames?.()[s.id]?.toLowerCase() === ref.toLowerCase()) ?? findSpace(spaces, ref);
         if (!space) return `ERROR: unknown space ${ref}`;
@@ -102,7 +102,48 @@ export function officeTools(ctx: OfficeToolContext): BridgeTool[] {
         const name = z.string().trim().max(40).parse(args.name);
         if (name && spaces.some(s => s.id !== space.id && [s.id, s.name, ctx.spaceNames?.()[s.id]].some(n => n?.toLowerCase() === name.toLowerCase()))) return "ERROR: room name already in use";
         await ctx.renameSpace(space.id, name);
-        return JSON.stringify({ id: space.id, name: name || space.name, defaultName: space.name });
+        const room = ctx.layout?.().rooms.find((r) => r.id === space.id);
+        const fallback = room?.name ?? defaultRoomName(space.kind, space.id);
+        return JSON.stringify({ id: space.id, name: name || fallback, defaultName: fallback });
+      },
+    },
+    {
+      name: "set_layout",
+      description: "Move several rooms to hexes in order; moving onto an occupied hex swaps the rooms.",
+      schema: { moves: z.array(z.object({ space: z.string().min(1), toHex: z.object({ q: z.number().int(), r: z.number().int() }) })).min(1).max(40) },
+      handler: async (args) => {
+        if (!ctx.layout || !ctx.updateLayout) return "ERROR: layout editing unavailable";
+        try {
+          const edit = (current: OfficeLayout) => applyLayoutMoves(current, args.moves as { space: string; toHex: { q: number; r: number } }[]);
+          const next = ctx.editLayout ? await ctx.editLayout(edit) : await ctx.updateLayout(edit(ctx.layout()));
+          return JSON.stringify(next);
+        } catch (e) { return `ERROR: ${(e as Error).message}`; }
+      },
+    },
+    {
+      name: "move_room",
+      description: "Move one room to a hex; swaps with the room there if occupied.",
+      schema: { space: z.string().min(1), q: z.number().int(), r: z.number().int() },
+      handler: async (args) => {
+        if (!ctx.layout || !ctx.updateLayout) return "ERROR: layout editing unavailable";
+        try {
+          const edit = (current: OfficeLayout) => applyLayoutMoves(current, [{ space: String(args.space), toHex: { q: Number(args.q), r: Number(args.r) } }]);
+          const next = ctx.editLayout ? await ctx.editLayout(edit) : await ctx.updateLayout(edit(ctx.layout()));
+          return JSON.stringify(next);
+        } catch (e) { return `ERROR: ${(e as Error).message}`; }
+      },
+    },
+    {
+      name: "set_room_kind",
+      description: "Add or replace a room at a hex, or remove an empty room with null. The manager's office and My Office are required.",
+      schema: { q: z.number().int(), r: z.number().int(), kind: SpaceKindSchema.nullable() },
+      handler: async (args) => {
+        if (!ctx.layout || !ctx.updateLayout) return "ERROR: layout editing unavailable";
+        try {
+          const edit = (current: OfficeLayout) => setRoomKind(current, { q: Number(args.q), r: Number(args.r) }, args.kind as OfficeLayout["rooms"][number]["kind"] | null);
+          const next = ctx.editLayout ? await ctx.editLayout(edit) : await ctx.updateLayout(edit(ctx.layout()));
+          return JSON.stringify(next);
+        } catch (e) { return `ERROR: ${(e as Error).message}`; }
       },
     },
     {

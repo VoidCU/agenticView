@@ -90,7 +90,12 @@ export interface ManagerToolContext {
   /** When preferCheapModels is on, returns the cheapest available {provider, model}. */
   cheapProvider?: () => Promise<{ provider: Provider; model: string } | undefined>;
   /** Add a new room to the office layout. */
-  addRoom?: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{ ok: true; spaceId: string } | { ok: false; message: string }>;
+  addRoom?: (kind: "pod" | "meeting" | "lounge" | "production" | "research", name: string) => Promise<{ ok: true; spaceId: string } | { ok: false; message: string }>;
+  removeRoom?: (spaceId: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  layout?: () => import("@agenticview/shared").OfficeLayout;
+  updateLayout?: (layout: import("@agenticview/shared").OfficeLayout) => Promise<import("@agenticview/shared").OfficeLayout>;
+  editLayout?: (edit: (current: import("@agenticview/shared").OfficeLayout) => import("@agenticview/shared").OfficeLayout) => Promise<import("@agenticview/shared").OfficeLayout>;
+  spaces?: () => import("@agenticview/shared").Space[];
   /** Emit a brainstorm.updated event. */
   emitBrainstorm?: (ev: Extract<ServerMessage, { type: "brainstorm.updated" }>) => void;
   /** Claude Code sessions with live state (claude-session provider). */
@@ -512,16 +517,26 @@ export function managerTools(ctx: ManagerToolContext): BridgeTool[] {
     },
     {
       name: "add_room",
-      description: "Add a new pod, meeting room, or lounge to the office layout. Returns the new space id.",
+      description: "Add a new pod, meeting, lounge, production, or research room. Returns the new space id.",
       schema: {
-        kind: z.enum(["pod", "meeting", "lounge"]),
+        kind: z.enum(["pod", "meeting", "lounge", "production", "research"]),
         name: z.string().max(40).optional().describe("Display name; omit for a default like 'Pod B'"),
       },
       handler: async (args) => {
         if (!ctx.addRoom) return "ERROR: addRoom not available";
-        const result = await ctx.addRoom(args.kind as "pod" | "meeting" | "lounge", (args.name as string | undefined) ?? "");
+        const result = await ctx.addRoom(args.kind as "pod" | "meeting" | "lounge" | "production" | "research", (args.name as string | undefined) ?? "");
         if (!result.ok) return `ERROR: ${result.message}`;
         return `Added ${args.kind} room (id: ${result.spaceId})`;
+      },
+    },
+    {
+      name: "remove_room",
+      description: "Remove an empty room by space id. The Manager's Office and My Office cannot be removed.",
+      schema: { space: z.string().min(1) },
+      handler: async (args) => {
+        if (!ctx.removeRoom) return "ERROR: room removal unavailable";
+        const result = await ctx.removeRoom(String(args.space));
+        return result.ok ? `Removed room ${args.space}` : `ERROR: ${result.message}`;
       },
     },
   ];

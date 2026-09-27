@@ -4,7 +4,7 @@ import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { z } from "zod";
-import { newId, ClaudeLimitsBodySchema, ProviderSchema, SwitchAgentPayloadSchema, SwitchProviderPayloadSchema } from "@agenticview/shared";
+import { newId, ClaudeLimitsBodySchema, ProviderSchema, SwitchAgentPayloadSchema, SwitchProviderPayloadSchema, OfficeLayoutSchema, SpaceNamesSchema } from "@agenticview/shared";
 import type { World } from "../world.js";
 import { mirrorRoutes } from "../hooks/mirror.js";
 
@@ -101,6 +101,20 @@ export function apiRoutes(world: World): Hono {
   const app = new Hono();
 
   app.get("/api/snapshot", async (c) => c.json(await world.snapshot()));
+
+  app.get("/api/layout", async (c) => c.json({ ...world.layout(), spaceNames: (await world.snapshot()).spaceNames }));
+
+  app.put("/api/layout", async (c) => {
+    let json: unknown;
+    try { json = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
+    const body = OfficeLayoutSchema.extend({ spaceNames: SpaceNamesSchema.optional() }).safeParse(json);
+    if (!body.success) return c.json({ error: "Invalid layout", details: body.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`) }, 400);
+    const { spaceNames, ...layout } = body.data;
+    try {
+      await world.updateLayout(layout, spaceNames);
+      return c.json({ layout: world.layout(), spaceNames: (await world.snapshot()).spaceNames });
+    } catch (e) { return c.json({ error: (e as Error).message }, 400); }
+  });
 
   app.get("/api/limits", async (c) => c.json(await world.getLimits()));
 

@@ -1,4 +1,4 @@
-import { type Agent, type Space } from "@agenticview/shared";
+import { type OfficeLayout, type Agent, type Space } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry } from "../agents/registry.js";
 export interface OfficeToolContext {
@@ -6,11 +6,11 @@ export interface OfficeToolContext {
     emitAgent: (agent: Agent) => void;
     spaceNames?: () => Record<string, string>;
     renameSpace?: (id: string, name: string) => Promise<void>;
-    /**
-     * When the world has an explicit room layout (from addRoom), returns those spaces.
-     * When absent the office tools fall back to planOffice (auto-grow from worker count).
-     */
+    /** Spaces built from the world's persisted layout; tests without a world use planOffice. */
     spaces?: () => Space[];
+    layout?: () => OfficeLayout;
+    updateLayout?: (layout: OfficeLayout) => Promise<OfficeLayout>;
+    editLayout?: (edit: (current: OfficeLayout) => OfficeLayout) => Promise<OfficeLayout>;
 }
 /** Seat map of the office: every space with its free desks and who sits where. */
 export declare function describeSpaces(ctx: OfficeToolContext): Promise<string>;

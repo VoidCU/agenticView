@@ -60,7 +60,12 @@ export interface WorldDeps {
   renameSpace?: (id: string, name: string) => Promise<void>;
   usageTracker?: UsageTracker;
   emitProviders?: () => Promise<void>;
-  addRoom?: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{ ok: true; spaceId: string } | { ok: false; message: string }>;
+  addRoom?: (kind: "pod" | "meeting" | "lounge" | "production" | "research", name: string) => Promise<{ ok: true; spaceId: string } | { ok: false; message: string }>;
+  removeRoom?: (spaceId: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  layout?: () => import("@agenticview/shared").OfficeLayout;
+  updateLayout?: (layout: import("@agenticview/shared").OfficeLayout) => Promise<import("@agenticview/shared").OfficeLayout>;
+  editLayout?: (edit: (current: import("@agenticview/shared").OfficeLayout) => import("@agenticview/shared").OfficeLayout) => Promise<import("@agenticview/shared").OfficeLayout>;
+  spaces?: () => import("@agenticview/shared").Space[];
   /** Override the auto-revive delay (ms) for tests. Default 6000. */
   reviveDelayMs?: number;
   /** Override the revive-done clear delay (ms) for tests. Default 5000. */
@@ -668,6 +673,11 @@ export class Orchestrator {
         reviveAgent: (agentId, provider, model) => this.reviveAgent(agentId, provider, model),
         cheapProvider: this.deps.settings().preferCheapModels ? () => this.cheapProvider() : undefined,
         addRoom: this.deps.addRoom,
+        removeRoom: this.deps.removeRoom,
+        layout: this.deps.layout,
+        updateLayout: this.deps.updateLayout,
+        editLayout: this.deps.editLayout,
+        spaces: this.deps.spaces,
         emitBrainstorm: (ev) => this.deps.bus.emit(ev),
         sessions: this.deps.sessions,
         providerOf: async (a) => (await this.resolveProviderLive(a)).provider,

@@ -27,6 +27,13 @@ export class AgentRegistry {
     world;
     global;
     project;
+    layout;
+    ensureDesk;
+    createWrites = Promise.resolve();
+    useLayout(layout, ensureDesk) {
+        this.layout = layout;
+        this.ensureDesk = ensureDesk;
+    }
     constructor(world) {
         this.world = world;
         this.global = new JsonStore(join(globalRoot(), "agents"), AgentSchema);
@@ -52,6 +59,11 @@ export class AgentRegistry {
         return (await this.project?.read(id)) ?? this.global.read(id);
     }
     async create(input) {
+        const work = this.createWrites.then(() => this.createUnqueued(input));
+        this.createWrites = work.then(() => undefined, () => undefined);
+        return work;
+    }
+    async createUnqueued(input) {
         const scope = input.scope ?? (this.world.kind === "project" ? "project" : "global");
         const store = this.storeFor(scope);
         const agent = normalizeAgent(defaultAgent({
@@ -62,8 +74,9 @@ export class AgentRegistry {
             model: input.model ?? null,
         }));
         if (agent.role === "worker") {
+            await this.ensureDesk?.((await this.list()).filter((a) => a.role === "worker").length + 1);
             // Take the next free desk now so the seat is stable even as the roster changes around it.
-            const seat = planOffice([...(await this.list()), agent]).placements[agent.id];
+            const seat = planOffice([...(await this.list()), agent], this.layout?.()).placements[agent.id];
             if (seat)
                 agent.placement = seat;
         }
@@ -106,7 +119,7 @@ export class AgentRegistry {
      */
     async pinPlacements() {
         const all = await this.list();
-        const { placements } = planOffice(all);
+        const { placements } = planOffice(all, this.layout?.());
         const changed = [];
         for (const a of all) {
             const p = placements[a.id];

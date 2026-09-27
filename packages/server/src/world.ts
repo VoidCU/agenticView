@@ -1,4 +1,5 @@
 import { basename, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import {
   GlobalConfigSchema,
   SpaceNamesSchema,
@@ -18,12 +19,17 @@ import {
   type LimitsReport,
   type UsageReport,
   type GamesData,
-  buildSpaces,
-  ringsFor,
   MAX_RINGS,
   ExplicitRoomsSchema,
-  type ExplicitRoom,
-  planOfficeWithSpaces,
+  OfficeLayoutSchema,
+  type OfficeLayout,
+  buildSpacesFromLayout,
+  migrateLegacyLayout,
+  validateLayout,
+  growLayout,
+  nextGrowthHex,
+  newRoomId,
+  defaultRoomName,
   planOffice,
   loungeSpots,
   customRef,
@@ -99,11 +105,14 @@ export interface World {
    * Add a new room to the office layout.
    * Returns {ok:true, spaceId} on success or {ok:false, message} when the office is full.
    */
-  addRoom: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{ ok: true; spaceId: string } | { ok: false; message: string }>;
+  addRoom: (kind: "pod" | "meeting" | "lounge" | "production" | "research", name: string) => Promise<{ ok: true; spaceId: string } | { ok: false; message: string }>;
   /**
    * Remove an empty room from the office layout. Refuses if any agents are seated there.
    */
   removeRoom: (spaceId: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  layout: () => OfficeLayout;
+  updateLayout: (layout: OfficeLayout, names?: Record<string, string>) => Promise<OfficeLayout>;
+  editLayout: (edit: (current: OfficeLayout) => OfficeLayout) => Promise<OfficeLayout>;
   /** Store (or clear, with null/"") a built-in provider's API key in the global config. Never echoed to clients. */
   setProviderKey: (provider: KeyedProvider, apiKey: string | null) => Promise<void>;
   /** Save the provider order (Automatic, failover candidates, header chips). */
@@ -113,79 +122,6 @@ export interface World {
   removeCustomProvider: (id: string) => Promise<void>;
   /** Wire decoration of outgoing messages (fills agent.sessionModel for claude-session agents). */
   decorate: (m: ServerMessage) => ServerMessage;
-}
-
-// ── Explicit-room helpers (used by addRoom / removeRoom) ─────────────────────
-
-/** Build a Space[] from an explicit room list, assigning seats by kind. */
-function buildSpacesFromExplicit(rooms: ExplicitRoom[]): Space[] {
-  const SEATS_BY_KIND: Record<ExplicitRoom["kind"], number> = { pod: 6, meeting: 6, lounge: 4 };
-  return [
-    // Manager's office is always present at origin.
-    { id: "office", name: "Manager's Office", kind: "office", q: 0, r: 0, x: 0, z: 0, ring: 0, seats: 0 },
-    ...rooms.map((rm) => {
-      const { q, r } = rm;
-      // Axial to flat-top world coords (HEX_R = 5, sqrt3 * 5 / 2 ≈ 4.33)
-      const x = 5 * 1.5 * q;
-      const z = 5 * Math.sqrt(3) * (r + q / 2);
-      const ring = Math.max(Math.abs(q), Math.abs(r), Math.abs(-q - r));
-      return { id: rm.id, name: rm.name, kind: rm.kind, q, r, x, z, ring, seats: SEATS_BY_KIND[rm.kind] ?? 4 };
-    }),
-  ];
-}
-
-/** Returns the largest ring index present in an explicit room list (minimum 1). */
-function currentOfficeRings(rooms: ExplicitRoom[]): number {
-  let max = 1;
-  for (const rm of rooms) {
-    const ring = Math.max(Math.abs(rm.q), Math.abs(rm.r), Math.abs(-rm.q - rm.r));
-    if (ring > max) max = ring;
-  }
-  return max;
-}
-
-/** Hexes used by the meeting-room and lounge in ring-1 of the default layout. */
-const RESERVED_HEX = new Set(["0,-1", "-1,0"]);
-
-/** Find the next free hex coordinate to place a new room (spiral outward). */
-function nextAddRoomHex(rooms: ExplicitRoom[]): { q: number; r: number } | undefined {
-  const taken = new Set(rooms.map((rm) => `${rm.q},${rm.r}`));
-  taken.add("0,0"); // manager's office
-  // Spiral outward ring by ring up to MAX_RINGS.
-  for (let ring = 1; ring <= MAX_RINGS; ring++) {
-    // Produce all hexes at this ring distance.
-    const hexes: { q: number; r: number }[] = [];
-    let q = ring;
-    let r = -ring;
-    const dirs = [[0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1], [1, 0]] as const;
-    for (let d = 0; d < 6; d++) {
-      for (let s = 0; s < ring; s++) {
-        hexes.push({ q, r });
-        q += dirs[d]![0];
-        r += dirs[d]![1];
-      }
-    }
-    for (const h of hexes) {
-      const key = `${h.q},${h.r}`;
-      if (!taken.has(key) && !RESERVED_HEX.has(key)) return h;
-    }
-  }
-  return undefined;
-}
-
-/** Generate a unique room id given the kind and current rooms. */
-function nextRoomId(kind: ExplicitRoom["kind"], rooms: ExplicitRoom[]): string {
-  if (kind !== "pod") {
-    const existing = rooms.filter((r) => r.kind === kind).length;
-    return existing === 0 ? kind : `${kind}-${existing + 1}`;
-  }
-  const letters = "abcdefghijklmnopqrstuvwxyz";
-  const existingPods = new Set(rooms.filter((r) => r.kind === "pod").map((r) => r.id));
-  for (const letter of letters) {
-    const id = `pod-${letter}`;
-    if (!existingPods.has(id)) return id;
-  }
-  return `pod-${rooms.filter((r) => r.kind === "pod").length}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,45 +187,83 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
 
   const officeFile = join(root, "office.json");
   let spaceNames = await readJsonFile(officeFile, SpaceNamesSchema, {});
-  let nameWrites = Promise.resolve();
-  const renameSpace = (id: string, name: string): Promise<void> => {
-    const work = nameWrites.then(async () => {
+  const renameSpace = (id: string, name: string): Promise<void> =>
+    serializeLayout(async () => {
       const next = { ...spaceNames };
       if (name) next[id] = name; else delete next[id];
       await writeJsonFile(officeFile, next);
       spaceNames = next;
       opts.bus.emit({ type: "spaceNames.updated", spaceNames: { ...next } });
     });
-    nameWrites = work.catch(() => undefined);
-    return work;
-  };
 
-  // Explicit room layout (rooms.json).  null = no file yet → fall back to auto-grow for ringCount.
-  const roomsFile = join(root, "rooms.json");
-  let explicitRooms: ExplicitRoom[] | null = await readJsonFile(roomsFile, ExplicitRoomsSchema.nullable(), null);
-  let roomWrites = Promise.resolve();
-  const writeRooms = (next: ExplicitRoom[]): Promise<void> => {
-    const work = roomWrites.then(() => writeJsonFile(roomsFile, next));
-    roomWrites = work.catch(() => undefined);
+  const registry = new AgentRegistry(ref);
+  const layoutFile = join(root, "layout.json");
+  let layout: OfficeLayout;
+  let savedLayout: OfficeLayout | null = null;
+  try {
+    const raw = JSON.parse(await readFile(layoutFile, "utf8")) as unknown;
+    const parsed = OfficeLayoutSchema.parse(raw);
+    const check = validateLayout(parsed);
+    if (!check.ok) throw new Error(check.errors.join("; "));
+    savedLayout = parsed;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") console.error("[agenticview] invalid layout.json; migrating legacy rooms:", e);
+  }
+  const legacyRooms = savedLayout ? null : await readJsonFile(join(root, "rooms.json"), ExplicitRoomsSchema.nullable(), null).catch((e) => {
+    console.error("[agenticview] invalid rooms.json; using default rooms:", e);
+    return null;
+  });
+  const migrated = migrateLegacyLayout({ rooms: legacyRooms, spaceNames, workers: await registry.list(), layout: savedLayout });
+  layout = migrated.layout;
+  if (!savedLayout) await writeJsonFile(layoutFile, layout);
+  if (JSON.stringify(spaceNames) !== JSON.stringify(migrated.spaceNames)) {
+    spaceNames = migrated.spaceNames;
+    await writeJsonFile(officeFile, spaceNames);
+  }
+  for (const [id, placement] of Object.entries(migrated.placements)) await registry.update(id, { placement });
+  if (!savedLayout) console.info(`[agenticview] layout migration: dropped ${migrated.dropped.length} rooms (${migrated.dropped.join(", ") || "none"}); moved ${Object.keys(migrated.placements).length} seats`);
+  let layoutWrites = Promise.resolve();
+  const serializeLayout = <T>(fn: () => Promise<T>): Promise<T> => {
+    const work = layoutWrites.then(fn);
+    layoutWrites = work.then(() => undefined, () => undefined);
     return work;
   };
-  /**
-   * On the first explicit addRoom call, initialise rooms.json from the auto-grown layout so
-   * existing workers keep their spaces.
-   */
-  const ensureRoomsInitialized = async (): Promise<ExplicitRoom[]> => {
-    if (explicitRooms !== null) return explicitRooms;
+  const applyLayout = async (next: OfficeLayout, names?: Record<string, string>): Promise<OfficeLayout> => {
     const agents = await registry.list();
-    const workers = agents.filter((a) => a.role === "worker");
-    const baseSpaces = buildSpaces(Math.max(1, ringsFor(workers.length)));
-    const rooms: ExplicitRoom[] = baseSpaces
-      .filter((s) => s.kind !== "office")
-      .map((s) => ({ id: s.id, kind: s.kind as ExplicitRoom["kind"], name: s.name, q: s.q, r: s.r }));
-    explicitRooms = rooms;
-    await writeRooms(rooms);
-    return rooms;
+    const replacements = new Set(layout.rooms.filter((old) => next.rooms.some((room) => room.q === old.q && room.r === old.r && room.id !== old.id && room.kind !== old.kind)).map((room) => room.id));
+    const currentSeats = planOffice(agents, layout, spaceNames).placements;
+    const placements = Object.fromEntries(Object.entries(currentSeats).filter(([, seat]) => !replacements.has(seat.space)));
+    const check = validateLayout(next, { previous: layout, placements });
+    if (!check.ok) throw new Error(check.errors.join("; "));
+    const nextPlan = planOffice(agents, next, names ?? spaceNames);
+    const unseated = agents.filter((a) => a.role === "worker" && !nextPlan.placements[a.id]);
+    if (unseated.length) throw new Error(`No free pod desk for ${unseated.map((a) => a.name).join(", ")}; add a pod before changing this room`);
+    const parsedNames = names === undefined ? spaceNames : SpaceNamesSchema.parse(names);
+    const ids = new Set(next.rooms.map((r) => r.id));
+    const cleanedNames = Object.fromEntries(Object.entries(parsedNames).filter(([id]) => ids.has(id)));
+    const changed = JSON.stringify(next) !== JSON.stringify(layout);
+    const namesChanged = JSON.stringify(cleanedNames) !== JSON.stringify(spaceNames);
+    if (changed) await writeJsonFile(layoutFile, next);
+    if (namesChanged) await writeJsonFile(officeFile, cleanedNames);
+    layout = next;
+    spaceNames = cleanedNames;
+    const plan = planOffice(agents, layout, spaceNames);
+    for (const a of agents) {
+      const p = plan.placements[a.id];
+      if (p && (a.placement?.space !== p.space || a.placement?.seat !== p.seat)) {
+        const moved = await registry.update(a.id, { placement: p });
+        opts.bus.emit({ type: "agent.updated", agent: moved });
+      }
+    }
+    if (changed) opts.bus.emit({ type: "layout.updated", layout });
+    if (namesChanged) opts.bus.emit({ type: "spaceNames.updated", spaceNames: { ...spaceNames } });
+    return layout;
   };
-  const registry = new AgentRegistry(ref);
+  const updateLayout = (next: OfficeLayout, names?: Record<string, string>): Promise<OfficeLayout> => serializeLayout(() => applyLayout(next, names));
+  const editLayout = (edit: (current: OfficeLayout) => OfficeLayout): Promise<OfficeLayout> => serializeLayout(() => applyLayout(edit(layout)));
+  registry.useLayout(() => layout, async (workerCount) => {
+    await editLayout((current) => growLayout(current, workerCount));
+  });
   // Only state changes go on the wire, and never with the log: the web feed is built from run.events.
   const tasks = new TaskService(ref.kind === "project" ? join(root, "tasks") : join(root, "hub-tasks"), (task, kind) => {
     if (kind === "state") opts.bus.emit({ type: "task.updated", task: toWire(task) });
@@ -315,6 +289,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       name: ref.kind === "project" ? basename(ref.projectPath) || ref.projectPath : "Hub",
       projectPath: ref.kind === "project" ? ref.projectPath : null,
       knownProjects: cfg.knownProjects,
+      layout,
     };
   };
 
@@ -330,7 +305,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   // Idle behaviour (desk / visit / lounge rolls): server-local randomness only, never a model call.
   const officeSpaces = async (): Promise<{ spaces: Space[]; agents: Agent[] }> => {
     const agents = await registry.list();
-    const spaces = explicitRooms !== null ? buildSpacesFromExplicit(explicitRooms) : buildSpaces(ringsFor(agents.filter((a) => a.role === "worker").length));
+    const spaces = buildSpacesFromLayout(layout, spaceNames);
     return { spaces, agents };
   };
   const loungeBaseSpots = loungeSpots(0).spots.filter((sp) => !sp.waiting).length;
@@ -342,7 +317,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     desks: async () => {
       const { spaces, agents } = await officeSpaces();
       const seats = spaces.filter((s) => s.kind === "pod").flatMap((s) => Array.from({ length: s.seats }, (_, seat) => ({ space: s.id, seat })));
-      return { seats, placements: planOfficeWithSpaces(spaces, agents).placements };
+      return { seats, placements: planOffice(agents, layout, spaceNames).placements };
     },
     whiteboardSpace: async () => (await officeSpaces()).spaces.find((s) => s.kind === "meeting")?.id,
   });
@@ -382,6 +357,11 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     workerTools: opts.workerTools,
     spaceNames: () => ({ ...spaceNames }),
     renameSpace,
+    removeRoom: (spaceId) => removeRoomFn(spaceId),
+    layout: () => layout,
+    updateLayout,
+    editLayout,
+    spaces: () => buildSpacesFromLayout(layout, spaceNames),
     usageTracker,
     emitProviders: () => emitProvidersFn(),
     sessions: () => sessions(),
@@ -611,12 +591,10 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   // Snapshot helper (defined here so addRoom/removeRoom can broadcast it before the return object).
   const snapshot = async (): Promise<Snapshot> => {
     const agents = await registry.list();
-    const rc =
-      explicitRooms !== null
-        ? currentOfficeRings(explicitRooms)
-        : ringsFor(agents.filter((a) => a.role === "worker").length);
+    const rc = Math.max(1, ...layout.rooms.map((r) => Math.max(Math.abs(r.q), Math.abs(r.r), Math.abs(-r.q - r.r))));
     return {
       spaceNames: { ...spaceNames },
+      layout,
       world: await info(),
       agents,
       tasks: (await tasks.list()).map(toWire),
@@ -631,37 +609,28 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     };
   };
 
-  // addRoom: ring-by-ring explicit room placement.
-  const addRoomFn = async (kind: "pod" | "meeting" | "lounge", name: string): Promise<{ ok: true; spaceId: string } | { ok: false; message: string }> => {
-    const rooms = await ensureRoomsInitialized();
-    const hex = nextAddRoomHex(rooms);
-    if (!hex) {
-      return { ok: false, message: `The office is full (${MAX_RINGS} rings). Remove an empty room first.` };
-    }
-    const id = nextRoomId(kind, rooms);
-    const podCount = rooms.filter((r) => r.kind === "pod").length;
-    const defaultName =
-      kind === "pod" ? `Pod ${String.fromCharCode(65 + podCount)}` : kind === "meeting" ? "Meeting Room" : "Lounge";
-    const newRoom: ExplicitRoom = { id, kind, name: name.trim() || defaultName, q: hex.q, r: hex.r };
-    const next = [...rooms, newRoom];
-    explicitRooms = next;
-    await writeRooms(next);
-    // Persist a display-name override so list_spaces and the client see the custom name immediately.
-    if (newRoom.name !== defaultName) await renameSpace(id, newRoom.name);
-    void snapshot().then((s) => opts.bus.emit({ type: "snapshot", ...s }));
+  const addRoomFn = async (kind: "pod" | "meeting" | "lounge" | "production" | "research", name: string): Promise<{ ok: true; spaceId: string } | { ok: false; message: string }> => {
+    let id = "";
+    try {
+      await editLayout((current) => {
+        const hex = nextGrowthHex(current, kind);
+        if (!hex) throw new Error(`The office is full (${MAX_RINGS} rings). Remove an empty room first.`);
+        id = newRoomId(current, kind);
+        const custom = name.trim();
+        return { version: 1, rooms: [...current.rooms, { id, kind, ...hex, ...(custom && custom !== defaultRoomName(kind, id) ? { name: custom } : {}) }] };
+      });
+    } catch (e) { return { ok: false, message: (e as Error).message }; }
     return { ok: true, spaceId: id };
   };
 
   // removeRoom: only empty rooms (no seated agents), never the Manager's Office.
   const removeRoomFn = async (spaceId: string): Promise<{ ok: true } | { ok: false; message: string }> => {
-    if (spaceId === "office") return { ok: false, message: "Cannot remove the Manager's Office." };
-    const rooms = explicitRooms;
-    if (rooms === null || !rooms.find((r) => r.id === spaceId)) {
+    if (spaceId === "office" || spaceId === "myoffice") return { ok: false, message: `Cannot remove ${spaceId === "office" ? "the Manager's Office" : "My Office"}.` };
+    if (!layout.rooms.find((r) => r.id === spaceId)) {
       return { ok: false, message: `Unknown room '${spaceId}'.` };
     }
     const agents = await registry.list();
-    const spaces = buildSpacesFromExplicit(rooms);
-    const plan = planOfficeWithSpaces(spaces, agents);
+    const plan = planOffice(agents, layout, spaceNames);
     const seatedIds = Object.entries(plan.placements)
       .filter(([, p]) => p.space === spaceId)
       .map(([agentId]) => agentId);
@@ -672,11 +641,8 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
         message: `Cannot remove '${spaceId}': ${names.join(", ")} ${names.length === 1 ? "is" : "are"} seated there. Move them first.`,
       };
     }
-    const next = rooms.filter((r) => r.id !== spaceId);
-    explicitRooms = next;
-    await writeRooms(next);
-    if (spaceNames[spaceId]) await renameSpace(spaceId, "");
-    void snapshot().then((s) => opts.bus.emit({ type: "snapshot", ...s }));
+    const next: OfficeLayout = { version: 1, rooms: layout.rooms.filter((r) => r.id !== spaceId) };
+    try { await updateLayout(next); } catch (e) { return { ok: false, message: (e as Error).message }; }
     return { ok: true };
   };
 
@@ -771,6 +737,9 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       return projectSettings;
     },
     addRoom: addRoomFn,
+    layout: () => layout,
+    updateLayout,
+    editLayout,
     setProviderKey: (provider, apiKey) =>
       mutateConfig((cfg) => {
         const key = apiKey?.trim();

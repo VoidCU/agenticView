@@ -1,4 +1,4 @@
-import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type ServerMessage, type Effort, type LimitsReport, type UsageReport, type GamesData, type CustomProviderUpsert, type KeyedProvider } from "@agenticview/shared";
+import { type GlobalConfig, type ProjectSettings, type Provider, type ProviderStatus, type Snapshot, type WorldInfo, type WorkerSessionInfo, type ServerMessage, type Effort, type LimitsReport, type UsageReport, type GamesData, type OfficeLayout, type CustomProviderUpsert, type KeyedProvider } from "@agenticview/shared";
 import { UsageTracker } from "./manager/usageTracker.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { type SyncResult } from "./agents/subagents.js";
@@ -62,7 +62,7 @@ export interface World {
      * Add a new room to the office layout.
      * Returns {ok:true, spaceId} on success or {ok:false, message} when the office is full.
      */
-    addRoom: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{
+    addRoom: (kind: "pod" | "meeting" | "lounge" | "production" | "research", name: string) => Promise<{
         ok: true;
         spaceId: string;
     } | {
@@ -78,6 +78,9 @@ export interface World {
         ok: false;
         message: string;
     }>;
+    layout: () => OfficeLayout;
+    updateLayout: (layout: OfficeLayout, names?: Record<string, string>) => Promise<OfficeLayout>;
+    editLayout: (edit: (current: OfficeLayout) => OfficeLayout) => Promise<OfficeLayout>;
     /** Store (or clear, with null/"") a built-in provider's API key in the global config. Never echoed to clients. */
     setProviderKey: (provider: KeyedProvider, apiKey: string | null) => Promise<void>;
     /** Save the provider order (Automatic, failover candidates, header chips). */

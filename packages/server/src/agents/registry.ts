@@ -3,6 +3,7 @@ import {
   defaultAgent,
   MANAGER_TOOLS,
   planOffice,
+  type OfficeLayout,
   type Agent,
   type Effort,
   type Role,
@@ -60,6 +61,14 @@ export class ScopeError extends Error {
 export class AgentRegistry {
   private readonly global: JsonStore<Agent>;
   private readonly project?: JsonStore<Agent>;
+  private layout?: () => OfficeLayout;
+  private ensureDesk?: (workerCount: number) => Promise<void>;
+  private createWrites: Promise<void> = Promise.resolve();
+
+  useLayout(layout: () => OfficeLayout, ensureDesk: (workerCount: number) => Promise<void>): void {
+    this.layout = layout;
+    this.ensureDesk = ensureDesk;
+  }
 
   constructor(readonly world: WorldRef) {
     this.global = new JsonStore(join(globalRoot(), "agents"), AgentSchema);
@@ -86,6 +95,12 @@ export class AgentRegistry {
   }
 
   async create(input: CreateAgentInput): Promise<Agent> {
+    const work = this.createWrites.then(() => this.createUnqueued(input));
+    this.createWrites = work.then(() => undefined, () => undefined);
+    return work;
+  }
+
+  private async createUnqueued(input: CreateAgentInput): Promise<Agent> {
     const scope = input.scope ?? (this.world.kind === "project" ? "project" : "global");
     const store = this.storeFor(scope);
     const agent = normalizeAgent(
@@ -98,8 +113,9 @@ export class AgentRegistry {
       }),
     );
     if (agent.role === "worker") {
+      await this.ensureDesk?.((await this.list()).filter((a) => a.role === "worker").length + 1);
       // Take the next free desk now so the seat is stable even as the roster changes around it.
-      const seat = planOffice([...(await this.list()), agent]).placements[agent.id];
+      const seat = planOffice([...(await this.list()), agent], this.layout?.()).placements[agent.id];
       if (seat) agent.placement = seat;
     }
     await store.write(agent.id, agent);
@@ -140,7 +156,7 @@ export class AgentRegistry {
    */
   async pinPlacements(): Promise<Agent[]> {
     const all = await this.list();
-    const { placements } = planOffice(all);
+    const { placements } = planOffice(all, this.layout?.());
     const changed: Agent[] = [];
     for (const a of all) {
       const p = placements[a.id];

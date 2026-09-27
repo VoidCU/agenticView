@@ -36,7 +36,7 @@ describe("office bridge tools", () => {
     const { ctx } = fakeWorld(roster());
     const reg = new ToolRegistry();
     const { token } = reg.register("run1", officeTools(ctx));
-    expect(reg.describe("run1", token).map((t) => t.name)).toEqual(["list_spaces", "rename_space", "move_worker", "arrange_workers"]);
+    expect(reg.describe("run1", token).map((t) => t.name)).toEqual(["list_spaces", "rename_space", "set_layout", "move_room", "set_room_kind", "move_worker", "arrange_workers"]);
     const rows = JSON.parse(await reg.call("run1", token, "list_spaces", {})) as { id: string; seats: { seat: number; name?: string; free?: boolean }[] }[];
     const podA = rows.find((r) => r.id === "pod-a")!;
     expect(podA.seats.map((s) => s.name ?? "free")).toEqual(["W1", "W2", "W3", "free", "free", "free"]);

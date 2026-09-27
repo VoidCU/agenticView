@@ -38,13 +38,23 @@ export interface ManagerToolContext {
         model: string;
     } | undefined>;
     /** Add a new room to the office layout. */
-    addRoom?: (kind: "pod" | "meeting" | "lounge", name: string) => Promise<{
+    addRoom?: (kind: "pod" | "meeting" | "lounge" | "production" | "research", name: string) => Promise<{
         ok: true;
         spaceId: string;
     } | {
         ok: false;
         message: string;
     }>;
+    removeRoom?: (spaceId: string) => Promise<{
+        ok: true;
+    } | {
+        ok: false;
+        message: string;
+    }>;
+    layout?: () => import("@agenticview/shared").OfficeLayout;
+    updateLayout?: (layout: import("@agenticview/shared").OfficeLayout) => Promise<import("@agenticview/shared").OfficeLayout>;
+    editLayout?: (edit: (current: import("@agenticview/shared").OfficeLayout) => import("@agenticview/shared").OfficeLayout) => Promise<import("@agenticview/shared").OfficeLayout>;
+    spaces?: () => import("@agenticview/shared").Space[];
     /** Emit a brainstorm.updated event. */
     emitBrainstorm?: (ev: Extract<ServerMessage, {
         type: "brainstorm.updated";

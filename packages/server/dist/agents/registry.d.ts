@@ -1,4 +1,4 @@
-import { type Agent, type Effort, type Role, type Scope, type Provider, type ToolAllowance, type PermissionMode, type Appearance } from "@agenticview/shared";
+import { type OfficeLayout, type Agent, type Effort, type Role, type Scope, type Provider, type ToolAllowance, type PermissionMode, type Appearance } from "@agenticview/shared";
 export type WorldRef = {
     kind: "project";
     projectPath: string;
@@ -37,12 +37,17 @@ export declare class AgentRegistry {
     readonly world: WorldRef;
     private readonly global;
     private readonly project?;
+    private layout?;
+    private ensureDesk?;
+    private createWrites;
+    useLayout(layout: () => OfficeLayout, ensureDesk: (workerCount: number) => Promise<void>): void;
     constructor(world: WorldRef);
     private storeFor;
     /** Project world: project agents plus global workers. Hub: every global agent. */
     list(): Promise<Agent[]>;
     get(id: string): Promise<Agent | undefined>;
     create(input: CreateAgentInput): Promise<Agent>;
+    private createUnqueued;
     update(id: string, patch: Partial<Agent>): Promise<Agent>;
     /** Clone a global agent into this project with fresh id and stats, remembering its origin. */
     copyToProject(id: string): Promise<Agent>;

@@ -28,7 +28,7 @@ export function brainstormTool(ctx) {
     async function begin(topic, refs) {
         const agents = await ctx.registry.list();
         const tasks = await ctx.tasks.list();
-        const plan = planOffice(agents);
+        const plan = planOffice(agents, ctx.layout?.(), ctx.spaceNames?.());
         const session = { participants: [], skipped: [], completion: Promise.resolve() };
         const workers = agents.filter(a => a.role === "worker");
         for (const ref of refs) {
@@ -88,7 +88,7 @@ export function brainstormTool(ctx) {
                 return;
             }
             const agents = await ctx.registry.list();
-            const plan = planOffice(agents);
+            const plan = planOffice(agents, ctx.layout?.(), ctx.spaceNames?.());
             const meeting = plan.spaces.find(s => s.id === "meeting");
             const pendingIds = new Set(pending.map(p => p.agent.id));
             const occupied = agents.filter(a => !pendingIds.has(a.id) && !finishedAgents.has(a.id) && plan.placements[a.id]?.space === meeting.id).length;
@@ -107,7 +107,7 @@ export function brainstormTool(ctx) {
             try {
                 for (const p of batch) {
                     const current = await ctx.registry.list();
-                    const seats = planOffice(current).placements;
+                    const seats = planOffice(current, ctx.layout?.(), ctx.spaceNames?.()).placements;
                     const taken = new Set(current.filter(a => a.id !== p.agent.id && seats[a.id]?.space === "meeting").map(a => seats[a.id].seat));
                     const free = Array.from({ length: meeting.seats }, (_, i) => i).find(i => !taken.has(i));
                     // Completed participants may lend their meeting desk to a later batch; the return swap restores them.
