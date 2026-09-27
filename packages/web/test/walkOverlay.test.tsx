@@ -3,8 +3,13 @@
  * releases pointer lock and pauses walk mode, and hands it back on close.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { Space } from "@agenticview/shared";
 import { Modal } from "../src/hud/ui";
+import { PodBoard } from "../src/hud/PodBoard";
+import { useStore } from "../src/state/store";
+import { manager, snapshot, task } from "./fixtures";
 import { useWalk } from "../src/state/walk";
 import { openOverlayFromWalk } from "../src/state/pointerLock";
 
@@ -43,6 +48,25 @@ describe("overlays opened from walk mode release pointer lock", () => {
     expect(document.exitPointerLock).not.toHaveBeenCalled();
     expect(useWalk.getState().paused).toBe(false);
     unmount();
+  });
+
+  it("the Manager board's timeline keeps the mouse free from walk mode until the board closes", async () => {
+    const office: Space = { id: "office", name: "Manager's Office", kind: "office", q: 0, r: 0, ring: 0, x: 0, z: 0, seats: 1 };
+    useStore.getState().reset();
+    useStore.getState().apply(snapshot([manager], [task({ id: "req1", kind: "request", title: "Build login", assigneeId: manager.id, createdBy: "user" })]));
+    const { unmount } = render(<PodBoard space={office} onClose={() => {}} />);
+    expect(document.exitPointerLock).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByTestId("manager-view-timeline"));
+    expect(screen.getByTestId("workflow-board")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByTestId("manager-board")).toBeInTheDocument();
+    // Still one overlay holding the mouse: walk stays paused, nothing tried to re-lock.
+    expect(useWalk.getState().paused).toBe(true);
+    const requestLock = (canvas as unknown as { requestPointerLock: () => void }).requestPointerLock;
+    expect(requestLock).not.toHaveBeenCalled();
+    unmount();
+    expect(useWalk.getState().paused).toBe(false);
+    expect(requestLock).toHaveBeenCalled();
   });
 
   it("the restore function is idempotent and leaves the mouse free while another dialog is open", () => {

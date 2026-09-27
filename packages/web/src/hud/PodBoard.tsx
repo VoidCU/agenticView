@@ -8,6 +8,7 @@ import {
 import { CloseIcon, Modal } from "./ui";
 import { RetryButton } from "./LimitChip";
 import { SimpleMarkdown } from "./markdown";
+import { WorkflowBoardBody, workflowTitle } from "./WorkflowBoard";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -784,11 +785,34 @@ function DelegatedMiniCard({ branch, now }: { branch: TaskBranch; now: number })
   );
 }
 
-function ManagerKanban({ manager }: { manager: Agent | undefined }) {
+/** A small flow glyph (three steps joined by a line) for "View timeline". */
+function TimelineIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+      <path d="M4 3.5v9" />
+      <circle cx="4" cy="3" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="8" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="4" cy="13" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M8 3h5M8 8h5M8 13h3" />
+    </svg>
+  );
+}
+
+function ManagerKanban({
+  manager,
+  openIds,
+  onToggle,
+  onOpenWorkflow,
+}: {
+  manager: Agent | undefined;
+  openIds: ReadonlySet<string>;
+  onToggle: (taskId: string) => void;
+  /** Show this request's workflow (the Timeline's WorkflowBoard) in the board's dialog. */
+  onOpenWorkflow: (taskId: string) => void;
+}) {
   const tasks = useStore((s) => s.tasks);
   const feed = useStore((s) => s.feed);
   const [now, setNow] = useState(Date.now);
-  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30000);
@@ -796,14 +820,6 @@ function ManagerKanban({ manager }: { manager: Agent | undefined }) {
   }, []);
 
   const requests = managerBoard(manager?.id, Object.values(tasks), feed[manager?.id ?? ""] ?? NO_FEED);
-
-  const toggleRow = (id: string) => {
-    setOpenIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
 
   if (!requests.length) {
     return <p className="board-empty">No requests yet. Tell the manager what you want to build.</p>;
@@ -814,19 +830,46 @@ function ManagerKanban({ manager }: { manager: Agent | undefined }) {
       {requests.map(({ task, children, replies }) => {
         const isOpen = openIds.has(task.id);
         return (
-          <div key={task.id} className="kanban-manager-row" data-testid="manager-row">
-            <button
-              type="button"
-              className="kanban-manager-summary"
-              onClick={() => toggleRow(task.id)}
-              aria-expanded={isOpen}
-              aria-label={task.title}
-            >
-              <span className="kanban-manager-meta">You · {relativeTime(task.createdAt, now)}</span>
-              <strong className="kanban-manager-title">{task.title}</strong>
-              <ManagerProgressBar branches={children} />
-              <span className="kanban-manager-count">{children.length} delegated</span>
-            </button>
+          <div key={task.id} className="kanban-manager-row" data-testid="manager-row" data-request-id={task.id}>
+            <div className="kanban-manager-head">
+              {/* The title area opens the request's timeline (its workflow flow). */}
+              <button
+                type="button"
+                className="kanban-manager-summary"
+                onClick={() => onOpenWorkflow(task.id)}
+                aria-label={task.title}
+                aria-haspopup="dialog"
+                title="View timeline"
+              >
+                <span className="kanban-manager-meta">You · {relativeTime(task.createdAt, now)}</span>
+                <strong className="kanban-manager-title">{task.title}</strong>
+                <ManagerProgressBar branches={children} />
+                <span className="kanban-manager-count">{children.length} delegated</span>
+              </button>
+              <div className="kanban-manager-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs kanban-manager-timeline"
+                  onClick={() => onOpenWorkflow(task.id)}
+                  aria-haspopup="dialog"
+                  aria-label={`View timeline: ${task.title}`}
+                  data-testid="manager-view-timeline"
+                >
+                  <TimelineIcon />
+                  View timeline
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs kanban-manager-toggle"
+                  onClick={() => onToggle(task.id)}
+                  aria-expanded={isOpen}
+                  aria-label={`${isOpen ? "Hide" : "Show"} details: ${task.title}`}
+                >
+                  {isOpen ? "Hide details" : "Details"}
+                  <span aria-hidden="true" className="kanban-manager-chevron">{isOpen ? "▴" : "▾"}</span>
+                </button>
+              </div>
+            </div>
             {isOpen && (
               <div className="kanban-manager-detail">
                 {(task.result || replies.length > 0) && (
@@ -867,9 +910,59 @@ export function PodBoard({
   const roomBoard = space.kind === "production" || space.kind === "research";
   const manager = Object.values(agents).find((a) => a.role === "manager");
   const displayName = spaceNames[space.id]?.trim() || space.name;
+  // Manager board: which request rows are expanded, and which request's workflow is shown (if any).
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  const [workflowId, setWorkflowId] = useState<string>();
+  const workflowRoot = useStore((s) => (workflowId ? s.tasks[workflowId] : undefined));
+  const backRef = useRef<HTMLButtonElement>(null);
+  const returnTo = useRef<string | undefined>(undefined);
+
+  // Swapping in the workflow moves focus to its Back button; coming back refocuses the request's row.
+  useEffect(() => {
+    if (workflowId) {
+      returnTo.current = workflowId;
+      backRef.current?.focus();
+      return;
+    }
+    const id = returnTo.current;
+    returnTo.current = undefined;
+    if (!id) return;
+    const row = Array.from(document.querySelectorAll<HTMLElement>("[data-request-id]")).find((el) => el.dataset.requestId === id);
+    row?.querySelector<HTMLElement>(".kanban-manager-summary")?.focus();
+  }, [workflowId]);
 
   // My Office and lounges have no whiteboard; meeting rooms (like the manager's office) open the Manager board.
   if (space.kind === "myoffice" || space.kind === "lounge") return null;
+
+  // A request's timeline replaces the board inside the SAME dialog (not a second dialog stacked on
+  // top): one focus trap, one Escape handler and one walk-mode pointer release, so Esc, the close
+  // button or the Back button step back to the Manager board, and closing the board then hands the
+  // mouse back to walk mode as usual.
+  if (!pod && workflowRoot) {
+    const back = () => setWorkflowId(undefined);
+    return (
+      <Modal title={workflowTitle(workflowRoot)} onClose={back} wide>
+        <WorkflowBoardBody
+          root={workflowRoot}
+          toolbar={
+            <div className="wfb-toolbar">
+              <button type="button" ref={backRef} className="btn btn-ghost btn-xs wfb-back" onClick={back} data-testid="workflow-back">
+                <span aria-hidden="true">←</span> Back to Manager board
+              </button>
+            </div>
+          }
+        />
+      </Modal>
+    );
+  }
+
+  const toggleRow = (id: string) => {
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <Modal title={roomBoard ? `${displayName} board` : pod ? `Pod board · ${displayName}` : "Manager board"} onClose={onClose} wide>
@@ -878,8 +971,8 @@ export function PodBoard({
           <PodKanban space={space} onOpenInbox={onOpenInbox} onCloseBoard={onClose} />
         ) : (
           <>
-            <p className="board-caption">Your conversation with {manager?.name ?? "Atlas"} · newest requests first</p>
-            <ManagerKanban manager={manager} />
+            <p className="board-caption">Your conversation with {manager?.name ?? "Atlas"} · newest requests first · open a request to see its timeline</p>
+            <ManagerKanban manager={manager} openIds={openIds} onToggle={toggleRow} onOpenWorkflow={setWorkflowId} />
           </>
         )}
       </div>

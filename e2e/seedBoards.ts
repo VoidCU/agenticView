@@ -35,7 +35,9 @@ export async function seedPinnedBoards(page: Page): Promise<{ requestId: string;
       return `t_e2e_pin_${n}`;
     };
     const requestTitle = "Build the sign-in flow";
-    const requestId = task(requestTitle, "running", atlas.id, { kind: "request", createdBy: "user", log: [{ ts: new Date(now - 200_000).toISOString(), type: "user", text: requestTitle }] });
+    // The request predates everything it delegated (the workflow reads top to bottom from "You asked").
+    const asked = new Date(now - 40 * 60_000).toISOString();
+    const requestId = task(requestTitle, "running", atlas.id, { kind: "request", createdBy: "user", createdAt: asked, startedAt: asked, log: [{ ts: asked, type: "user", text: requestTitle }] });
     task("Add password reset", "waiting", atlas.id, { kind: "request", createdBy: "user" });
     task("Write release notes", "done", atlas.id, { kind: "request", createdBy: "user" });
     task("Fix flaky CI job", "failed", atlas.id, { kind: "request", createdBy: "user" });

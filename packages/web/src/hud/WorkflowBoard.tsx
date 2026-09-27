@@ -5,7 +5,7 @@
  * to full markdown; a step's title opens that task's drawer. Presentation only: the steps come from
  * buildWorkflow (state/workflow.ts).
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { Agent, Task } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { filesChangedForTask } from "../state/boards";
@@ -136,7 +136,17 @@ function Drawer({ taskId, onClose }: { taskId: string; onClose: () => void }) {
   );
 }
 
-export function WorkflowBoard({ root, onClose }: { root: Task; onClose: () => void }) {
+/** Title of the workflow overlay for a request (shared by the Timeline and the Manager board). */
+export function workflowTitle(root: Task): string {
+  return `Workflow · ${root.title}`;
+}
+
+/**
+ * The workflow flow itself, without its dialog: the Manager board shows it inside its own dialog
+ * (one dialog, so one focus trap and one walk-mode pointer release) with a way back to the board.
+ * `toolbar` renders above the summary (the Manager board's "Back to board" button).
+ */
+export function WorkflowBoardBody({ root, toolbar }: { root: Task; toolbar?: ReactNode }) {
   const tasks = useStore((s) => s.tasks);
   const agents = useStore((s) => s.agents);
   const [drawerId, setDrawerId] = useState<string>();
@@ -146,27 +156,34 @@ export function WorkflowBoard({ root, onClose }: { root: Task; onClose: () => vo
   const end = root.finishedAt ? Date.parse(root.finishedAt) : NaN;
   const took = Number.isNaN(end) ? undefined : formatDuration(Math.max(0, end - Date.parse(root.createdAt)));
   return (
-    <Modal title={`Workflow · ${root.title}`} onClose={onClose} wide>
-      <div className="workflow-board" data-testid="workflow-board">
-        <div className="wfb-summary">
-          <span className={`tl-status tl-status-${root.status}`}>{STATUS_LABEL[root.status]}</span>
-          <time dateTime={root.createdAt}>{timeAgo(root.createdAt)}</time>
-          <span>{steps.length} steps</span>
-          <span className="wfb-involved">
-            {involved.map((id) => <Avatar key={id} id={id} agents={agents} />)}
-            {involved.length} agent{involved.length === 1 ? "" : "s"}
-          </span>
-          {took && <span>took {took}</span>}
-        </div>
-        <div className="wfb-scroll">
+    <div className="workflow-board" data-testid="workflow-board">
+      {toolbar}
+      <div className="wfb-summary">
+        <span className={`tl-status tl-status-${root.status}`}>{STATUS_LABEL[root.status]}</span>
+        <time dateTime={root.createdAt}>{timeAgo(root.createdAt)}</time>
+        <span>{steps.length} steps</span>
+        <span className="wfb-involved">
+          {involved.map((id) => <Avatar key={id} id={id} agents={agents} />)}
+          {involved.length} agent{involved.length === 1 ? "" : "s"}
+        </span>
+        {took && <span>took {took}</span>}
+      </div>
+      <div className="wfb-scroll">
         <ol className="wfb-list" aria-label={`Workflow: ${root.title}`}>
           {steps.map((s, i) => (
             <FlowStep key={s.id} step={s} n={i + 1} agents={agents} onOpen={setDrawerId} />
           ))}
         </ol>
-        </div>
-        {drawerId && <Drawer taskId={drawerId} onClose={() => setDrawerId(undefined)} />}
       </div>
+      {drawerId && <Drawer taskId={drawerId} onClose={() => setDrawerId(undefined)} />}
+    </div>
+  );
+}
+
+export function WorkflowBoard({ root, onClose }: { root: Task; onClose: () => void }) {
+  return (
+    <Modal title={workflowTitle(root)} onClose={onClose} wide>
+      <WorkflowBoardBody root={root} />
     </Modal>
   );
 }

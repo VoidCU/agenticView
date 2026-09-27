@@ -1,6 +1,7 @@
 /**
  * Round 14 review screenshots, light and dark, 1440x900:
- *  - walk-mode whiteboards drawn as the popup's pinned notes (Pod A's tasks, the Manager board's requests).
+ *  - walk-mode whiteboards drawn as the popup's pinned notes (Pod A's tasks, the Manager board's requests);
+ *  - the Manager board popup's "View timeline" rows, and the request's workflow swapped into the dialog.
  *
  * Runs when AGENTICVIEW_SCREENSHOTS=1 npm run test:e2e. Saved to e2e/screenshots/ (gitignored).
  */
@@ -41,5 +42,29 @@ for (const theme of ["light", "dark"] as const) {
     await page.waitForTimeout(1_400);
     await page.screenshot({ path: `e2e/screenshots/r14-walk-board-pod-oblique-${theme}-1440x900.png` });
     await page.evaluate(() => (window as unknown as Win).__setWalking?.(false));
+  });
+
+  test(`${theme}: Manager board rows open the request's timeline, Esc returns to the board`, async ({ page }) => {
+    mkdirSync("e2e/screenshots", { recursive: true });
+    await page.emulateMedia({ colorScheme: theme });
+    await page.goto(`/#token=${launchToken()}`);
+    await expect(page.locator(".tag-name", { hasText: "Atlas" })).toBeVisible({ timeout: 20_000 });
+    const { requestId, requestTitle } = await seedPinnedBoards(page);
+    await page.getByRole("button", { name: /Open Manager board from/ }).first().click();
+    const board = page.getByTestId("manager-board");
+    await expect(board).toBeVisible();
+    const row = page.locator(`[data-request-id="${requestId}"]`);
+    await expect(row.getByTestId("manager-view-timeline")).toBeVisible();
+    await page.screenshot({ path: `e2e/screenshots/r14-manager-board-rows-${theme}-1440x900.png` });
+    await row.getByTestId("manager-view-timeline").click();
+    await expect(page.getByRole("dialog", { name: `Workflow · ${requestTitle}` })).toBeVisible();
+    await expect(page.getByTestId("wf-step").first()).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await page.screenshot({ path: `e2e/screenshots/r14-manager-board-workflow-${theme}-1440x900.png` });
+    await page.keyboard.press("Escape");
+    await expect(board).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Manager board" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 }

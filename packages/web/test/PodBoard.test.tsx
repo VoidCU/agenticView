@@ -296,10 +296,78 @@ describe("Manager board", () => {
     expect(within(rows[0]!).getByTestId("manager-progress-bar")).toBeInTheDocument();
 
     // Expand to see delegated tasks
-    await userEvent.click(within(rows[0]!).getByRole("button", { name: /build login/i }));
+    await userEvent.click(within(rows[0]!).getByRole("button", { name: /show details: build login/i }));
     const delegated = screen.getByTestId("delegated-cards");
     expect(within(delegated).getByText("Child done")).toBeInTheDocument();
     expect(within(delegated).getByText("Child running")).toBeInTheDocument();
+    expect(within(rows[0]!).getByRole("button", { name: /hide details: build login/i })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  function renderManagerWithRequests() {
+    const childDone = task({ id: "c1", title: "Child done", status: "done", parentId: "req1", assigneeId: worker.id, createdAt: "2026-09-25T00:01:00.000Z", finishedAt: "2026-09-25T00:03:00.000Z" });
+    const request = task({ id: "req1", title: "Build login", kind: "request", status: "done", createdBy: "user", assigneeId: manager.id, finishedAt: "2026-09-25T00:05:00.000Z" });
+    const other = task({ id: "req2", title: "Write docs", kind: "request", createdBy: "user", assigneeId: manager.id, createdAt: "2026-09-24T00:00:00.000Z" });
+    useStore.getState().apply(snapshot([manager, worker], [request, childDone, other]));
+    const onClose = vi.fn();
+    render(<PodBoard space={officeSpace} onClose={onClose} />);
+    return { onClose };
+  }
+
+  it("each request row has a visible View timeline button that opens its workflow with that request's steps", async () => {
+    renderManagerWithRequests();
+    const rows = screen.getAllByTestId("manager-row");
+    expect(within(rows[0]!).getByTestId("manager-view-timeline")).toHaveTextContent("View timeline");
+    await userEvent.click(within(rows[0]!).getByTestId("manager-view-timeline"));
+    // The workflow replaces the board inside the same dialog (never two stacked dialogs).
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    const dialog = screen.getByRole("dialog", { name: "Workflow · Build login" });
+    const flow = within(dialog).getByRole("list", { name: "Workflow: Build login" });
+    const steps = within(flow).getAllByTestId("wf-step");
+    expect(steps[0]!.textContent).toContain("You asked");
+    expect(steps.some((s) => s.textContent?.includes("Child done"))).toBe(true);
+    expect(steps.some((s) => s.textContent?.includes("Write docs"))).toBe(false);
+    expect(screen.queryByTestId("manager-board")).toBeNull();
+    // Focus lands on the way back.
+    expect(within(dialog).getByTestId("workflow-back")).toHaveFocus();
+  });
+
+  it("clicking a request's title area opens its timeline too", async () => {
+    renderManagerWithRequests();
+    const row = screen.getAllByTestId("manager-row")[1]!;
+    await userEvent.click(within(row).getByText("Write docs"));
+    expect(screen.getByRole("dialog", { name: "Workflow · Write docs" })).toBeInTheDocument();
+    expect(screen.getByTestId("workflow-board")).toBeInTheDocument();
+  });
+
+  it("Escape (or Back) returns from the timeline to the Manager board, with the row refocused and still expanded", async () => {
+    const { onClose } = renderManagerWithRequests();
+    const row = () => screen.getAllByTestId("manager-row")[0]!;
+    await userEvent.click(within(row()).getByRole("button", { name: /show details: build login/i }));
+    await userEvent.click(within(row()).getByRole("button", { name: "Build login" }));
+    expect(screen.getByTestId("workflow-board")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("workflow-board")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Manager board" })).toBeInTheDocument();
+    expect(within(row()).getByRole("button", { name: "Build login" })).toHaveFocus();
+    expect(screen.getByTestId("delegated-cards")).toBeInTheDocument();
+    // Back button does the same; a second Escape then closes the board.
+    await userEvent.click(within(row()).getByTestId("manager-view-timeline"));
+    await userEvent.click(screen.getByTestId("workflow-back"));
+    expect(screen.getByTestId("manager-board")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("a step's task drawer closes on Escape before the timeline does", async () => {
+    renderManagerWithRequests();
+    await userEvent.click(within(screen.getAllByTestId("manager-row")[0]!).getByTestId("manager-view-timeline"));
+    const delegate = screen.getAllByTestId("wf-step").find((s) => s.getAttribute("data-kind") === "delegate")!;
+    await userEvent.click(within(delegate).getByRole("button", { name: /Atlas → Pixel/ }));
+    expect(screen.getByTestId("task-drawer")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByTestId("task-drawer")).toBeNull();
+    expect(screen.getByTestId("workflow-board")).toBeInTheDocument();
   });
 
   it("shows empty state when no manager requests exist", () => {
