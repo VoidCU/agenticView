@@ -64,7 +64,12 @@ function buildScoreboardTexture(leaderboard: PlayerStats[], isDark: boolean): TH
   ctx.textAlign = "right";
   ctx.fillText("W  L  D", W - 30, 74);
 
+  // Top 6, but the user's own row is always pinned on the board: with agents racking up
+  // auto-match wins, "You" would otherwise fall off and the board looks like it never updates.
   const top = leaderboard.slice(0, 6);
+  const youIdx = leaderboard.findIndex((p) => p.playerId === "you");
+  if (youIdx >= 6) top.splice(5, 1, leaderboard[youIdx]!);
+  const rankOf = (p: PlayerStats) => leaderboard.indexOf(p);
   if (top.length === 0) {
     ctx.fillStyle = "rgba(255,255,255,0.38)";
     ctx.font = "18px Inter, sans-serif";
@@ -72,12 +77,14 @@ function buildScoreboardTexture(leaderboard: PlayerStats[], isDark: boolean): TH
     ctx.fillText("No games yet", W / 2, H / 2 + 20);
   } else {
     const MEDAL = ["🥇", "🥈", "🥉"];
-    top.forEach((p, i) => {
-      const y = 100 + i * 36;
+    top.forEach((p, slot) => {
+      const i = rankOf(p);
+      const y = 100 + slot * 36;
       const podium = i < 3;
-      ctx.font = `${podium ? "bold 20" : "17"}px Inter, sans-serif`;
+      const isYou = p.playerId === "you";
+      ctx.font = `${podium || isYou ? "bold 20" : "17"}px Inter, sans-serif`;
       ctx.fillStyle =
-        i === 0 ? "#ffd166" : i === 1 ? "#d4d4d4" : i === 2 ? "#cd7f32" : "rgba(255,255,255,0.75)";
+        isYou ? "#7cc4ff" : i === 0 ? "#ffd166" : i === 1 ? "#d4d4d4" : i === 2 ? "#cd7f32" : "rgba(255,255,255,0.75)";
       ctx.textAlign = "left";
       const prefix = MEDAL[i] ?? `${i + 1}.`;
       ctx.fillText(`${prefix} ${p.name}`, 28, y);

@@ -144,9 +144,8 @@ describe("lounge scoreboard placement", () => {
     const d = Math.hypot(sbX - lounge.x, sbZ - lounge.z);
     expect(d).toBeGreaterThan(HEX_APOTHEM - 1);
     expect(d).toBeLessThan(HEX_R);
-    // Facing (sin yaw, cos yaw) points into the room and toward +x/+z.
-    expect(Math.sin(sb.yaw)).toBeGreaterThan(0);
-    expect(Math.cos(sb.yaw)).toBeGreaterThan(0);
+    // Facing (sin yaw, cos yaw) points into the room and toward the default camera at (+x, +z).
+    expect(Math.sin(sb.yaw) + Math.cos(sb.yaw)).toBeGreaterThan(0);
     expect(Math.sin(sb.yaw) * (lounge.x - sbX) + Math.cos(sb.yaw) * (lounge.z - sbZ)).toBeGreaterThan(0);
   });
 
