@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../state/store";
 import { Modal } from "./ui";
+import { useEngage } from "../scene/engage";
+import { rpsResultLine, rpsThrowLine, sayRps } from "../state/rps";
 import type { Move, GameRoundResult } from "@agenticview/shared";
 
 const MOVES: { key: Move; emoji: string; label: string; hint: string }[] = [
@@ -38,6 +40,16 @@ export function PlayRpsModal({ agentId, onClose }: { agentId: string; onClose: (
   const [waiting, setWaiting] = useState(false);
   const [done, setDone] = useState(false);
   const lastRoundRef = useRef<GameRoundResult | undefined>(undefined);
+  const revealTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => revealTimers.current.forEach(clearTimeout), []);
+
+  // The agent stops what it is doing and faces the player for the match; it resumes on close.
+  useEffect(() => {
+    useEngage.getState().engage(agentId);
+    return () => {
+      if (useEngage.getState().agentId === agentId) useEngage.getState().engage(undefined);
+    };
+  }, [agentId]);
 
   // Listen for incoming round results
   useEffect(() => {
@@ -49,6 +61,10 @@ export function PlayRpsModal({ agentId, onClose }: { agentId: string; onClose: (
 
     if (!matchId) setMatchId(lastGameRound.matchId);
 
+    // Emotes over the robot: its throw now, its reaction on the reveal.
+    const round = lastGameRound;
+    sayRps(agentId, rpsThrowLine(round));
+
     // Start with unrevealed, reveal after brief delay
     setRounds((prev) => {
       // Avoid duplicates
@@ -56,14 +72,15 @@ export function PlayRpsModal({ agentId, onClose }: { agentId: string; onClose: (
       return [...prev, { ...lastGameRound, revealed: false }];
     });
 
-    // Reveal after animation delay
-    const tid = setTimeout(() => {
+    // Reveal after animation delay. The timer lives in a ref: setMatchId above re-runs this effect,
+    // and clearing the timer in that cleanup used to leave the first round unrevealed.
+    revealTimers.current.push(setTimeout(() => {
       setRounds((prev) => prev.map((r) => (r.round === lastGameRound.round ? { ...r, revealed: true } : r)));
       setWaiting(false);
       if (lastGameRound.done) setDone(true);
-    }, 700);
-    return () => clearTimeout(tid);
-  }, [lastGameRound, matchId]);
+      sayRps(agentId, rpsResultLine(round));
+    }, 700));
+  }, [lastGameRound, matchId, agentId]);
 
   const score = rounds.length > 0 ? rounds[rounds.length - 1]!.score : { you: 0, agent: 0 };
   const finalWinner: "you" | "agent" | "draw" | null = done

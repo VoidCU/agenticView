@@ -53,12 +53,30 @@ export declare const PlacementSchema: z.ZodObject<{
     seat: z.ZodNumber;
 }, z.core.$strip>;
 export type Placement = z.infer<typeof PlacementSchema>;
+/**
+ * Revive state machine after a provider failure. For a quota / rate limit (`cause` "limit") the office
+ * shows it as a walk: fainted = the agent walks to the Manager's desk and reports the limit; reviving =
+ * it stands there while the switch is decided; done = it says "Switching to <switchTo>!" and walks
+ * back to its seat while the retried task runs. A crash (`cause` "crash") faints in the lounge instead.
+ */
 export declare const AgentReviveSchema: z.ZodObject<{
     phase: z.ZodEnum<{
         fainted: "fainted";
         reviving: "reviving";
         done: "done";
     }>;
+    cause: z.ZodOptional<z.ZodEnum<{
+        crash: "crash";
+        limit: "limit";
+    }>>;
+    failedProvider: z.ZodOptional<z.ZodEnum<{
+        claude: "claude";
+        "claude-session": "claude-session";
+        codex: "codex";
+        copilot: "copilot";
+        antigravity: "antigravity";
+        gemini: "gemini";
+    }>>;
     managerId: z.ZodOptional<z.ZodString>;
     suggested: z.ZodOptional<z.ZodObject<{
         provider: z.ZodEnum<{
@@ -70,6 +88,17 @@ export declare const AgentReviveSchema: z.ZodObject<{
             gemini: "gemini";
         }>;
         model: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    switchTo: z.ZodOptional<z.ZodObject<{
+        provider: z.ZodNullable<z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            copilot: "copilot";
+            antigravity: "antigravity";
+            gemini: "gemini";
+        }>>;
+        model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$strip>>;
     failedTaskId: z.ZodOptional<z.ZodString>;
     resetAt: z.ZodOptional<z.ZodString>;
@@ -159,6 +188,18 @@ export declare const AgentSchema: z.ZodObject<{
             reviving: "reviving";
             done: "done";
         }>;
+        cause: z.ZodOptional<z.ZodEnum<{
+            crash: "crash";
+            limit: "limit";
+        }>>;
+        failedProvider: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            copilot: "copilot";
+            antigravity: "antigravity";
+            gemini: "gemini";
+        }>>;
         managerId: z.ZodOptional<z.ZodString>;
         suggested: z.ZodOptional<z.ZodObject<{
             provider: z.ZodEnum<{
@@ -170,6 +211,17 @@ export declare const AgentSchema: z.ZodObject<{
                 gemini: "gemini";
             }>;
             model: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        switchTo: z.ZodOptional<z.ZodObject<{
+            provider: z.ZodNullable<z.ZodEnum<{
+                claude: "claude";
+                "claude-session": "claude-session";
+                codex: "codex";
+                copilot: "copilot";
+                antigravity: "antigravity";
+                gemini: "gemini";
+            }>>;
+            model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>;
         failedTaskId: z.ZodOptional<z.ZodString>;
         resetAt: z.ZodOptional<z.ZodString>;

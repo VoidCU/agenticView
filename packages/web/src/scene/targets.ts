@@ -1,7 +1,7 @@
-import { assignLoungeSpots, loungeSpots, rpsFacing, visitPose, yawToward, type Agent, type Match, type Space } from "@agenticview/shared";
+import { assignLoungeSpots, loungeSpots, managerHome, rpsFacing, visitPose, yawToward, type Agent, type Match, type Space } from "@agenticview/shared";
 import type { OfficeLayout } from "./layout";
 import type { LoungeBreak } from "./breaks";
-import { agentRevivePhase } from "./breaks";
+import { agentRevivePhase, isFaintedCrash, limitWalk } from "./breaks";
 import { whiteboardPose } from "./Whiteboard";
 
 export interface Target {
@@ -75,6 +75,23 @@ export function visitTarget(agent: Agent, layout: Pick<OfficeLayout, "poses" | "
   return undefined;
 }
 
+/** Distance from the manager's home pose, toward the room, where a reporting agent stands (behind the visitor chairs). */
+export const REPORT_DIST = 2.75;
+
+/**
+ * Where an agent reporting a provider limit stands: across the executive desk from the Manager,
+ * behind the two visitor chairs, facing the Manager. Further reporters line up sideways.
+ */
+export function reportSpot(office: Space, slot = 0): Target {
+  const home = managerHome(office);
+  // The desk faces the camera side (+x/+z, 45 deg), like kit.ts officeRoom.
+  const fx = Math.SQRT1_2;
+  const fz = Math.SQRT1_2;
+  const side = slot === 0 ? 0 : (slot % 2 === 1 ? 1 : -1) * Math.ceil(slot / 2) * VISITOR_GAP;
+  const p = { x: home.x + fx * REPORT_DIST + fz * side, z: home.z + fz * REPORT_DIST - fx * side };
+  return { ...p, yaw: yawToward(p, home), yOffset: 0 };
+}
+
 export interface TargetInputs {
   layout: OfficeLayout;
   list: readonly Agent[];
@@ -91,7 +108,8 @@ export interface TargetInputs {
 }
 
 /**
- * Every agent's current walk target. Priority (later wins): resting pose < idle visit < lounge / faint
+ * Every agent's current walk target. Priority (later wins): resting pose < idle visit < lounge / crash faint
+ * < limit report at the Manager's desk
  * < manager walks < RPS match < RPS result facing. Pure: the scene memoises it on its inputs.
  */
 export function computeTargets(inp: TargetInputs): { targets: Record<string, Target>; loungeAssign: Record<string, string> } {
@@ -118,8 +136,8 @@ export function computeTargets(inp: TargetInputs): { targets: Record<string, Tar
     for (const a of list) {
       if (loungeBreaks.has(a.id)) continue;
       if (a.lounging && a.role === "worker") { loungeAgentIds.push(a.id); continue; }
-      const phase = agentRevivePhase(a);
-      if (phase === "fainted" || phase === "reviving") loungeAgentIds.push(a.id);
+      // Crashes faint in the lounge; a limit walks to the Manager's desk (below).
+      if (isFaintedCrash(a)) loungeAgentIds.push(a.id);
     }
     if (loungeAgentIds.length > 0) {
       const loungeLayout = loungeSpots(Math.max(16, loungeAgentIds.length + 2));
@@ -137,12 +155,29 @@ export function computeTargets(inp: TargetInputs): { targets: Record<string, Tar
 
   // Manager walks to a fainted agent while it is being revived.
   if (managerId && lounge && !managerVisit) {
-    const fainting = list.find((a) => agentRevivePhase(a) === "reviving");
+    const fainting = list.find((a) => agentRevivePhase(a) === "reviving" && isFaintedCrash(a));
     const agentPos = fainting ? out[fainting.id] : undefined;
     if (agentPos) {
       const p = { x: agentPos.x + 0.6, z: agentPos.z };
       out[managerId] = { ...p, yaw: yawToward(p, agentPos) };
     }
+  }
+
+  // Limit reports: the agent walks to the Manager's desk and stands there until the switch is decided
+  // ("switching" is not overridden: it walks back to its seat). The Manager turns to face the first one.
+  const office = layout.spaces.find((s) => s.kind === "office");
+  if (office) {
+    let slot = 0;
+    let first: Target | undefined;
+    for (const a of list) {
+      const w = limitWalk(a);
+      if (!w || w.phase === "switching") continue;
+      const t = reportSpot(office, slot++);
+      out[a.id] = t;
+      first ??= t;
+    }
+    const mPose = managerId ? layout.poses[managerId] : undefined;
+    if (managerId && first && mPose && !managerVisit) out[managerId] = { ...mPose, yaw: yawToward(mPose, first) };
   }
 
   // Manager task visits.

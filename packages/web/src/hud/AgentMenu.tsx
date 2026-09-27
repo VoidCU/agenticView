@@ -4,11 +4,14 @@ import type { Agent } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { CreateAgentModal } from "./CreateAgentModal";
 import { MoreIcon } from "./ui";
+import { RPS_BUSY_LINE, agentOnTask } from "../state/rps";
 
 /** Actions for the agent shown in the chat header: edit, play RPS (anywhere, not just the lounge), copy to project, delete. */
 export function AgentMenu({ agent }: { agent: Agent }) {
   const send = useStore((s) => s.send);
   const world = useStore((s) => s.world);
+  // Busy on a task: the challenge is declined, so the item shows disabled with the reason.
+  const busy = useStore((s) => agentOnTask(s.tasks, agent.id));
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -44,8 +47,8 @@ export function AgentMenu({ agent }: { agent: Agent }) {
           <button type="button" role="menuitem" onClick={() => (setOpen(false), setEditing(true))}>
             Edit {agent.name}
           </button>
-          <button type="button" role="menuitem" onClick={() => (setOpen(false), window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: agent.id } })))}>
-            Play rock-paper-scissors
+          <button type="button" role="menuitem" disabled={busy} aria-disabled={busy} title={busy ? `${agent.name} is busy on a task: "${RPS_BUSY_LINE}"` : undefined} onClick={() => (setOpen(false), window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId: agent.id } })))}>
+            {busy ? "Play rock-paper-scissors (busy)" : "Play rock-paper-scissors"}
           </button>
           {canCopy && (
             <button type="button" role="menuitem" onClick={() => (setOpen(false), send({ type: "agent.copyToProject", id: agent.id }))}>

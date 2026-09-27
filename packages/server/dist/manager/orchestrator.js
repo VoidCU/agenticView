@@ -228,6 +228,16 @@ export class Orchestrator {
         this.deps.bus.emit({ type: "limit.resolved", id });
         entry.resolve(answer, provider, model);
     }
+    /** The agent's limit was decided elsewhere (the Manager, another answer): close its open Inbox limit items. */
+    settleLimitsFor(agentId) {
+        for (const [id, entry] of this.pendingLimits) {
+            if (entry.info.agentId !== agentId)
+                continue;
+            this.pendingLimits.delete(id);
+            this.deps.bus.emit({ type: "limit.resolved", id });
+            entry.resolve("settled");
+        }
+    }
     /** Returns the cheapest available provider when preferCheapModels is on, or undefined. */
     async cheapProvider() {
         for (const c of CHEAP_CANDIDATES) {
@@ -278,18 +288,20 @@ export class Orchestrator {
         return undefined;
     }
     /** Trigger the revive state machine for a worker agent after a quota/rate-limit failure. */
-    async triggerRevive(agent, failedProvider, failedTaskId, errorText, managerId) {
+    async triggerRevive(agent, failedProvider, failedTaskId, errorText, cause = "limit", managerId) {
         const { registry } = this.deps;
         try {
             const s = this.deps.settings();
             const suggested = this.pickReviveProvider(failedProvider);
-            const fainted = await registry.update(agent.id, { revive: { phase: "fainted", managerId, suggested, failedTaskId } });
+            // Scene: a limit makes the agent walk to the Manager's desk and report (a crash faints in the lounge).
+            const base = { cause, failedProvider, managerId, suggested, failedTaskId };
+            const fainted = await registry.update(agent.id, { revive: { phase: "fainted", ...base } });
             this.emitAgent(fainted);
             const managerDecides = s.limitPolicy === "manager";
             const resetAt = this.deps.usageTracker?.getProviderLimit(failedProvider)?.resetAt ?? agent.limit?.resetAt;
             if ((s.limitPolicy === "auto" || managerDecides) && suggested) {
                 // Short delay then switch and retry automatically (only when an alternate provider is available).
-                const revivingAgent = await registry.update(agent.id, { revive: { phase: "reviving", managerId, suggested, failedTaskId } });
+                const revivingAgent = await registry.update(agent.id, { revive: { phase: "reviving", ...base, switchTo: { provider: suggested.provider, model: suggested.model ?? null } } });
                 this.emitAgent(revivingAgent);
                 await delay(this.deps.reviveDelayMs ?? 6000);
                 await this.reviveAgent(agent.id, suggested.provider, suggested.model);
@@ -322,9 +334,13 @@ export class Orchestrator {
                 const answer = await new Promise((resolve) => {
                     this.pendingLimits.set(id, { info, resolve: (answer, provider, model) => resolve({ answer, provider, model }) });
                 });
+                // Settled by the Manager (update_agent + retry_task / revive_agent): nothing left to do here.
+                if (answer.answer === "settled")
+                    return;
                 if (answer.answer === "dismiss") {
                     const cur = await registry.get(agent.id);
-                    if (cur) {
+                    // Settled elsewhere (the Manager or another Inbox answer revived the agent): leave that state alone.
+                    if (cur && cur.revive?.phase !== "done") {
                         const cleared = await registry.update(agent.id, { revive: undefined });
                         this.emitAgent(cleared);
                     }
@@ -335,7 +351,7 @@ export class Orchestrator {
                 const cur = await registry.get(agent.id);
                 if (!cur)
                     return;
-                const revivingAgent = await registry.update(agent.id, { revive: { phase: "reviving", managerId, suggested, failedTaskId } });
+                const revivingAgent = await registry.update(agent.id, { revive: { phase: "reviving", ...base, switchTo: { provider: chosenProvider ?? null, model: chosenModel ?? null } } });
                 this.emitAgent(revivingAgent);
                 await this.reviveAgent(agent.id, chosenProvider, chosenModel);
             }
@@ -352,8 +368,16 @@ export class Orchestrator {
             if (!agent)
                 return;
             const failedTaskId = agent.revive?.failedTaskId;
-            // Switch provider.
-            const updated = await registry.update(agentId, { provider: provider ?? null, model: model ?? null, limit: undefined, revive: { phase: "done", failedTaskId } });
+            // Any Inbox question still open for this agent is settled by this decision.
+            this.settleLimitsFor(agentId);
+            // Switch provider. "done" + switchTo: the scene says "Switching to <provider>!" and walks back to the seat.
+            const { cause, failedProvider } = agent.revive ?? {};
+            const updated = await registry.update(agentId, {
+                provider: provider ?? null,
+                model: model ?? null,
+                limit: undefined,
+                revive: { phase: "done", failedTaskId, ...(cause ? { cause } : {}), ...(failedProvider ? { failedProvider } : {}), switchTo: { provider: provider ?? null, model: model ?? null } },
+            });
             this.emitAgent(updated);
             // Retry the task.
             if (failedTaskId) {
@@ -728,7 +752,7 @@ export class Orchestrator {
                     // Trigger revive for workers whose provider hit a quota, rate-limit, or crash.
                     const cls = classifyError(errorText ?? "");
                     if (agent.role === "worker" && (cls === "quota" || cls === "rate-limit" || cls === "crash")) {
-                        void this.triggerRevive(agent, provider, task.id, errorText ?? "");
+                        void this.triggerRevive(agent, provider, task.id, errorText ?? "", cls === "crash" ? "crash" : "limit");
                     }
                 }
             }
@@ -759,7 +783,7 @@ export class Orchestrator {
                 await this.deps.emitProviders?.();
                 const cls = classifyError(errorText ?? "");
                 if (runAgent.role === "worker" && (cls === "quota" || cls === "rate-limit" || cls === "crash")) {
-                    void this.triggerRevive(runAgent, runProvider, task.id, errorText ?? "");
+                    void this.triggerRevive(runAgent, runProvider, task.id, errorText ?? "", cls === "crash" ? "crash" : "limit");
                 }
             }
         }
