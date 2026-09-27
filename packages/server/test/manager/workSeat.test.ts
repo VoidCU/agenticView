@@ -87,10 +87,41 @@ describe("move_worker owns the designated desk (workSeat)", () => {
   });
 
   it("refuses a space whose every desk is designated unless a seat is named", async () => {
-    const ws = [0, 1, 2, 3].map((n) => ({ ...mk(n + 1), workSeat: { space: "meeting", seat: n }, placement: { space: "meeting", seat: n } }));
-    const meetingFull = [...ws, { ...mk(5), workSeat: { space: "meeting", seat: 4 } }, { ...mk(6), workSeat: { space: "meeting", seat: 5 } }, mk(7, 0, 0)];
-    const { ctx } = fakeWorld([manager(), ...meetingFull]);
-    expect(await moveWorker(ctx, "W7", "meeting")).toMatch(/^ERROR: every desk in Meeting Room is someone's designated desk/);
+    const ws = [0, 1, 2, 3].map((n) => ({ ...mk(n + 1), workSeat: { space: "pod-b", seat: n }, placement: { space: "pod-b", seat: n } }));
+    const podFull = [...ws, { ...mk(5), workSeat: { space: "pod-b", seat: 4 } }, { ...mk(6), workSeat: { space: "pod-b", seat: 5 } }, mk(7, 0, 0)];
+    const { ctx } = fakeWorld([manager(), ...podFull]);
+    expect(await moveWorker(ctx, "W7", "pod-b")).toMatch(/^ERROR: every desk in Pod B is someone's designated desk/);
+  });
+
+  it("a move to the meeting room or lounge is a temporary seat: the designated desk never changes", async () => {
+    const { ctx, byId, violations } = fakeWorld([manager(), mk(1, 0, 0), mk(2, 1, 1)]);
+    const out = await moveWorker(ctx, "W1", "Meeting Room", 2);
+    expect(out).toBe("Moved W1 to Meeting Room seat 2 (temporary seat: Meeting Room has no work desks, so W1's designated desk is unchanged)");
+    expect(byId.get("w_1")!.placement).toEqual({ space: "meeting", seat: 2 });
+    expect(byId.get("w_1")!.workSeat).toEqual({ space: "pod-a", seat: 0 });
+    await moveWorker(ctx, "W2", "lounge");
+    expect(byId.get("w_2")!.placement?.space).toBe("lounge");
+    expect(byId.get("w_2")!.workSeat).toEqual({ space: "pod-a", seat: 1 });
+    // arrange_workers follows the same rule per move.
+    const tool = officeTools(ctx).find((t) => t.name === "arrange_workers")!;
+    await tool.handler({ moves: [{ agent: "W1", space: "lounge" }, { agent: "W2", space: "pod-b", seat: 4 }] });
+    expect(byId.get("w_1")!.workSeat).toEqual({ space: "pod-a", seat: 0 });
+    expect(byId.get("w_2")!.workSeat).toEqual({ space: "pod-b", seat: 4 });
+    expect(violations).toEqual([]);
+  });
+
+  it("a worker without a desk moved to the lounge still has none", async () => {
+    const { ctx, byId } = fakeWorld([manager(), mk(1, 0, 0), mk(2)]);
+    await moveWorker(ctx, "W2", "lounge");
+    expect(byId.get("w_2")!.workSeat).toBeUndefined();
+  });
+
+  it("move_worker and arrange_workers tool descriptions say meeting room / lounge seats are temporary", () => {
+    const { ctx } = fakeWorld([manager()]);
+    const tools = officeTools(ctx);
+    for (const name of ["move_worker", "arrange_workers"]) {
+      expect(tools.find((t) => t.name === name)!.description).toMatch(/meeting room or lounge .*temporary seat/);
+    }
   });
 
   it("arrange_workers applies several owner moves without duplicates", async () => {

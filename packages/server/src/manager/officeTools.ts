@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { assignableSpaces, designatedSeats, findSpace, freeDeskFor, placementKey, planOffice, planOfficeWithSpaces, seatLabel, applyLayoutMoves, setRoomKind, defaultRoomName, SpaceKindSchema, type OfficeLayout, type Agent, type Placement, type Space } from "@agenticview/shared";
+import { assignableSpaces, designatedSeats, isDeskKind, findSpace, freeDeskFor, placementKey, planOffice, planOfficeWithSpaces, seatLabel, applyLayoutMoves, setRoomKind, defaultRoomName, SpaceKindSchema, type OfficeLayout, type Agent, type Placement, type Space } from "@agenticview/shared";
 import type { BridgeTool } from "../runtimes/types.js";
 import type { AgentRegistry } from "../agents/registry.js";
 
 export interface OfficeToolContext {
-  registry: Pick<AgentRegistry, "list" | "update"> & Partial<Pick<AgentRegistry, "pinPlacements">>;
+  registry: Pick<AgentRegistry, "list" | "update"> & Partial<Pick<AgentRegistry, "pinPlacements" | "withDeskLock">>;
   emitAgent: (agent: Agent) => void;
   spaceNames?: () => Record<string, string>;
   renameSpace?: (id: string, name: string) => Promise<void>;
@@ -81,6 +81,12 @@ async function sitAt(ctx: OfficeToolContext, agentId: string, desk: Placement, p
  * (the Manager's move_worker / arrange_workers, or the user dragging the agent) and the only way a
  * workSeat changes after create_agent.
  *
+ * The whole check-and-write runs under the registry's desk lock, so a user drag and a Manager move onto
+ * the same desk at the same moment are applied one after the other (the second sees the first's desk and
+ * swaps or is refused) and two agents never end up with the same designated desk.
+ *
+ * - A space without work desks (meeting room, lounge): only a temporary seat (seatWorker); the
+ *   designated desk does not change.
  * - No seat: the first desk of the space that is nobody's workSeat (a free one first).
  * - A seat that is another worker's workSeat: the two SWAP designated desks (the other worker gets the
  *   mover's old workSeat). The other worker's desk is released before the mover takes it, so two agents
@@ -88,11 +94,21 @@ async function sitAt(ctx: OfficeToolContext, agentId: string, desk: Placement, p
  * - Anyone merely sitting at the destination (idle) gets up and moves elsewhere.
  */
 export async function moveWorker(ctx: OfficeToolContext, agentRef: string, spaceRef: string, seat?: number): Promise<string> {
+  const run = () => moveWorkerLocked(ctx, agentRef, spaceRef, seat);
+  return ctx.registry.withDeskLock ? ctx.registry.withDeskLock(run) : run();
+}
+
+async function moveWorkerLocked(ctx: OfficeToolContext, agentRef: string, spaceRef: string, seat?: number): Promise<string> {
   const agents = await ctx.registry.list();
   const worker = findWorker(agents, agentRef);
   if (!worker) return `ERROR: unknown worker ${agentRef} (use list_agents)`;
   const space = resolveSpace(ctx, agents, spaceRef);
   if (typeof space === "string") return space;
+  if (!isDeskKind(space.kind)) {
+    const out = await seatWorker(ctx, worker.id, space.id, seat);
+    if (out.startsWith("ERROR:")) return out;
+    return `${out} (temporary seat: ${space.name} has no work desks, so ${worker.name}'s designated desk is unchanged)`;
+  }
   const plan = officePlan(ctx, agents);
   const designated = designatedSeats(agents, worker.id);
   const deskKey = (n: number) => `${space.id}#${n}`;
@@ -239,17 +255,17 @@ export function officeTools(ctx: OfficeToolContext): BridgeTool[] {
     },
     {
       name: "move_worker",
-      description: "Give a worker a new designated desk (its workSeat: where it always sits while working) and walk it there, e.g. to group a team in one pod. Omit seat for the first desk nobody owns. If the seat is another worker's designated desk the two SWAP designated desks (never shared, not even briefly); a worker without a desk cannot swap and is refused. An idle worker merely sitting there gets up and moves elsewhere.",
+      description: "Give a worker a new designated desk (its workSeat: where it always sits while working) and walk it there, e.g. to group a team in one pod. Designated desks are only in work rooms (pods, Production Room, Research Room); moving a worker to the meeting room or lounge is just a temporary seat and keeps its designated desk. Omit seat for the first desk nobody owns. If the seat is another worker's designated desk the two SWAP designated desks (never shared, not even briefly); a worker without a desk cannot swap and is refused. An idle worker merely sitting there gets up and moves elsewhere.",
       schema: {
         agent: z.string().min(1).describe("Worker id or name"),
-        space: z.string().min(1).describe("Space id or name from list_spaces, e.g. pod-b or 'Meeting Room'"),
+        space: z.string().min(1).describe("Space id or name from list_spaces, e.g. pod-b; the meeting room or lounge only seats the worker temporarily"),
         seat: z.number().int().min(0).optional().describe("Seat number; omit for the first free seat"),
       },
       handler: async (args) => moveWorker(ctx, String(args.agent), String(args.space), args.seat as number | undefined),
     },
     {
       name: "arrange_workers",
-      description: "Rearrange several workers' designated desks at once. Moves are applied in order; each behaves like move_worker (swaps designated desks when the seat is taken).",
+      description: "Rearrange several workers' designated desks at once. Moves are applied in order; each behaves like move_worker (swaps designated desks when the seat is taken; a move to the meeting room or lounge is a temporary seat that keeps the designated desk).",
       schema: {
         moves: z
           .array(z.object({ agent: z.string().min(1), space: z.string().min(1), seat: z.number().int().min(0).optional() }))

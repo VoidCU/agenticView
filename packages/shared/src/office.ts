@@ -81,6 +81,16 @@ export const SEATS_BY_KIND: Record<SpaceKind, number> = {
   research: 4,
 };
 
+/**
+ * Room kinds whose seats are work desks: pods, the Production Room's edit desks and the Research Room's
+ * reading table. Only these can hold a worker's designated desk (workSeat); a seat in the meeting room or
+ * the lounge is always temporary.
+ */
+export const DESK_KINDS: readonly SpaceKind[] = ["pod", "production", "research"];
+export function isDeskKind(kind: SpaceKind): boolean {
+  return DESK_KINDS.includes(kind);
+}
+
 /** Default display name of each kind (pods get "Pod <letter>" from their id, see defaultRoomName). */
 export const DEFAULT_ROOM_NAMES: Record<SpaceKind, string> = {
   office: "Manager's Office",

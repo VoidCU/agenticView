@@ -555,7 +555,8 @@ function useDragToReassign(layout: OfficeLayout) {
           const from = l.placements[id];
           if (!from || seatKey(from) !== seatKey(dest)) {
             // The drop desk becomes the worker's designated desk (workSeat). The server swaps designated
-            // desks with its owner and moves anyone idle sitting there, in one step.
+            // desks with its owner and moves anyone idle sitting there, in one step. A drop in the meeting
+            // room or lounge is only a temporary seat: designated desks exist only in work rooms.
             useStore.getState().send({ type: "agent.update", id, patch: { placement: dest } });
           }
         }

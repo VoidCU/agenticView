@@ -5,6 +5,7 @@ import {
   buildSpacesFromLayout,
   defaultLayout,
   designatedSeats,
+  isDeskKind,
   nextPlacement,
   planOffice,
   placementKey,
@@ -21,6 +22,7 @@ import {
   type Placement,
 } from "@agenticview/shared";
 import { join } from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { JsonStore } from "../store/jsonStore.js";
 import { globalRoot, projectRoot } from "../store/paths.js";
 
@@ -70,7 +72,31 @@ export class AgentRegistry {
   private readonly project?: JsonStore<Agent>;
   private layout?: () => OfficeLayout;
   private ensureDesk?: (workerCount: number) => Promise<void>;
-  private createWrites: Promise<void> = Promise.resolve();
+  /**
+   * The desk lock: every operation that changes a workSeat (create, copy, an update carrying workSeat,
+   * move/swap, the workSeat migration) runs through this one queue, so the "is this desk free?" check and
+   * the write that takes it are atomic. It is reentrant for the holder's own async chain (a move that
+   * calls update, a create that grows the layout and re-runs the migration) via AsyncLocalStorage; the
+   * token must still be the active holder, so a stray continuation after release queues normally.
+   */
+  private deskQueue: Promise<void> = Promise.resolve();
+  private deskHolder: object | null = null;
+  private readonly deskContext = new AsyncLocalStorage<object>();
+
+  withDeskLock<T>(fn: () => Promise<T>): Promise<T> {
+    const mine = this.deskContext.getStore();
+    if (mine && mine === this.deskHolder) return fn();
+    const token = {};
+    const work = this.deskQueue.then(() => {
+      this.deskHolder = token;
+      return this.deskContext.run(token, fn);
+    });
+    this.deskQueue = work.then(
+      () => { if (this.deskHolder === token) this.deskHolder = null; },
+      () => { if (this.deskHolder === token) this.deskHolder = null; },
+    );
+    return work;
+  }
 
   useLayout(layout: () => OfficeLayout, ensureDesk: (workerCount: number) => Promise<void>): void {
     this.layout = layout;
@@ -102,9 +128,7 @@ export class AgentRegistry {
   }
 
   async create(input: CreateAgentInput): Promise<Agent> {
-    const work = this.createWrites.then(() => this.createUnqueued(input));
-    this.createWrites = work.then(() => undefined, () => undefined);
-    return work;
+    return this.withDeskLock(() => this.createUnqueued(input));
   }
 
   private async createUnqueued(input: CreateAgentInput): Promise<Agent> {
@@ -134,6 +158,10 @@ export class AgentRegistry {
   }
 
   async update(id: string, patch: Partial<Agent>): Promise<Agent> {
+    return "workSeat" in patch ? this.withDeskLock(() => this.updateUnlocked(id, patch)) : this.updateUnlocked(id, patch);
+  }
+
+  private async updateUnlocked(id: string, patch: Partial<Agent>): Promise<Agent> {
     const cur = await this.get(id);
     if (!cur) throw new Error(`Unknown agent ${id}`);
     if (patch.workSeat) await this.assertDeskFree(id, patch.workSeat);
@@ -150,16 +178,25 @@ export class AgentRegistry {
     return next;
   }
 
-  /** The office-wide invariant: two agents never share a designated desk (workSeat). */
+  /**
+   * The office-wide invariants: two agents never share a designated desk (workSeat), and a designated desk
+   * is a work desk (a seat of a pod, the Production Room or the Research Room). Call under the desk lock.
+   */
   async assertDeskFree(id: string, seat: Placement): Promise<void> {
-    const owner = designatedSeats(await this.list(), id).get(placementKey(seat));
-    if (!owner) return;
-    const layout = this.layout?.() ?? defaultLayout((await this.list()).filter((a) => a.role === "worker").length);
-    throw new Error(`${seatLabel(buildSpacesFromLayout(layout), seat)} is ${owner.name}'s designated desk`);
+    const agents = await this.list();
+    const spaces = buildSpacesFromLayout(this.layout?.() ?? defaultLayout(agents.filter((a) => a.role === "worker").length));
+    const space = spaces.find((s) => s.id === seat.space);
+    if (space && !isDeskKind(space.kind)) throw new Error(`${space.name} has no work desks; a designated desk must be in a pod, the Production Room or the Research Room`);
+    const owner = designatedSeats(agents, id).get(placementKey(seat));
+    if (owner) throw new Error(`${seatLabel(spaces, seat)} is ${owner.name}'s designated desk`);
   }
 
   /** Clone a global agent into this project with fresh id and stats, remembering its origin. */
   async copyToProject(id: string): Promise<Agent> {
+    return this.withDeskLock(() => this.copyToProjectUnlocked(id));
+  }
+
+  private async copyToProjectUnlocked(id: string): Promise<Agent> {
     if (this.world.kind !== "project" || !this.project) throw new ScopeError("copyToProject requires a project world");
     const src = await this.get(id);
     if (!src) throw new Error(`Unknown agent ${id}`);

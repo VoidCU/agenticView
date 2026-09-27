@@ -8,6 +8,9 @@ import {
   defaultLayout,
   describeWorkSeatMoves,
   designatedSeats,
+  DESK_KINDS,
+  isDeskKind,
+  SPACE_KINDS,
   freeDeskFor,
   migrateWorkSeats,
   nextPlacement,
@@ -104,6 +107,35 @@ describe("migrateWorkSeats", () => {
     const m = migrateWorkSeats(agents, tiny);
     expect(Object.keys(m.workSeats)).toHaveLength(6);
     expect(m.unseated).toEqual(["w_7"]);
+  });
+
+  it("only work rooms hold designated desks: meeting room / lounge seats are neither kept nor adopted", () => {
+    const m = migrateWorkSeats([
+      w(1, { workSeat: at("meeting", 0), placement: at("meeting", 0) }),
+      w(2, { placement: at("lounge", 1) }),
+      w(3, { workSeat: at("research", 1) }),
+      w(4, { workSeat: at("production", 0) }),
+    ], spaces);
+    expect(m.workSeats.w_1!.space).toBe("pod-a");
+    expect(m.workSeats.w_2!.space).toBe("pod-a");
+    expect(m.workSeats.w_3).toEqual(at("research", 1));
+    expect(m.workSeats.w_4).toEqual(at("production", 0));
+    expect(m.moves.map((x) => [x.agentId, x.reason])).toEqual([["w_1", "missing"], ["w_2", "missing"]]);
+    for (const seat of Object.values(m.workSeats)) expect(isDeskKind(spaces.find((sp) => sp.id === seat.space)!.kind)).toBe(true);
+  });
+
+  it("never falls back to a meeting room or lounge seat when work desks run out", () => {
+    const noDesks = spaces.filter((s) => s.kind === "meeting" || s.kind === "lounge");
+    const m = migrateWorkSeats([w(1), w(2, { placement: at("meeting", 0) })], noDesks);
+    expect(m.workSeats).toEqual({});
+    expect(m.unseated).toEqual(["w_1", "w_2"]);
+  });
+});
+
+describe("desk kinds", () => {
+  it("pods, the Production Room and the Research Room are work rooms; nothing else is", () => {
+    expect([...DESK_KINDS].sort()).toEqual(["pod", "production", "research"]);
+    expect(SPACE_KINDS.filter(isDeskKind).sort()).toEqual(["pod", "production", "research"]);
   });
 });
 

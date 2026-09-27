@@ -25,4 +25,9 @@ describe("round12: manager prompt gating for production and research", () => {
     expect(MANAGER_SYSTEM_PROMPT).toContain("set_layout / move_room / set_room_kind");
     expect(MANAGER_SYSTEM_PROMPT).toContain("only when the user asks for a layout change");
   });
+
+  it("says designated desks exist only in work rooms and meeting room / lounge moves are temporary", () => {
+    expect(MANAGER_SYSTEM_PROMPT).toContain("Designated desks exist only in work rooms (pods, Production Room, Research Room)");
+    expect(MANAGER_SYSTEM_PROMPT).toContain("moving a worker to the meeting room or lounge only seats it there for a while and keeps its designated desk");
+  });
 });

@@ -123,4 +123,74 @@ describe("working agents sit at their workSeat", () => {
     expect((await world.registry.get(bolt.id))!.workSeat).toEqual(nova.workSeat);
     expect((await world.registry.get(nova.id))!.workSeat).toEqual(bolt.workSeat);
   });
+
+  it("a drag into the meeting room or lounge is a temporary seat; the workSeat stays", async () => {
+    const { world } = await open();
+    const nova = await world.registry.create({ name: "Nova", specialty: "x" });
+    const desk = nova.workSeat!;
+    expect(await world.moveDesk(nova.id, { space: "meeting", seat: 3 })).toMatch(/temporary seat/);
+    expect((await world.registry.get(nova.id))!.placement).toEqual({ space: "meeting", seat: 3 });
+    expect((await world.registry.get(nova.id))!.workSeat).toEqual(desk);
+    await world.moveDesk(nova.id, { space: "lounge", seat: 0 });
+    expect((await world.registry.get(nova.id))!.workSeat).toEqual(desk);
+    // The Production and Research Rooms are work rooms: a move there does set the designated desk.
+    await world.moveDesk(nova.id, { space: "research", seat: 2 });
+    expect((await world.registry.get(nova.id))!.workSeat).toEqual({ space: "research", seat: 2 });
+  });
+
+  it("the registry refuses a workSeat outside a work room", async () => {
+    const { world } = await open();
+    const nova = await world.registry.create({ name: "Nova", specialty: "x" });
+    await expect(world.registry.update(nova.id, { workSeat: { space: "lounge", seat: 0 } })).rejects.toThrow(/no work desks/);
+    await expect(world.registry.update(nova.id, { workSeat: { space: "meeting", seat: 0 } })).rejects.toThrow(/no work desks/);
+  });
+});
+
+describe("desk writes are serialized (no race can share a designated desk)", () => {
+  const keysOf = async (world: World) =>
+    (await world.registry.list()).filter((a) => a.role === "worker" && a.workSeat).map((a) => `${a.workSeat!.space}#${a.workSeat!.seat}`);
+
+  it("concurrent drags and Manager moves onto the same free desk: one wins, the other swaps, never a duplicate", async () => {
+    const { world } = await open();
+    const ws = [];
+    for (const name of ["Ada", "Bea", "Cid", "Dot"]) ws.push(await world.registry.create({ name, specialty: "x" }));
+    const target = { space: "pod-b", seat: 4 };
+    for (let round = 0; round < 5; round++) {
+      // Everyone lunges for the same desk at once (a mix of user drags and Manager tool moves).
+      const out = await Promise.all(ws.map((w, i) => (i % 2 ? world.moveDesk(w.id, target) : world.moveDesk(w.id, { ...target }))));
+      expect(out.filter((o) => o.startsWith("ERROR"))).toEqual([]);
+      const keys = await keysOf(world);
+      expect(keys).toHaveLength(ws.length);
+      expect(new Set(keys).size).toBe(keys.length);
+      // Exactly one worker ends up owning the contested desk.
+      expect(keys.filter((k) => k === "pod-b#4")).toHaveLength(1);
+    }
+  });
+
+  it("concurrent direct workSeat writes to one desk: exactly one succeeds, the rest are refused", async () => {
+    const { world } = await open();
+    const ws = [];
+    for (const name of ["Ada", "Bea", "Cid"]) ws.push(await world.registry.create({ name, specialty: "x" }));
+    const results = await Promise.allSettled(ws.map((w) => world.registry.update(w.id, { workSeat: { space: "pod-a", seat: 5 } })));
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason))).toEqual([
+      expect.stringMatching(/designated desk/),
+      expect.stringMatching(/designated desk/),
+    ]);
+    const keys = await keysOf(world);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("concurrent creates (which grow the layout) and moves never share a desk", async () => {
+    const { world } = await open();
+    const first = await world.registry.create({ name: "Ada", specialty: "x" });
+    const jobs: Promise<unknown>[] = [];
+    for (let i = 0; i < 8; i++) jobs.push(world.registry.create({ name: `W${i}`, specialty: "x" }));
+    jobs.push(world.moveDesk(first.id, { space: "pod-a", seat: 1 }));
+    jobs.push(world.moveDesk(first.id, { space: "pod-a", seat: 2 }));
+    await Promise.all(jobs);
+    const keys = await keysOf(world);
+    expect(keys).toHaveLength(9);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
 });

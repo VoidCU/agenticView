@@ -233,7 +233,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
    * current seat; duplicates and seats that no longer exist move to a free desk) and after a layout change
    * that removed a room. Desks that change hands are released first, so none is ever shared.
    */
-  const syncWorkSeats = async (why: string, emit: boolean): Promise<void> => {
+  const syncWorkSeats = (why: string, emit: boolean): Promise<void> => registry.withDeskLock(async () => {
     const agents = await registry.list();
     const result = migrateWorkSeats(agents, buildSpacesFromLayout(layout, spaceNames));
     if (result.unseated.length) console.warn(`[agenticview] workSeat migration (${why}): no free desk for ${result.unseated.join(", ")}`);
@@ -245,7 +245,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       if (emit) opts.bus.emit({ type: "agent.updated", agent: a });
     }
     console.info(`[agenticview] workSeat migration (${why}): ${describeWorkSeatMoves(result.moves).join("; ")}`);
-  };
+  });
   await syncWorkSeats("office start", false);
   let layoutWrites = Promise.resolve();
   const serializeLayout = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -285,8 +285,12 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     if (namesChanged) opts.bus.emit({ type: "spaceNames.updated", spaceNames: { ...spaceNames } });
     return layout;
   };
-  const updateLayout = (next: OfficeLayout, names?: Record<string, string>): Promise<OfficeLayout> => serializeLayout(() => applyLayout(next, names));
-  const editLayout = (edit: (current: OfficeLayout) => OfficeLayout): Promise<OfficeLayout> => serializeLayout(() => applyLayout(edit(layout)));
+  // Lock order is always desk lock, then layout queue: a layout change can re-run the workSeat migration
+  // (desk lock) and creating a worker can grow the layout (layout queue) while holding the desk lock.
+  const updateLayout = (next: OfficeLayout, names?: Record<string, string>): Promise<OfficeLayout> =>
+    registry.withDeskLock(() => serializeLayout(() => applyLayout(next, names)));
+  const editLayout = (edit: (current: OfficeLayout) => OfficeLayout): Promise<OfficeLayout> =>
+    registry.withDeskLock(() => serializeLayout(() => applyLayout(edit(layout))));
   registry.useLayout(() => layout, async (workerCount) => {
     await editLayout((current) => growLayout(current, workerCount));
   });

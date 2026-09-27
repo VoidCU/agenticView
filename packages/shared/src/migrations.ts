@@ -6,6 +6,7 @@ import {
   buildSpacesFromLayout,
   defaultRoomName,
   firstFreeSeat,
+  isDeskKind,
   placementKey,
   growLayout,
   hexDistance,
@@ -155,7 +156,8 @@ export interface WorkSeatMove {
   /**
    * adopted: the agent's current seat became its workSeat (first run on an older office);
    * duplicate: that desk was already another (earlier) agent's, so it got a free desk;
-   * missing: it had no seat, or its seat no longer exists in the layout.
+   * missing: it had no seat, its seat no longer exists in the layout, or it is not a work desk
+   *   (meeting room and lounge seats are never designated desks).
    */
   reason: "adopted" | "duplicate" | "missing";
 }
@@ -179,7 +181,9 @@ const seatOrder = (a: Agent, b: Agent) => a.createdAt.localeCompare(b.createdAt)
  * - A valid workSeat is kept (earliest created agent wins a contested one).
  * - A worker without one adopts its current placement when that desk exists and is not somebody's yet.
  * - Everyone left (duplicates, seats that no longer exist, no seat at all) gets a free desk: in the same
- *   pod when it has one, else the first free pod desk, else any free desk of a seated room.
+ *   pod when it has one, else the first free pod desk, else a free Production / Research Room desk.
+ * - Only work desks (isDeskKind: pods, Production Room, Research Room) are ever designated; a workSeat
+ *   or placement in the meeting room or lounge does not count.
  *
  * Pure and idempotent: run on its own output it changes nothing.
  */
@@ -188,7 +192,7 @@ export function migrateWorkSeats(agents: readonly Agent[], spaces: readonly Spac
   const byId = new Map(spaces.map((s) => [s.id, s]));
   const valid = (p: Placement | undefined): p is Placement => {
     const s = p && byId.get(p.space);
-    return Boolean(p && s && p.seat >= 0 && p.seat < s.seats);
+    return Boolean(p && s && isDeskKind(s.kind) && p.seat >= 0 && p.seat < s.seats);
   };
   const taken = new Set<string>();
   const out: Record<string, Placement> = {};
@@ -217,8 +221,7 @@ export function migrateWorkSeats(agents: readonly Agent[], spaces: readonly Spac
     const pick =
       (home && home.kind === "pod" ? freeIn(home) : undefined) ??
       firstFreeSeat([...spaces], taken) ??
-      spaces.filter((s) => s.kind !== "lounge" && s.kind !== "meeting").map(freeIn).find(Boolean) ??
-      spaces.map(freeIn).find(Boolean);
+      spaces.filter((s) => isDeskKind(s.kind)).map(freeIn).find(Boolean);
     if (!pick) {
       unseated.push(w.id);
       continue;
