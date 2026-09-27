@@ -101,21 +101,38 @@ describe("Timeline panel", () => {
     expect(screen.queryByText(/Build the form/)).toBeNull(); // sub-tasks are not rows
   });
 
-  it("opening a row shows its workflow; a step opens the task drawer", async () => {
+  it("opening a row shows its workflow as a board of numbered steps; a step opens the task drawer", async () => {
     render(<Timeline onClose={vi.fn()} />);
     await userEvent.click(screen.getAllByRole("button", { name: /Build a login page/ })[0]!);
-    const flow = screen.getByRole("list", { name: "Workflow: Build a login page" });
+    const board = screen.getByRole("dialog", { name: /Workflow · Build a login page/ });
+    const flow = within(board).getByRole("list", { name: "Workflow: Build a login page" });
     const steps = within(flow).getAllByTestId("wf-step");
     expect(steps.map((s) => s.getAttribute("data-kind"))).toContain("delegate");
-    expect(within(flow).getByText("Atlas → Byte (Codex / gpt-5): Build the form")).toBeInTheDocument();
-    // Expand the full reply (markdown).
+    // Numbered 1, 2, 3 ... top to bottom.
+    expect(steps.map((s) => s.querySelector(".wfb-num")!.textContent)).toEqual(steps.map((_, i) => String(i + 1)));
+    // A delegation shows both agents with an arrow, the action and the task.
+    const delegate = steps.find((s) => s.textContent?.includes("Atlas → Byte (Codex / gpt-5)"))!;
+    expect(delegate.querySelectorAll(".wfb-actors .avatar")).toHaveLength(2);
+    expect(within(delegate).getByText("Build the form")).toBeInTheDocument();
+    // A reply reads "<agent> replied · <duration>" and expands to full markdown.
     const reply = steps.find((s) => s.getAttribute("data-kind") === "reply")!;
+    expect(reply.textContent).toMatch(/replied · \d/);
     await userEvent.click(within(reply).getByRole("button", { name: "Show all" }));
     expect(reply.querySelector(".wf-full code")!.textContent).toBe("LoginForm.tsx");
+    // The first step is you asking.
+    expect(steps[0]!.textContent).toContain("You asked");
     // Clicking a step opens that task's drawer.
-    await userEvent.click(within(flow).getByText("Atlas → Byte (Codex / gpt-5): Build the form"));
+    await userEvent.click(within(delegate).getByRole("button", { name: /Atlas → Byte/ }));
     const drawer = screen.getByTestId("task-drawer");
     expect(within(drawer).getByRole("heading", { name: "Build the form" })).toBeInTheDocument();
+  });
+
+  it("the workflow board closes with Escape", async () => {
+    render(<Timeline onClose={vi.fn()} />);
+    await userEvent.click(screen.getAllByRole("button", { name: /Build a login page/ })[0]!);
+    expect(screen.getByTestId("workflow-board")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByTestId("workflow-board")).toBeNull();
   });
 
   it("filters requests by an agent involved", async () => {
