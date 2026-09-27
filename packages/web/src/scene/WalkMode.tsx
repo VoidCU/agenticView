@@ -355,9 +355,9 @@ export function WalkModeController({
       } else if (action?.kind === "greet") {
         if (greet(action.id) !== undefined) triggerHand("wave", performance.now());
       } else if (action?.kind === "select") {
-        // The agent's chat opens beside the view: free the mouse so it can be used (click the view to walk on).
-        openOverlayFromWalk();
-        select(action.id);
+        // Walk mode hides the chat column, so a bare select would be invisible: clicking a far
+        // agent opens the conversation the same way C does.
+        openWalkChat(action.id);
       }
       else if (action?.kind === "chat") openWalkChat(action.id);
       else if (action?.kind === "board") onBoard?.(action.id);
