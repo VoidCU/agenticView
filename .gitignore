@@ -17,4 +17,5 @@ e2e/screenshots/
 # Stray nested packages directory (build artifact)
 packages/web/packages/
 
-/media//.gemini/
+/media/
+/.gemini/
