@@ -3,7 +3,8 @@ import * as THREE from "three";
 
 export type SceneTheme = "light" | "dark";
 
-function currentTheme(): SceneTheme {
+/** The app theme right now (non-hook form of useSceneTheme, for throttled canvas redraws). */
+export function currentTheme(): SceneTheme {
   if (typeof document === "undefined") return "dark";
   const forced = document.documentElement.getAttribute("data-theme");
   if (forced === "light" || forced === "dark") return forced;

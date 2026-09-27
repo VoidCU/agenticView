@@ -9,6 +9,7 @@ import { test, expect } from "@playwright/test";
 import { readdirSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { E2E_HOME } from "./paths";
+import { faceBoard } from "./seedBoards";
 
 function launchToken(): string {
   const dir = join(E2E_HOME, "instances");
@@ -280,16 +281,10 @@ for (const vp of viewports) {
       await page.evaluate(() => (window as unknown as Win).__setWalking?.(true));
       await expect.poll(() => page.evaluate(() => typeof (window as unknown as Win).__teleportWalk)).toBe("function");
 
-      // Whiteboard: straight on, then oblique so any gap between overlay and board would show.
+      // Whiteboard (pinned notes, like the popup): straight on, then oblique so any gap between overlay
+      // and board would show. faceBoard tilts the view down so the whole face is in frame.
       for (const room of ["pod-a", "office"] as const) for (const [label, side, back] of [["front", 0, 2.2], ["oblique", 1.1, 1.3]] as const) {
-        await page.evaluate(([s, b, r]) => {
-          const w = window as unknown as Win;
-          const pose = w.__agenticviewTest!.boardPose(r)!;
-          const nx = Math.sin(pose.yaw), nz = Math.cos(pose.yaw);
-          const x = pose.face[0] + nx * b + nz * s;
-          const z = pose.face[2] + nz * b - nx * s;
-          w.__teleportWalk!(x, z, Math.atan2(-(pose.face[0] - x), -(pose.face[2] - z)));
-        }, [side, back, room] as const);
+        await faceBoard(page, room, back, side);
         await page.waitForTimeout(1_400); // board texture redraws at most once a second
         await page.screenshot({ path: `e2e/screenshots/walk-whiteboard-${room}-${label}-light-${vp.name}.png`, fullPage: false });
       }
