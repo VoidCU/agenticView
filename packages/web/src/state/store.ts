@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo } from "@agenticview/shared";
+import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo, ProviderConfigInfo } from "@agenticview/shared";
+import { setCustomProviders } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
 export type Bubble = { text: string; until: number; /** Local playful bonk line (shown even in walk mode). */ bonk?: boolean; /** A friendly greeting reply (walk mode H), shown like a bonk line. */ greet?: boolean };
@@ -38,6 +39,8 @@ export interface Store {
   providers: ProviderStatus[];
   /** What "Automatic" resolves to on the server right now. */
   autoProvider: Provider | null;
+  /** Custom providers, the provider order and which keys are set (never key values). */
+  providerConfig?: ProviderConfigInfo;
   settings?: ProjectSettings;
   /** Claude Code sessions known to the office (claude-session workers). */
   sessions: WorkerSessionInfo[];
@@ -150,6 +153,7 @@ const initial = () => ({
   tasks: {} as Record<string, Task>,
   providers: [] as ProviderStatus[],
   autoProvider: null as Provider | null,
+  providerConfig: undefined as ProviderConfigInfo | undefined,
   settings: undefined as ProjectSettings | undefined,
   sessions: [] as WorkerSessionInfo[],
   feed: {} as Record<string, FeedItem[]>,
@@ -189,6 +193,7 @@ export const useStore = create<Store>()((set, get) => ({
           tasks,
           providers: msg.providers,
           autoProvider: msg.autoProvider ?? null,
+          ...withProviderConfig(msg.providerConfig),
           settings: msg.settings,
           sessions: msg.sessions ?? [],
           spaceNames: msg.spaceNames ?? {},
@@ -204,7 +209,7 @@ export const useStore = create<Store>()((set, get) => ({
         set({ spaceNames: msg.spaceNames });
         return;
       case "providers.updated":
-        set({ providers: msg.providers, autoProvider: msg.autoProvider });
+        set({ providers: msg.providers, autoProvider: msg.autoProvider, ...withProviderConfig(msg.providerConfig) });
         return;
       case "sessions.updated":
         set({ sessions: msg.sessions });
@@ -491,3 +496,10 @@ export function spaceNameOf(spaceNames: Record<string, string> | undefined, spac
   return typeof space === "string" ? space : space.name;
 }
 
+
+/** Register the server's custom providers (labels, model lists) for this page and keep the config in the store. */
+function withProviderConfig(cfg: ProviderConfigInfo | undefined): { providerConfig?: ProviderConfigInfo } {
+  if (!cfg) return {};
+  setCustomProviders(cfg.customProviders);
+  return { providerConfig: cfg };
+}

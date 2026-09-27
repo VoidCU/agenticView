@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useWalkOverlay } from "../state/pointerLock";
-import { PROVIDER_LABELS, type Provider, type ProviderStatus } from "@agenticview/shared";
+import { PROVIDER_LABELS, isCustomProvider, providerLabelOf, type Provider, type ProviderStatus } from "@agenticview/shared";
 
 export const PROVIDER_LABEL: Record<string, string> = PROVIDER_LABELS;
 
@@ -16,7 +16,7 @@ export function automaticLabel(auto: Provider | null | undefined): string {
 }
 
 export function providerLabel(p: string | null | undefined, fallback = "Default"): string {
-  return p ? (PROVIDER_LABEL[p] ?? p) : fallback;
+  return p ? providerLabelOf(p) : fallback;
 }
 
 /** A small provider pill with an availability dot. Unavailable providers are greyed with the reason as the title. */
@@ -32,7 +32,7 @@ export function ProviderChip({ status, compact = false }: { status: ProviderStat
 }
 
 /** Modal shell: contain focus, restore the opener, and close on Escape or backdrop click. */
-export function Modal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, onClose, children, wide = false, className = "" }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; className?: string }) {
   // Opened while walking: release pointer lock so the cursor works over the overlay (restored on close).
   useWalkOverlay();
   const ref = useRef<HTMLDivElement>(null);
@@ -80,7 +80,7 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
   // Portal to <body>: panels use backdrop-filter, which would otherwise trap a fixed-position modal inside them.
   return createPortal(
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? "modal-wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" ref={ref} tabIndex={-1}>
+      <div className={`modal ${wide ? "modal-wide" : ""} ${className}`} role="dialog" aria-modal="true" aria-labelledby="modal-title" ref={ref} tabIndex={-1}>
         <div className="modal-head">
           <h2 id="modal-title">{title}</h2>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
@@ -189,4 +189,31 @@ export function xpProgress(xp: number, level: number): { pct: number; next: numb
   const next = 25 * level ** 2;
   const pct = next === floor ? 0 : Math.min(100, Math.round(((xp - floor) / (next - floor)) * 100));
   return { pct, next };
+}
+
+/** "(unavailable)" etc. suffix for a provider option. */
+function optionSuffix(p: ProviderStatus): string {
+  if (p.ok) return "";
+  return p.provider === "claude-session" ? " (no worker yet)" : " (unavailable)";
+}
+
+/**
+ * <option>s for a provider picker: built-in providers first, then custom endpoints under a "Custom" group.
+ * Unavailable providers are disabled (claude-session stays pickable: its runs wait for a session).
+ */
+export function ProviderOptions({ providers }: { providers: ProviderStatus[] }) {
+  const builtin = providers.filter((p) => !isCustomProvider(p.provider));
+  const custom = providers.filter((p) => isCustomProvider(p.provider));
+  const option = (p: ProviderStatus) => (
+    <option key={p.provider} value={p.provider} disabled={!p.ok && p.provider !== "claude-session"} title={p.ok ? undefined : p.reason ?? "Unavailable"}>
+      {providerLabel(p.provider)}
+      {optionSuffix(p)}
+    </option>
+  );
+  return (
+    <>
+      {builtin.map(option)}
+      {custom.length > 0 && <optgroup label="Custom">{custom.map(option)}</optgroup>}
+    </>
+  );
 }

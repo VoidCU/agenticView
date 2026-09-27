@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { SimpleMarkdown } from "./markdown";
-import { PROVIDER_LABELS } from "@agenticview/shared";
+import { allProviders, providerLabelOf } from "@agenticview/shared";
 import type { Provider } from "@agenticview/shared";
 import { useStore, type PendingPermission, type PendingQuestion, type PendingLimit } from "../state/store";
 import { Modal, prettyInput } from "./ui";
@@ -143,7 +143,7 @@ function InboxLimitItem({ limit }: { limit: PendingLimit }) {
   };
 
   const resetLabel = limit.resetAt ? `resets ${timeAgo(limit.resetAt)}` : undefined;
-  const suggestedLabel = limit.suggested ? PROVIDER_LABELS[limit.suggested.provider] + (limit.suggested.model ? ` / ${limit.suggested.model}` : "") : undefined;
+  const suggestedLabel = limit.suggested ? providerLabelOf(limit.suggested.provider) + (limit.suggested.model ? ` / ${limit.suggested.model}` : "") : undefined;
 
   return (
     <li className="inbox-item inbox-item-limit" data-testid={`inbox-limit-${limit.id}`}>
@@ -202,8 +202,8 @@ function InboxLimitItem({ limit }: { limit: PendingLimit }) {
             aria-label="Provider"
           >
             <option value="">Auto</option>
-            {(Object.keys(PROVIDER_LABELS) as Provider[]).map((p) => (
-              <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
+            {allProviders().map((p) => (
+              <option key={p} value={p}>{providerLabelOf(p)}</option>
             ))}
           </select>
           <input
