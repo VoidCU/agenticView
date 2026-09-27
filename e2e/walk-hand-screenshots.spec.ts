@@ -17,7 +17,7 @@ function launchToken(): string {
 
 type Probe = {
   store: { getState(): { agents: Record<string, { id: string; name: string }> } };
-  agentPos(id: string): { x: number; z: number } | undefined;
+  agentPos(id: string): { x: number; z: number; walking?: boolean } | undefined;
   boardPose(spaceId: string): { yaw: number; face: [number, number, number] } | undefined;
   hand: { gesture: "slap" | "wave" | null; start: number; pin: number | null };
 };
@@ -55,6 +55,7 @@ async function expectInView(page: import("@playwright/test").Page, testId: strin
 }
 
 test("walk mode: hand mid-slap, greeting, board with a free mouse", async ({ page }) => {
+  test.setTimeout(240_000); // Atlas may first walk a round trip to a worker (two doorways each way).
   if (!existsSync(SHOTS)) mkdirSync(SHOTS, { recursive: true });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/#token=${launchToken()}`);
@@ -67,6 +68,12 @@ test("walk mode: hand mid-slap, greeting, board with a free mouse", async ({ pag
 
   await page.evaluate(() => (window as unknown as Win).__setWalking?.(true));
   await expect.poll(() => page.evaluate(() => typeof (window as unknown as Win).__teleportWalk)).toBe("function");
+  // Atlas may still be walking back to his desk from a visit (the office is no longer the centre room).
+  await expect.poll(() => page.evaluate(() => {
+    const w = window as unknown as Win;
+    const atlas = Object.values(w.__agenticviewTest!.store.getState().agents).find((a) => a.name === "Atlas")!;
+    return w.__agenticviewTest!.agentPos(atlas.id)?.walking;
+  }), { timeout: 150_000 }).toBe(false);
   // Stand right next to Atlas (1.5 units), at eye height, looking at the robot.
   const face = (pitch = -0.12) => page.evaluate((pt) => {
     const w = window as unknown as Win;

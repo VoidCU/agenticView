@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Inbox } from "../src/hud/Inbox";
 import { TopBar } from "../src/hud/TopBar";
@@ -150,5 +150,18 @@ describe("Inbox and TopBar badge", () => {
     expect(dialog).toBeInTheDocument();
     expect(within(dialog).getByPlaceholderText("Type an answer")).toBeInTheDocument();
   });
-});
 
+  it("opens the requested Settings tab from a wall screen event and defaults invalid tabs to General", async () => {
+    useStore.getState().apply(snapshot([manager], []));
+    render(<App />);
+
+    act(() => window.dispatchEvent(new CustomEvent("agenticview:open-settings", { detail: { tab: "connections" } })));
+    let dialog = screen.getByRole("dialog", { name: /project settings/i });
+    expect(within(dialog).getByRole("tab", { name: "Connections" })).toHaveAttribute("aria-selected", "true");
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    act(() => window.dispatchEvent(new CustomEvent("agenticview:open-settings", { detail: { tab: "unknown" } })));
+    dialog = screen.getByRole("dialog", { name: /project settings/i });
+    expect(within(dialog).getByRole("tab", { name: "General" })).toHaveAttribute("aria-selected", "true");
+  });
+});

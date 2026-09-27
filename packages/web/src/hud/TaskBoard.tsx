@@ -217,6 +217,7 @@ export function TaskBoard({
   const agents = useStore((s) => s.agents);
   const world = useStore((s) => s.world);
   const spaceNames = useStore((s) => s.spaceNames);
+  const layout = useStore((s) => s.layout);
 
   const [selectedRoom, setSelectedRoom] = useState("");
   const [internalCollapsed, setInternalCollapsed] = useState(false);
@@ -253,7 +254,7 @@ export function TaskBoard({
   };
 
   const agentList = useMemo(() => Object.values(agents), [agents]);
-  const plan = useMemo(() => planOffice(agentList), [agentList]);
+  const plan = useMemo(() => planOffice(agentList, layout, spaceNames), [agentList, layout, spaceNames]);
 
   const rooms = useMemo(() => {
     const list: { id: string; name: string }[] = [];
@@ -262,13 +263,13 @@ export function TaskBoard({
       seen.add(s.id);
       list.push({ id: s.id, name: spaceNames[s.id]?.trim() || s.name });
     }
-    for (const [id, custom] of Object.entries(spaceNames ?? {})) {
+    for (const [id, custom] of Object.entries(layout ? {} : spaceNames)) {
       if (!seen.has(id) && custom?.trim()) {
         seen.add(id);
         list.push({ id, name: custom.trim() });
       }
     }
-    for (const a of agentList) {
+    for (const a of layout ? [] : agentList) {
       const sp = a.placement?.space;
       if (sp && !seen.has(sp)) {
         seen.add(sp);
@@ -276,7 +277,7 @@ export function TaskBoard({
       }
     }
     return list;
-  }, [plan.spaces, spaceNames, agentList]);
+  }, [plan.spaces, spaceNames, agentList, layout]);
 
   const projectTasks = useMemo(() => {
     const byId = new Map(Object.values(tasks).map((t) => [t.id, t]));

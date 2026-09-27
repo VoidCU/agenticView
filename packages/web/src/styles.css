@@ -3456,6 +3456,33 @@ kbd {
 .panel-tab-tasks { left: 0; border-left: 0; border-radius: 0 9px 9px 0; }
 .panel-tab-chat { right: 0; border-right: 0; border-radius: 9px 0 0 9px; }
 .panel-tab .panel-count { margin: 0; }
+.layout-editor { display: grid; gap: 12px; }
+.layout-editor-map { display: block; width: min(100%, 420px); max-height: min(38vh, 400px); margin-inline: auto; }
+.layout-editor-hex { cursor: pointer; outline: none; }
+.layout-editor-hex polygon { fill: var(--input); stroke: var(--line-strong); stroke-width: 1.5; }
+.layout-editor-hex[data-kind="office"] polygon { fill: var(--blue); fill-opacity: .28; }
+.layout-editor-hex[data-kind="myoffice"] polygon { fill: var(--green); fill-opacity: .25; }
+.layout-editor-hex[data-kind="pod"] polygon { fill: var(--blue); fill-opacity: .14; }
+.layout-editor-hex[data-kind="meeting"] polygon { fill: var(--green); fill-opacity: .14; }
+.layout-editor-hex[data-kind="lounge"] polygon { fill: #9b7fd8; fill-opacity: .2; }
+.layout-editor-hex[data-kind="production"] polygon { fill: var(--amber); fill-opacity: .2; }
+.layout-editor-hex[data-kind="research"] polygon { fill: #4bd2ce; fill-opacity: .2; }
+.layout-editor-hex:hover polygon, .layout-editor-hex.is-selected polygon { stroke: var(--blue); stroke-width: 3; }
+.layout-editor-hex:focus-visible polygon { stroke: var(--text); stroke-width: 4; }
+.layout-editor-hex text { fill: var(--text); font-size: 11px; font-weight: 650; pointer-events: none; }
+.layout-editor-hex[data-kind="empty"] text { fill: var(--muted); font-size: 16px; }
+.layout-editor-controls { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 12px; }
+.layout-editor-controls input, .layout-editor-controls select { min-width: 0; padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--input); color: var(--text); }
+.layout-editor-controls input:focus, .layout-editor-controls select:focus { border-color: var(--blue); outline: none; }
+.layout-editor-controls select:disabled { opacity: .55; }
+.layout-editor-controls .hint { grid-column: 1 / -1; }
+.layout-editor-errors { padding: 8px 12px; color: var(--red); border: 1px solid var(--red); border-radius: var(--radius-sm); }
+.layout-editor-errors p { margin: 4px 0; }
+.connection-options { display: grid; gap: 10px; }
+.connection-options > div { display: flex; align-items: center; gap: 10px; }
+.menu-room-move { display: grid; gap: 5px; padding: 7px 10px; border-block: 1px solid var(--line); }
+.menu-room-move label { color: var(--muted); font-size: 11px; }
+.menu-room-move select { width: 100%; min-width: 150px; }
 
 .chat-head-actions { flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .chat-head-actions > .menu-wrap > .icon-btn, .chat-collapse { min-width: 24px; min-height: 28px; }

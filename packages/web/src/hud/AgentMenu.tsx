@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Agent } from "@agenticview/shared";
+import { planOffice, type Agent } from "@agenticview/shared";
 import { useStore } from "../state/store";
 import { CreateAgentModal } from "./CreateAgentModal";
 import { MoreIcon } from "./ui";
@@ -10,6 +10,9 @@ import { RPS_BUSY_LINE, agentOnTask } from "../state/rps";
 export function AgentMenu({ agent }: { agent: Agent }) {
   const send = useStore((s) => s.send);
   const world = useStore((s) => s.world);
+  const agents = useStore((s) => s.agents);
+  const layout = useStore((s) => s.layout);
+  const spaceNames = useStore((s) => s.spaceNames);
   // Busy on a task: the challenge is declined, so the item shows disabled with the reason.
   const busy = useStore((s) => agentOnTask(s.tasks, agent.id));
   const [open, setOpen] = useState(false);
@@ -33,6 +36,9 @@ export function AgentMenu({ agent }: { agent: Agent }) {
 
   const canCopy = agent.scope === "global" && agent.role === "worker" && world?.kind === "project";
   const canDelete = agent.role !== "manager";
+  const roomPlan = useMemo(() => planOffice(Object.values(agents), layout, spaceNames), [agents, layout, spaceNames]);
+  const occupiedSeats = new Set(Object.entries(roomPlan.placements).filter(([id]) => id !== agent.id).map(([, p]) => `${p.space}#${p.seat}`));
+  const moveRooms = agent.role === "worker" ? roomPlan.spaces.filter((s) => s.seats > 0) : [];
 
   return (
     <div className="menu-wrap" ref={ref}>
@@ -55,6 +61,20 @@ export function AgentMenu({ agent }: { agent: Agent }) {
               Copy to this project
             </button>
           )}
+          {agent.role === "worker" && <div className="menu-room-move" role="none">
+            <label htmlFor={`move-room-${agent.id}`}>Move to room</label>
+            <select id={`move-room-${agent.id}`} aria-label={`Move ${agent.name} to room`} value={roomPlan.placements[agent.id]?.space ?? ""}
+              onChange={(event) => {
+                const space = roomPlan.spaces.find((s) => s.id === event.target.value);
+                if (!space) return;
+                const seat = Array.from({ length: space.seats }, (_, i) => i).find((i) => !occupiedSeats.has(`${space.id}#${i}`));
+                if (seat === undefined) return;
+                send({ type: "agent.update", id: agent.id, patch: { placement: { space: space.id, seat } } });
+                setOpen(false);
+              }}>
+              {moveRooms.map((space) => <option key={space.id} value={space.id} disabled={Array.from({ length: space.seats }, (_, i) => i).every((i) => occupiedSeats.has(`${space.id}#${i}`)) && roomPlan.placements[agent.id]?.space !== space.id}>{space.name}</option>)}
+            </select>
+          </div>}
           {canDelete && !confirming && (
             <button type="button" role="menuitem" className="menu-danger" onClick={() => setConfirming(true)}>
               Delete {agent.name}
