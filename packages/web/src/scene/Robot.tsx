@@ -46,7 +46,9 @@ interface Props {
   onBodyClick?: (agentId: string) => void;
   /** Extra HTML that follows the robot (file chips). */
   children?: ReactNode;
-  /** When true: grey visor, zZ float, robot lies down on the floor (quota/rate-limit faint). */
+  /** Scene-driven speech (a limit report: "Hit my Codex limit!" / "Switching to Gemini!"); shown in walk mode too. */
+  statusBubble?: string;
+  /** When true: grey visor, zZ float, robot lies down on the floor (a crashed run). */
   fainted?: boolean;
 }
 
@@ -108,7 +110,7 @@ function Eyes({
 
 const EYE_X = [-0.2, 0.2] as const;
 
-export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive, onGrab, onBodyClick, children, fainted = false }: Props) {
+export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, statusBubble, onArrive, onGrab, onBodyClick, children, fainted = false }: Props) {
   const _status = useAgentStatus(agent.id);
   const status = fainted ? "idle" : _status;
   const selected = useStore((s) => s.selectedAgentId === agent.id);
@@ -152,7 +154,7 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
   const busy = status === "thinking" || status === "editing";
   const accents = levelAccents(agent.stats.level);
   const accent = agent.appearance.accent;
-  const bubbleText = bubbleOverride ?? (bubble && bubble.until > Date.now() ? bubble.text : undefined);
+  const bubbleText = bubbleOverride ?? statusBubble ?? (bubble && bubble.until > Date.now() ? bubble.text : undefined);
   const showBubble = Boolean(permission || question || bubbleText);
   // Turn round to the viewer when being talked to.
   const faceViewer = selected || Boolean(permission || question);
@@ -502,16 +504,16 @@ export function Robot({ agent, target, spaces, spawnAt, bubbleOverride, onArrive
         </div>
       </Html>
       )}
-      {!tagsVisible && bubble?.bonk && bubbleText && (
+      {!tagsVisible && bubbleText && (statusBubble || bubble?.bonk) && (
         <group ref={bubbleAnchor} position={[0, BUBBLE_HEAD_Y, 0]}>
         <Html center distanceFactor={walking ? WALK_BUBBLE_DISTANCE_FACTOR : 10} zIndexRange={[20, 0]} style={{ pointerEvents: "none" }}>
-          <div className={`bubble bubble-text bubble-bonk${bubble.greet ? " bubble-greet" : ""}`} data-testid={bubble.greet ? "greet-bubble" : "bonk-bubble"}>{bubbleText}</div>
+          <div className={`bubble bubble-text bubble-bonk${bubble?.greet && !statusBubble ? " bubble-greet" : ""}`} data-testid={statusBubble ? "status-bubble" : bubble?.greet ? "greet-bubble" : "bonk-bubble"}>{bubbleText}</div>
         </Html>
         </group>
       )}
       {fainted && tagsVisible && (
         <Html center position={[0, 2.2 * ROBOT_SCALE, 0]} distanceFactor={18} zIndexRange={[18, 0]} style={{ pointerEvents: "none" }}>
-          <div className="faint-zz" aria-label="Fainted – quota exceeded">
+          <div className="faint-zz" aria-label="Fainted – run crashed">
             <span className="faint-z z1">z</span>
             <span className="faint-z z2">Z</span>
             <span className="faint-z z3">Z</span>

@@ -4,7 +4,7 @@ import { Html, OrbitControls, PerformanceMonitor, useCursor } from "@react-three
 import * as THREE from "three";
 import { HEX_R, managerHome, seatPose, spaceAt, yawToward, type Agent, type ServerMessage, type Space, type Task } from "@agenticview/shared";
 import { useStore, sortedAgents, fileChipsFor, FILE_CHIP_MAX, type FeedItem, type FileChip } from "../state/store";
-import { useLoungeBreaks, agentRevivePhase } from "./breaks";
+import { useLoungeBreaks, isFaintedCrash, limitWalk, limitWalkBubble } from "./breaks";
 import { MeetingTV } from "./MeetingTV";
 import { awaySeatSignature, layoutFor, seatKey, type OfficeLayout } from "./layout";
 import { Robot, type RobotTarget } from "./Robot";
@@ -837,8 +837,10 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
       const lp = livePositions.get(a.id);
       const x = lp?.x ?? target.x;
       const z = lp?.z ?? target.z;
-      const phase = agentRevivePhase(a);
-      const fainted = phase === "fainted" || phase === "reviving";
+      const limitW = limitWalk(a);
+      const fainted = isFaintedCrash(a);
+      // Reporting a provider limit at the Manager's desk (or standing there while it is decided).
+      const reporting = Boolean(limitW && limitW.phase !== "switching");
       const inLounge = curLoungeBreaks.has(a.id) || (a.lounging === true && a.role === "worker") || fainted;
 
       // Activity from the live path and current room, with lounge/faint state taking precedence.
@@ -852,7 +854,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
         else activity = "lounge";
       } else if (lp?.walking) activity = "walking";
       else if (liveSpace?.kind === "meeting") activity = "meeting";
-      else if (lp?.waiting) activity = "waiting";
+      else if (lp?.waiting || reporting) activity = "waiting";
       else activity = "desk";
 
       const placement = curLayout.placements[a.id];
@@ -894,8 +896,8 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
         if (!target) return null;
         const fresh = a.role === "worker" && Date.parse(a.createdAt) > mountedAt.current - FRESH_MS;
         const home = managerHome(office);
-        const phase = agentRevivePhase(a);
-        const isFainted = phase === "fainted" || phase === "reviving";
+        const limitW = limitWalk(a);
+        const isFainted = isFaintedCrash(a);
         const isLounging = a.lounging === true && a.role === "worker";
         return (
           <Robot
@@ -908,6 +910,7 @@ function Scene({ onCreate, palette, onBoard }: { onCreate: () => void; palette: 
             onGrab={a.role === "worker" && !isFainted ? onGrab : undefined}
             onBodyClick={isLounging ? (agentId) => window.dispatchEvent(new CustomEvent("agenticview:play-rps", { detail: { agentId } })) : undefined}
             fainted={isFainted}
+            statusBubble={limitW ? limitWalkBubble(limitW) : undefined}
           >
             {a.role === "worker" && !walking && <FileChips agentId={a.id} />}
           </Robot>

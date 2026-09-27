@@ -46,6 +46,58 @@ export function agentRevivePhase(agent: Agent): "fainted" | "reviving" | "done" 
   return (agent as Agent & { revive?: { phase: "fainted" | "reviving" | "done" } }).revive?.phase;
 }
 
+/** Scene phase of a quota / rate-limit report (see AgentRevive in shared/agent.ts). */
+export type LimitWalkPhase = "reporting" | "deciding" | "switching";
+
+export interface LimitWalk {
+  phase: LimitWalkPhase;
+  /** Provider that hit the limit. */
+  failedProvider?: string;
+  /** Provider being switched to (switching phase). */
+  switchTo?: string | null;
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  claude: "Claude",
+  "claude-session": "Claude Code",
+  codex: "Codex",
+  copilot: "Copilot",
+  antigravity: "Antigravity",
+  gemini: "Gemini",
+};
+
+export function providerLabel(p: string | null | undefined): string {
+  return p ? (PROVIDER_LABEL[p] ?? p) : "the default";
+}
+
+/**
+ * A limit (not a crash) turns the revive state machine into a walk: fainted = walk to the Manager's
+ * desk and report, reviving = stand there while it is decided, done = "Switching to X!" and walk back
+ * to the seat. Undefined for crashes (they faint in the lounge) and agents without a revive.
+ */
+export function limitWalk(agent: Agent): LimitWalk | undefined {
+  const r = agent.revive;
+  if (!r || agent.role !== "worker") return undefined;
+  const cause = r.cause ?? (agent.limit?.errorType === "crash" ? "crash" : "limit");
+  if (cause !== "limit") return undefined;
+  const failedProvider = r.failedProvider ?? agent.provider ?? undefined;
+  if (r.phase === "fainted") return { phase: "reporting", failedProvider };
+  if (r.phase === "reviving") return { phase: "deciding", failedProvider, switchTo: r.switchTo?.provider ?? r.suggested?.provider };
+  return { phase: "switching", failedProvider, switchTo: r.switchTo?.provider ?? agent.provider };
+}
+
+/** The speech bubble for a limit walk. */
+export function limitWalkBubble(w: LimitWalk): string {
+  if (w.phase === "switching") return `Switching to ${providerLabel(w.switchTo)}!`;
+  return `Hit my ${providerLabel(w.failedProvider)} limit!`;
+}
+
+/** Fainted in the lounge: a crash (a limit walks to the Manager's desk instead). */
+export function isFaintedCrash(agent: Agent): boolean {
+  const phase = agentRevivePhase(agent);
+  return (phase === "fainted" || phase === "reviving") && !limitWalk(agent);
+}
+
 /**
  * Mutates `breaks` in place and updates `prevStatuses` for the next diff.
  * Injectable `now` makes this fully unit-testable.
