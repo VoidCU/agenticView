@@ -458,9 +458,15 @@ export function myOfficeChairFrame(): { x: number; z: number; yaw: number } {
   return { x: home.x - Math.sin(home.yaw) * SEATED_CHAIR_BACK, z: home.z - Math.cos(home.yaw) * SEATED_CHAIR_BACK, yaw: home.yaw };
 }
 
-/** Lounge scoreboard stand (local to the lounge): on the 210 wall's run next to the 180 corner, clear of the doorway. */
+/**
+ * Lounge scoreboard stand (local to the lounge): on the 120°–60° wall next to the 120° corner (the
+ * old floor-lamp corner). The 180° corner it used to occupy has sofa A right in front of it, which
+ * hid the board; here only low beanbags sit nearby, so it reads from the default camera.
+ */
 export function scoreboardFrame(): { x: number; z: number; yaw: number } {
-  return wallRunFrame(180, 240, 1.45, 0.2);
+  // The 120°–60° wall would face the board away from the default camera; this side of the corner
+  // keeps the face visible while staying clear of the 180° sofa.
+  return wallRunFrame(120, 180, 1.45, 0.2);
 }
 /** Board face inside the whiteboard frame: centre y, front-face z (box z 0.012 + half depth 0.005), size. */
 export const WHITEBOARD_FACE = { y: 1.12, z: 0.017, w: 1.6, h: 0.9 } as const;
@@ -601,7 +607,7 @@ function loungeRoom(k: Kit, _s: Space, _occ: RoomOccupancy) {
   }
 
   // Corner decor: lamp and plants
-  floorLamp(corner(k, 120, 4.6));
+  // (The 120° floor lamp made way for the scoreboard stand.)
   plant(corner(k, 0, 4.7), 1.2, 7);
   plant(corner(k, 60, 4.8), 0.8, 8);
 
@@ -613,6 +619,9 @@ function loungeRoom(k: Kit, _s: Space, _occ: RoomOccupancy) {
     b.box("alu", [x, (SCOREBOARD_STAND.y + 0.5) / 2, -0.02], [0.04, SCOREBOARD_STAND.y + 0.5, 0.04]);
     b.box("alu", [x, 0.02, -0.02], [0.06, 0.04, 0.1]);
   }
+  // Low base rail spanning the stand: the walk collider is the stand's full width (you shouldn't
+  // clip through under the board), so the floor geometry spans that width too.
+  b.box("alu", [0, 0.05, -0.02], [SCOREBOARD_STAND.w, 0.1, SCOREBOARD_STAND.d]);
   b.box("bezel", [0, SCOREBOARD_STAND.y, -0.025], [SCOREBOARD_STAND.w + 0.05, SCOREBOARD_STAND.h + 0.05, 0.04]);
 }
 

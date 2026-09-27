@@ -241,9 +241,8 @@ export function solidsForLayout(layout: OfficeLayout): SolidObstacle[] {
           }
         }
 
-        // Corner decor, as kit loungeRoom draws it: floor lamp (base 0.34) at 120, plants 1.2 at 0 and 0.8 at 60.
-        const l120 = cornerPose(s, 120, 4.6);
-        solids.push({ kind: "lamp", x: l120.x, z: l120.z, r: 0.17 });
+        // Corner decor, as kit loungeRoom draws it: plants 1.2 at 0 and 0.8 at 60. (The 120° floor
+        // lamp made way for the scoreboard stand, so it has no collider any more either.)
         const p0 = cornerPose(s, 0, 4.7);
         solids.push({ kind: "plant", x: p0.x, z: p0.z, r: potRadius(1.2) });
         const p60 = cornerPose(s, 60, 4.8);
