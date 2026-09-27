@@ -266,4 +266,56 @@ describe('limit policy "manager"', () => {
   });
 });
 
+
+describe('limit policy "manager": Atlas moves the agent and retries', () => {
+  it("on a limit note the Manager calls update_agent (new provider+model) and retry_task; the retried run uses them", async () => {
+    const codex = new FakeRuntime(async function* () {
+      yield { type: "text", text: "Started." };
+      throw new Error("You exceeded your current quota, please check your plan");
+    }, "codex");
+    const agy = new FakeRuntime(async function* () {
+      yield { type: "text", text: "Finished on antigravity." };
+    }, "antigravity");
+    const mgr = new FakeRuntime(async function* () {
+      yield { type: "text", text: "noted" };
+    }, "claude");
+    // Nothing to fail over to (codex only): nothing is switched automatically, the Manager decides.
+    const { world, reg, tasks, orch, msgs } = await setup(new Map<Provider, Runtime>([["codex", codex], ["antigravity", agy], ["claude", mgr]]), {
+      limitPolicy: "manager",
+      failoverOrder: ["codex"],
+    });
+    (orch as unknown as { deps: { reviveClearMs: number } }).deps.reviveClearMs = 0;
+    const cody = await reg.create({ name: "Cody", specialty: "backend", provider: "codex", model: "gpt-6-luna" });
+    const t = await orch.handleUserMessage({ agentId: cody.id, text: "refactor api.ts" });
+    await waitFor(async () => (await tasks.get(t.id))?.status === "failed" && (await reg.get(cody.id))?.revive?.phase === "fainted");
+    // The scene walks the agent to the Manager's desk: the revive state says it was a limit on codex.
+    const reporting = (await reg.get(cody.id))!.revive!;
+    expect(reporting).toMatchObject({ phase: "fainted", cause: "limit", failedProvider: "codex", failedTaskId: t.id });
+    expect(orch.pending().limits).toHaveLength(1);
+
+    // Atlas gets the provider note in its next preamble.
+    const m = await reg.ensureManager();
+    const req = await orch.handleUserMessage({ agentId: m.id, text: "status?" });
+    await waitFor(async () => (await tasks.get(req.id))?.status === "done");
+    expect(textOf(mgr.runs[0]!)).toMatch(/Cody .* hit codex limit .* no failover provider available/);
+
+    // Atlas analyses and moves Cody to antigravity on the strong tier, then retries the failed task.
+    const tools = managerTools(toolCtx(world, { startTask: (id) => orch.startTask(id), reviveAgent: (id, p, mo) => orch.reviveAgent(id, p, mo) }));
+    expect(await call(tools, "update_agent", { agentId: cody.id, provider: "antigravity", model: "gemini-3.1-pro-high" })).toContain("provider antigravity, model gemini-3.1-pro-high");
+    expect(await call(tools, "retry_task", { taskId: t.id })).toContain("limit cleared");
+    await waitFor(async () => (await tasks.get(t.id))?.status === "done");
+    expect(agy.runs).toHaveLength(1);
+    expect(agy.runs[0]!.model).toBe("gemini-3.1-pro-high");
+    expect(codex.runs).toHaveLength(1);
+    const after = (await reg.get(cody.id))!;
+    expect(after.provider).toBe("antigravity");
+    expect(after.limit).toBeUndefined();
+    // The Inbox item is closed by the Manager's decision, and the scene saw the switch.
+    expect(orch.pending().limits).toHaveLength(0);
+    expect(msgs.some((mm) => mm.type === "limit.resolved")).toBe(true);
+    expect(msgs.some((mm) => mm.type === "agent.updated" && mm.agent.id === cody.id && mm.agent.revive?.phase === "done" && mm.agent.revive.switchTo?.provider === "antigravity")).toBe(true);
+    await waitFor(async () => (await reg.get(cody.id))?.revive === undefined);
+  });
+});
+
 void (null as unknown as Agent);

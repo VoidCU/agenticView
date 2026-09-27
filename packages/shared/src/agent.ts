@@ -43,10 +43,22 @@ export const PlacementSchema = z.object({
 });
 export type Placement = z.infer<typeof PlacementSchema>;
 
+/**
+ * Revive state machine after a provider failure. For a quota / rate limit (`cause` "limit") the office
+ * shows it as a walk: fainted = the agent walks to the Manager's desk and reports the limit; reviving =
+ * it stands there while the switch is decided; done = it says "Switching to <switchTo>!" and walks
+ * back to its seat while the retried task runs. A crash (`cause` "crash") faints in the lounge instead.
+ */
 export const AgentReviveSchema = z.object({
   phase: z.enum(["fainted", "reviving", "done"]),
+  /** What failed: a quota / rate limit, or a crash. Absent on records from older servers (treated as a limit). */
+  cause: z.enum(["limit", "crash"]).optional(),
+  /** The provider that hit the limit. */
+  failedProvider: ProviderSchema.optional(),
   managerId: z.string().optional(),
   suggested: z.object({ provider: ProviderSchema, model: z.string().optional() }).optional(),
+  /** The provider/model the agent is being switched to (set once the decision has landed). */
+  switchTo: z.object({ provider: ProviderSchema.nullable(), model: z.string().nullable().optional() }).optional(),
   failedTaskId: z.string().optional(),
   resetAt: z.string().optional(),
 });
