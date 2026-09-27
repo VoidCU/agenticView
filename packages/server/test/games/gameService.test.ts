@@ -169,6 +169,23 @@ describe("agent auto-match scoring", () => {
 // ─── User best-of-3 ──────────────────────────────────────────────────────────
 
 describe("user best-of-3", () => {
+  it("a stale matchId from a previous opponent starts a fresh match instead of erroring", async () => {
+    const { svc, registry } = makeService({ randomInt: () => 2, randomDelay: () => 999_999_999 });
+    svc.start();
+    const a = await registry.create({ name: "Ana", specialty: "x", role: "worker", scope: "project" });
+    const b = await registry.create({ name: "Ben", specialty: "x", role: "worker", scope: "project" });
+    const r1 = await svc.playUser(a.id, undefined, "rock");
+    // The client kept Ana's live matchId but now challenges Ben.
+    const r2 = await svc.playUser(b.id, r1.matchId, "rock");
+    expect(r2.matchId).not.toBe(r1.matchId);
+    expect(r2.round).toBe(1);
+    expect(r2.score).toEqual({ you: 1, agent: 0 });
+    // Ana's match is untouched and continuable.
+    const r3 = await svc.playUser(a.id, r1.matchId, "rock");
+    expect(r3.matchId).toBe(r1.matchId);
+    expect(r3.round).toBe(2);
+  });
+
   it("plays a full best-of-3 match and emits game.result when done", async () => {
     // Agent always plays scissors (idx 2), so user wins every round with rock (idx 0).
     const { svc, msgs, registry } = makeService({ randomInt: () => 2, randomDelay: () => 999_999_999 });
@@ -241,12 +258,14 @@ describe("user best-of-3", () => {
     svc.stop();
   });
 
-  it("rejects wrong opponentId for an existing matchId", async () => {
+  it("a wrong opponentId for an existing matchId starts a fresh match (stale client hint)", async () => {
     const { svc, registry } = makeService({ randomInt: () => 0, randomDelay: () => 999_999_999 });
     svc.start();
     const agent = await registry.create({ name: "Bot", specialty: "x", role: "worker", scope: "project" });
     const r1 = await svc.playUser(agent.id, undefined, "rock");
-    await expect(svc.playUser("wrong-id", r1.matchId, "rock")).rejects.toThrow("opponentId mismatch");
+    const r2 = await svc.playUser("wrong-id", r1.matchId, "rock");
+    expect(r2.matchId).not.toBe(r1.matchId);
+    expect(r2.round).toBe(1);
     svc.stop();
   });
 });

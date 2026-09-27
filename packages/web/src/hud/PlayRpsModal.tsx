@@ -51,9 +51,18 @@ export function PlayRpsModal({ agentId, onClose }: { agentId: string; onClose: (
     };
   }, [agentId]);
 
+  // A fresh opponent means a fresh match: never carry the previous game's match id or rounds over.
+  useEffect(() => {
+    setMatchId(undefined);
+    setRounds([]);
+    lastRoundRef.current = undefined;
+  }, [agentId]);
+
   // Listen for incoming round results
   useEffect(() => {
     if (!lastGameRound) return;
+    // Only rounds of THIS opponent: the store may still hold the last round of a previous match.
+    if (lastGameRound.opponentId !== agentId) return;
     // Only process if same matchId or no matchId yet
     if (matchId && lastGameRound.matchId !== matchId) return;
     if (lastRoundRef.current?.matchId === lastGameRound.matchId && lastRoundRef.current?.round === lastGameRound.round) return;

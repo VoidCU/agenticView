@@ -73,3 +73,18 @@ describe("borrowPointerFromWalk", () => {
     expect(useWalk.getState().paused).toBe(false);
   });
 });
+
+describe("PlayRpsModal stale match state", () => {
+  it("does not send a previous opponent's matchId, and ignores their leftover round", () => {
+    const send = vi.fn();
+    // A finished round against a1 is still in the store when we open a game against a2.
+    useStore.setState({
+      send,
+      agents: {},
+      lastGameRound: { matchId: "gm_old", opponentId: "a1", opponentName: "Ana", round: 2, yourMove: "rock", agentMove: "scissors", winner: "you", score: { you: 2, agent: 0 }, done: true },
+    } as never);
+    render(<PlayRpsModal agentId="a2" onClose={() => {}} />);
+    fireEvent.keyDown(window, { key: "1" });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: "game.play", opponentId: "a2", matchId: undefined }));
+  });
+});

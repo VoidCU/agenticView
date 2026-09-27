@@ -252,11 +252,13 @@ export class GameService {
      * Handle a `game.play` message. Creates or continues a best-of-3 match.
      */
     async playUser(opponentId, matchId, move) {
+        // The matchId is only a continuation hint: it continues a match solely when it names a live match
+        // AGAINST THIS OPPONENT. A stale id from a previous opponent (client kept old state) starts a
+        // fresh match instead of failing the play.
+        const existing = matchId ? this.userMatches.get(matchId) : undefined;
         let state;
-        if (matchId && this.userMatches.has(matchId)) {
-            state = this.userMatches.get(matchId);
-            if (state.opponentId !== opponentId)
-                throw new Error("opponentId mismatch for existing matchId");
+        if (existing && existing.opponentId === opponentId) {
+            state = existing;
         }
         else {
             // New match.
