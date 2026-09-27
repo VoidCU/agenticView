@@ -19,6 +19,10 @@ export const PlayerStatsSchema = z.object({
     losses: z.number().int().min(0),
     draws: z.number().int().min(0),
 });
+/** Canonical leaderboard order: most wins first, then fewest losses. */
+export function compareStandings(a, b) {
+    return b.wins - a.wins || a.losses - b.losses;
+}
 export const GamesDataSchema = z.object({
     leaderboard: z.array(PlayerStatsSchema),
     recent: z.array(MatchSchema),

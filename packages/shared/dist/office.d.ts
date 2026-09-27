@@ -28,9 +28,9 @@ export declare const POD_SEATS = 6;
 export declare const SPACE_KINDS: readonly ["office", "pod", "meeting", "lounge", "myoffice", "production", "research"];
 export type SpaceKind = (typeof SPACE_KINDS)[number];
 export declare const SpaceKindSchema: z.ZodEnum<{
+    meeting: "meeting";
     office: "office";
     pod: "pod";
-    meeting: "meeting";
     lounge: "lounge";
     myoffice: "myoffice";
     production: "production";
@@ -225,8 +225,21 @@ export interface OfficePlan {
  */
 export declare function planOffice(agents: Agent[], layout?: OfficeLayout | null, spaceNames?: Record<string, string>): OfficePlan;
 export declare function firstFreeSeat(spaces: Space[], taken: Set<string>): Placement | undefined;
-/** The seat a newly created worker would take. */
+/** The seat a newly created worker would take: a pod desk nobody sits at and nobody has as their workSeat. */
 export declare function nextPlacement(agents: Agent[], layout?: OfficeLayout | null): Placement | undefined;
+/** "pod-a#2": the key two placements share when they are the same desk. */
+export declare function placementKey(p: Placement): string;
+/** Every worker's designated desk (workSeat) by seat key, optionally leaving one agent out. */
+export declare function designatedSeats(agents: readonly Agent[], exceptId?: string): Map<string, Agent>;
+/**
+ * Where a worker who must give up its desk goes (a squatter whose desk's owner starts working, or an idle
+ * worker on a desk the Manager just designated to someone else): its own workSeat when nobody sits there,
+ * else the first free desk of `seats` that is nobody's workSeat, else any free desk. Undefined = none is
+ * free (the caller sends it to the lounge). `placements` must already hold the desk being taken.
+ */
+export declare function freeDeskFor(agentId: string, seats: readonly Placement[], placements: Record<string, Placement>, agents: readonly Agent[]): Placement | undefined;
+/** Human label of a desk for tool messages: "Seat 2 in Pod A". */
+export declare function seatLabel(spaces: readonly Space[], p: Placement, spaceNames?: Record<string, string>): string;
 /** Find a space by id or (case-insensitive) name. */
 export declare function findSpace(spaces: Space[], ref: string): Space | undefined;
 /** Everywhere a worker could be moved to: every seat of the current honeycomb (it grows by itself when full). */
@@ -247,8 +260,8 @@ export interface ExplicitRoom {
 export declare const ExplicitRoomSchema: z.ZodObject<{
     id: z.ZodString;
     kind: z.ZodEnum<{
-        pod: "pod";
         meeting: "meeting";
+        pod: "pod";
         lounge: "lounge";
     }>;
     name: z.ZodString;
@@ -258,8 +271,8 @@ export declare const ExplicitRoomSchema: z.ZodObject<{
 export declare const ExplicitRoomsSchema: z.ZodArray<z.ZodObject<{
     id: z.ZodString;
     kind: z.ZodEnum<{
-        pod: "pod";
         meeting: "meeting";
+        pod: "pod";
         lounge: "lounge";
     }>;
     name: z.ZodString;
@@ -302,9 +315,9 @@ export declare function buildSpacesFromExplicit(rooms: ExplicitRoom[]): Space[];
 export declare const LayoutRoomSchema: z.ZodObject<{
     id: z.ZodString;
     kind: z.ZodEnum<{
+        meeting: "meeting";
         office: "office";
         pod: "pod";
-        meeting: "meeting";
         lounge: "lounge";
         myoffice: "myoffice";
         production: "production";
@@ -321,9 +334,9 @@ export declare const OfficeLayoutSchema: z.ZodObject<{
     rooms: z.ZodArray<z.ZodObject<{
         id: z.ZodString;
         kind: z.ZodEnum<{
+            meeting: "meeting";
             office: "office";
             pod: "pod";
-            meeting: "meeting";
             lounge: "lounge";
             myoffice: "myoffice";
             production: "production";

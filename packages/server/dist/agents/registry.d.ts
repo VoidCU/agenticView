@@ -1,4 +1,4 @@
-import { type OfficeLayout, type Agent, type Effort, type Role, type Scope, type Provider, type ToolAllowance, type PermissionMode, type Appearance } from "@agenticview/shared";
+import { type OfficeLayout, type Agent, type Effort, type Role, type Scope, type Provider, type ToolAllowance, type PermissionMode, type Appearance, type Placement } from "@agenticview/shared";
 export type WorldRef = {
     kind: "project";
     projectPath: string;
@@ -49,6 +49,8 @@ export declare class AgentRegistry {
     create(input: CreateAgentInput): Promise<Agent>;
     private createUnqueued;
     update(id: string, patch: Partial<Agent>): Promise<Agent>;
+    /** The office-wide invariant: two agents never share a designated desk (workSeat). */
+    assertDeskFree(id: string, seat: Placement): Promise<void>;
     /** Clone a global agent into this project with fresh id and stats, remembering its origin. */
     copyToProject(id: string): Promise<Agent>;
     /**

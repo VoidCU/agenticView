@@ -13,7 +13,11 @@ import type { EventBus } from "../events/bus.js";
  *   clears itself after visitSeconds. The worker keeps its own placement meanwhile.
  * - lounge (35%): sets `lounging`, unless the lounge already holds half its spots (then it stays).
  * Workers already in the lounge re-roll too, so they drift back to desks. Busy workers are never touched
- * by a roll; a worker that gets work while lounging sits back down through the same free-seat choice.
+ * by a roll. Idle wandering only ever changes `placement`, never the designated desk (`workSeat`).
+ *
+ * Getting work (anything but a brainstorm meeting) walks the worker to its workSeat. An idle worker
+ * sitting there (a squatter) gets up first: to its own workSeat, else a free desk nobody owns, else any
+ * free desk, else the lounge.
  */
 export type IdleOutcome = "stay" | "visit" | "lounge";
 export interface IdleBehaviourDeps {
@@ -63,8 +67,20 @@ export declare class IdleBehaviourService {
     /** Office start: every idle worker begins its idle cycle. */
     start(idleWorkerIds: string[]): void;
     stop(): void;
-    /** A worker got work: stop its idle cycle; if it was lounging or visiting it sits back down. */
-    onBusy(agentId: string): Promise<void>;
+    /**
+     * A worker got work: stop its idle cycle. With `toDesk` (every task but a brainstorm meeting) it walks
+     * to its designated desk (workSeat); otherwise, if it was lounging or visiting, it sits back down.
+     */
+    onBusy(agentId: string, opts?: {
+        toDesk?: boolean;
+    }): Promise<void>;
+    /** A busy worker starts (more) desk work: walk it to its workSeat. Idempotent. */
+    toWorkSeat(agentId: string): Promise<void>;
+    /**
+     * Sit `a` at its workSeat, displacing whoever else sits there (squatter rule). No-op when it is already
+     * seated there and neither lounging nor visiting. Returns the updated agent.
+     */
+    private takeWorkSeat;
     /** A worker finished its work: after the idle threshold it starts rolling. */
     onIdle(agentId: string): void;
     isBusy(agentId: string): boolean;

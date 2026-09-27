@@ -185,6 +185,10 @@ export declare const AgentSchema: z.ZodObject<{
         space: z.ZodString;
         seat: z.ZodNumber;
     }, z.core.$strip>>;
+    workSeat: z.ZodOptional<z.ZodObject<{
+        space: z.ZodString;
+        seat: z.ZodNumber;
+    }, z.core.$strip>>;
     session: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         id: z.ZodString;
         name: z.ZodOptional<z.ZodString>;

@@ -34,6 +34,8 @@ export declare const PlayerStatsSchema: z.ZodObject<{
     draws: z.ZodNumber;
 }, z.core.$strip>;
 export type PlayerStats = z.infer<typeof PlayerStatsSchema>;
+/** Canonical leaderboard order: most wins first, then fewest losses. */
+export declare function compareStandings(a: PlayerStats, b: PlayerStats): number;
 export declare const GamesDataSchema: z.ZodObject<{
     leaderboard: z.ZodArray<z.ZodObject<{
         playerId: z.ZodString;

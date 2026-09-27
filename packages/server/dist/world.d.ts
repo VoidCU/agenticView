@@ -8,7 +8,7 @@ import { Orchestrator, type ResolvedSettings } from "./manager/orchestrator.js";
 import type { Runtime, BridgeTool } from "./runtimes/types.js";
 import type { ToolRegistry } from "./bridge/toolRegistry.js";
 import type { EventBus } from "./events/bus.js";
-import { type Agent, type Task } from "@agenticview/shared";
+import { type Agent, type Placement, type Task } from "@agenticview/shared";
 export interface WorldOptions {
     runtimes: Map<Provider, Runtime>;
     bus: EventBus;
@@ -90,6 +90,11 @@ export interface World {
     removeCustomProvider: (id: string) => Promise<void>;
     /** Wire decoration of outgoing messages (fills agent.sessionModel for claude-session agents). */
     decorate: (m: ServerMessage) => ServerMessage;
+    /**
+     * The user dragged a worker to a desk: an owner action, so it becomes the worker's designated desk
+     * (move_worker semantics, including the designated-desk swap). Returns the tool message ("ERROR: ..." on refusal).
+     */
+    moveDesk: (agentId: string, desk: Placement) => Promise<string>;
 }
 export declare function globalConfigPath(): string;
 export declare function readGlobalConfig(): Promise<GlobalConfig>;

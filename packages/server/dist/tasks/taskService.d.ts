@@ -10,6 +10,8 @@ export interface CreateTaskInput {
     parentId?: string;
     images?: string[];
     readOnly?: boolean;
+    /** Brainstorm work in the Meeting Room: the assignee does not walk to its workSeat. */
+    meeting?: boolean;
     tier?: Task["tier"];
 }
 export type TaskPatch = Partial<Pick<Task, "result" | "error" | "session">>;

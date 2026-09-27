@@ -50,9 +50,9 @@ export declare const WorldInfoSchema: z.ZodObject<{
         rooms: z.ZodArray<z.ZodObject<{
             id: z.ZodString;
             kind: z.ZodEnum<{
+                meeting: "meeting";
                 office: "office";
                 pod: "pod";
-                meeting: "meeting";
                 lounge: "lounge";
                 myoffice: "myoffice";
                 production: "production";

@@ -32,6 +32,8 @@ export class TaskService {
         };
         if (input.readOnly)
             task.readOnly = true;
+        if (input.meeting)
+            task.meeting = true;
         if (input.tier)
             task.tier = input.tier;
         if (input.parentId)

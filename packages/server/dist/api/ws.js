@@ -35,11 +35,21 @@ async function handle(msg, world, opts, send) {
         case "agent.update": {
             if (msg.patch.provider && !isKnownProvider(msg.patch.provider))
                 throw new Error(`Unknown provider ${msg.patch.provider}`);
-            // Reseating someone must not reshuffle workers who were only auto-seated: pin them first.
-            if (msg.patch.placement)
-                for (const pinned of await registry.pinPlacements())
-                    bus.emit({ type: "agent.updated", agent: pinned });
-            const agent = await registry.update(msg.id, msg.patch);
+            const { placement, ...patch } = msg.patch;
+            // Dragging a worker to a desk is an owner action: that desk becomes its designated desk (workSeat),
+            // swapping designated desks with the owner of a taken one. Refusals surface as an error.
+            if (placement) {
+                const cur = await registry.get(msg.id);
+                const same = cur?.workSeat && cur.workSeat.space === placement.space && cur.workSeat.seat === placement.seat && cur.placement?.space === placement.space && cur.placement?.seat === placement.seat;
+                if (!same) {
+                    const out = await world.moveDesk(msg.id, placement);
+                    if (out.startsWith("ERROR:"))
+                        throw new Error(out.slice("ERROR:".length).trim());
+                }
+            }
+            if (Object.keys(patch).length === 0)
+                return;
+            const agent = await registry.update(msg.id, patch);
             bus.emit({ type: "agent.updated", agent });
             return;
         }

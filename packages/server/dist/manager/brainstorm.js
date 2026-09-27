@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { isTerminal, planOffice } from "@agenticview/shared";
 import { resolveAssignmentTarget } from "./tools.js";
-import { moveWorker } from "./officeTools.js";
+import { seatWorker } from "./officeTools.js";
 function toParticipants(participants, tasks) {
     return participants.map((p) => {
         const t = tasks.get(p.task.id) ?? p.task;
@@ -57,7 +57,7 @@ export function brainstormTool(ctx) {
                 kind: "work", title: `Brainstorm: ${topic}`,
                 description: `Give your expert view on ${topic} from your specialty in 5-10 bullet points; do not edit files or run commands.`,
                 createdBy: ctx.managerId, assigneeId: agent.id, parentId: ctx.requestTask.id,
-                projectPath: target.projectPath, readOnly: true,
+                projectPath: target.projectPath, readOnly: true, meeting: true,
             });
             session.participants.push({ agent, task, previous });
         }
@@ -112,7 +112,7 @@ export function brainstormTool(ctx) {
                     const free = Array.from({ length: meeting.seats }, (_, i) => i).find(i => !taken.has(i));
                     // Completed participants may lend their meeting desk to a later batch; the return swap restores them.
                     const lender = current.find(a => finishedAgents.has(a.id) && seats[a.id]?.space === "meeting");
-                    const out = await moveWorker(ctx, p.agent.id, "meeting", free ?? (lender && seats[lender.id].seat));
+                    const out = await seatWorker(ctx, p.agent.id, "meeting", free ?? (lender && seats[lender.id].seat));
                     if (out.startsWith("ERROR:"))
                         throw new Error(out);
                     moved.push(p);
@@ -133,7 +133,7 @@ export function brainstormTool(ctx) {
             finally {
                 for (const p of moved) {
                     if (await ctx.registry.get(p.agent.id))
-                        await moveWorker(ctx, p.agent.id, p.previous.space, p.previous.seat);
+                        await seatWorker(ctx, p.agent.id, p.previous.space, p.previous.seat);
                 }
             }
         }

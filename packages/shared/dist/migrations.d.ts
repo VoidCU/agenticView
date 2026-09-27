@@ -1,5 +1,5 @@
 import type { Agent, Placement } from "./agent.js";
-import { type ExplicitRoom, type OfficeLayout } from "./office.js";
+import { type ExplicitRoom, type OfficeLayout, type Space } from "./office.js";
 export interface LegacyLayoutInput {
     /** rooms.json of 0.2.16 and earlier (manager implicitly at 0,0; lounge at -1,0); null when the file never existed. */
     rooms: ExplicitRoom[] | null;
@@ -38,3 +38,39 @@ export interface LayoutMigration {
  * unchanged and only invalid seats are remapped, so running it on its own output changes nothing.
  */
 export declare function migrateLegacyLayout(input: LegacyLayoutInput): LayoutMigration;
+export interface WorkSeatMove {
+    agentId: string;
+    name: string;
+    /** The desk the agent had (its old workSeat, else its placement); absent when it had neither. */
+    from?: Placement;
+    to: Placement;
+    /**
+     * adopted: the agent's current seat became its workSeat (first run on an older office);
+     * duplicate: that desk was already another (earlier) agent's, so it got a free desk;
+     * missing: it had no seat, or its seat no longer exists in the layout.
+     */
+    reason: "adopted" | "duplicate" | "missing";
+}
+export interface WorkSeatMigration {
+    /** Every worker's designated desk after the migration (agent id → seat). */
+    workSeats: Record<string, Placement>;
+    /** The workers whose workSeat is new or changed, with why. */
+    moves: WorkSeatMove[];
+    /** Workers no desk was left for (the caller grows the layout and runs it again). */
+    unseated: string[];
+    /** True when any workSeat must be written back. */
+    changed: boolean;
+}
+/**
+ * Give every worker a unique designated desk (workSeat) on `spaces`.
+ *
+ * - A valid workSeat is kept (earliest created agent wins a contested one).
+ * - A worker without one adopts its current placement when that desk exists and is not somebody's yet.
+ * - Everyone left (duplicates, seats that no longer exist, no seat at all) gets a free desk: in the same
+ *   pod when it has one, else the first free pod desk, else any free desk of a seated room.
+ *
+ * Pure and idempotent: run on its own output it changes nothing.
+ */
+export declare function migrateWorkSeats(agents: readonly Agent[], spaces: readonly Space[]): WorkSeatMigration;
+/** One log line per workSeat move, for the office start log. */
+export declare function describeWorkSeatMoves(moves: readonly WorkSeatMove[]): string[];

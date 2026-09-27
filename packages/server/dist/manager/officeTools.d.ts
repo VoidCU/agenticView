@@ -15,8 +15,20 @@ export interface OfficeToolContext {
 /** Seat map of the office: every space with its free desks and who sits where. */
 export declare function describeSpaces(ctx: OfficeToolContext): Promise<string>;
 /**
- * Move one worker to a space (and seat). If the seat is taken the two workers swap desks.
- * Persists both placements and broadcasts them so the office animates the walk.
+ * Give one worker a new designated desk (workSeat) in a space and walk it there. This is an owner action
+ * (the Manager's move_worker / arrange_workers, or the user dragging the agent) and the only way a
+ * workSeat changes after create_agent.
+ *
+ * - No seat: the first desk of the space that is nobody's workSeat (a free one first).
+ * - A seat that is another worker's workSeat: the two SWAP designated desks (the other worker gets the
+ *   mover's old workSeat). The other worker's desk is released before the mover takes it, so two agents
+ *   never share a workSeat at any point. A mover without a workSeat cannot swap: refused.
+ * - Anyone merely sitting at the destination (idle) gets up and moves elsewhere.
  */
 export declare function moveWorker(ctx: OfficeToolContext, agentRef: string, spaceRef: string, seat?: number): Promise<string>;
+/**
+ * Seat a worker somewhere for a while WITHOUT changing its designated desk (brainstorm meetings and the
+ * walk back). If the seat is taken the two workers swap seats (placements only).
+ */
+export declare function seatWorker(ctx: OfficeToolContext, agentRef: string, spaceRef: string, seat?: number): Promise<string>;
 export declare function officeTools(ctx: OfficeToolContext): BridgeTool[];
