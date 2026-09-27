@@ -989,6 +989,10 @@ export function Office({ onCreate }: { onCreate: () => void }) {
       hand: handState,
       chairs: () => chairField.chairs.map((c) => ({ id: c.id, x: c.x, z: c.z, baseX: c.baseX, baseZ: c.baseZ, yaw: c.yaw, spin: c.spin, pushable: c.pushable, touchedAt: c.touchedAt, gliding: !Number.isNaN(c.glideT0) })),
       chairField,
+      spaces: () => {
+        const state = useStore.getState();
+        return layoutFor(Object.values(state.agents), state.spaceNames).spaces.map((s) => ({ id: s.id, kind: s.kind, x: s.x, z: s.z }));
+      },
       boardPose: (spaceId: string) => {
         const state = useStore.getState();
         const space = layoutFor(Object.values(state.agents), state.spaceNames).spaces.find((s) => s.id === spaceId);

@@ -120,8 +120,14 @@ export function WalkModeController({
       st.current.vx = 0;
       st.current.vz = 0;
     };
-    (window as unknown as Record<string, unknown>).__teleportWalk = teleport;
-    return () => { delete (window as unknown as Record<string, unknown>).__teleportWalk; };
+    const w = window as unknown as Record<string, unknown>;
+    w.__teleportWalk = teleport;
+    // Read-only: where the walker stands (Playwright walk tests).
+    w.__walkPos = () => ({ x: st.current.x, z: st.current.z, yaw: st.current.yaw });
+    return () => {
+      delete w.__teleportWalk;
+      delete w.__walkPos;
+    };
   }, []);
 
   // ---- Pointer lock setup ----
@@ -138,7 +144,6 @@ export function WalkModeController({
         st.current.clickPending = true;
       }
     };
-
     // Lock acquired.
     const onLockChange = () => {
       st.current.locked = isLocked(canvas);
@@ -156,7 +161,6 @@ export function WalkModeController({
         setWalking(false);
       }
     };
-
     // Mouse look (only runs while locked).
     const onMouseMove = (e: MouseEvent) => {
       if (!isLocked(canvas)) return;
@@ -165,7 +169,6 @@ export function WalkModeController({
         st.current.pitch - e.movementY * MOUSE_SENSITIVITY,
       );
     };
-
     canvas.addEventListener("click", onCanvasClick);
     document.addEventListener("pointerlockchange", onLockChange);
     document.addEventListener("mousemove", onMouseMove);
