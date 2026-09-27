@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildSpaces } from "@agenticview/shared";
-import { boardLines, BOARD_REFRESH_MS, BOARD_MAX_LINES, BOARD_FACE_NUDGE, whiteboardPose } from "../src/scene/Whiteboard";
-import { Kit, furnishSpace } from "../src/scene/kit";
+import { boardLines, boardRowsLayout, BOARD_REFRESH_MS, BOARD_MAX_LINES, BOARD_FACE_NUDGE, BOARD_ROWS_TOP, whiteboardPose } from "../src/scene/Whiteboard";
+import { Kit, furnishSpace, WHITEBOARD_FACE } from "../src/scene/kit";
 import { useWalk } from "../src/state/walk";
 import { task, worker } from "./fixtures";
 
@@ -22,6 +22,29 @@ describe("whiteboard lines", () => {
   it("throttles redraws to at most once a second and caps rows", () => {
     expect(BOARD_REFRESH_MS).toBeGreaterThanOrEqual(1000);
     expect(BOARD_MAX_LINES).toBeGreaterThan(3);
+  });
+});
+
+describe("walk-mode board rows layout", () => {
+  // Canvas height used by the board face: 1024 wide at the physical face's aspect.
+  const h = Math.round((1024 * WHITEBOARD_FACE.h) / WHITEBOARD_FACE.w);
+  it.each([0, 1, 3, BOARD_MAX_LINES, BOARD_MAX_LINES + 1, 40])("%i tasks: every row ends inside the canvas", (total) => {
+    const l = boardRowsLayout(h, total);
+    expect(l.shown).toBe(Math.min(total, BOARD_MAX_LINES));
+    expect(l.top).toBe(BOARD_ROWS_TOP);
+    expect(l.top + l.shown * l.rowH).toBeLessThanOrEqual(h);
+    expect(l.rowH).toBeGreaterThan(30); // still readable pills
+  });
+  it("keeps the '+N more' footer below the last row, never on top of it", () => {
+    const l = boardRowsLayout(h, BOARD_MAX_LINES + 5);
+    expect(l.footerY).not.toBeNull();
+    // Footer text is ~26px tall, centred on footerY.
+    expect(l.top + l.shown * l.rowH).toBeLessThanOrEqual(l.footerY! - 13);
+    expect(l.footerY! + 13).toBeLessThanOrEqual(h);
+    expect(boardRowsLayout(h, BOARD_MAX_LINES).footerY).toBeNull();
+  });
+  it("uses the compact row height when there are only a few tasks", () => {
+    expect(boardRowsLayout(h, 2).rowH).toBe(58);
   });
 });
 

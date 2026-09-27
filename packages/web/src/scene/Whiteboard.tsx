@@ -1,7 +1,9 @@
 /**
  * Whiteboard: one per pod / meeting / production / research room (and the manager's office). In the overview it shows coloured sticky
  * notes; while walking and near it, the board face is a canvas texture listing the
- * room's task titles with their status so it can be read in first person.
+ * room's task titles with their status so it can be read in first person: the compact
+ * status-pill rows with clipped titles from the original walk board (0a73efc), with the
+ * sticky notes hidden while it is up so they never sit on top of the rows.
  * Clicking it (pointer or walk-mode crosshair via userData.boardSpaceId) opens the full board.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -68,6 +70,27 @@ export function boardLines(space: Space, agents: Agent[], tasks: Task[], layout?
   return lines;
 }
 
+/** Top of the first task row on the board canvas (below the heading and rule). */
+export const BOARD_ROWS_TOP = 96;
+const BOARD_ROW_MAX_H = 58;
+const BOARD_FOOTER_H = 44;
+const BOARD_BOTTOM_PAD = 8;
+
+export interface BoardRowsLayout { shown: number; top: number; rowH: number; footerY: number | null }
+
+/**
+ * Row layout for the walk-mode board canvas: the compact status-pill rows of the original
+ * walk board (0a73efc), fitted so the last row always ends inside the canvas and, when some
+ * tasks are cut, above the "+N more" footer instead of under it.
+ */
+export function boardRowsLayout(canvasH: number, total: number): BoardRowsLayout {
+  const shown = Math.min(total, BOARD_MAX_LINES);
+  const more = total > shown;
+  const bottom = canvasH - (more ? BOARD_FOOTER_H : BOARD_BOTTOM_PAD);
+  const rowH = shown > 0 ? Math.min(BOARD_ROW_MAX_H, (bottom - BOARD_ROWS_TOP) / shown) : BOARD_ROW_MAX_H;
+  return { shown, top: BOARD_ROWS_TOP, rowH, footerY: more ? canvasH - BOARD_FOOTER_H / 2 : null };
+}
+
 /** Draws the board face. Exported for tests. */
 export function drawBoard(ctx: CanvasRenderingContext2D, heading: string, lines: BoardLine[]) {
   const w = ctx.canvas.width;
@@ -86,11 +109,12 @@ export function drawBoard(ctx: CanvasRenderingContext2D, heading: string, lines:
     ctx.fillText("No tasks yet", 36, 140);
     return;
   }
-  const shown = lines.slice(0, BOARD_MAX_LINES);
-  const rowH = Math.min(58, (h - 100) / shown.length);
+  const layout = boardRowsLayout(h, lines.length);
+  const shown = lines.slice(0, layout.shown);
+  const rowH = layout.rowH;
   const tagW = 230;
   shown.forEach((line, i) => {
-    const y = 96 + i * rowH;
+    const y = layout.top + i * rowH;
     ctx.fillStyle = BOARD_COLORS[line.status];
     ctx.fillRect(28, y + 4, tagW, rowH - 10);
     ctx.fillStyle = "#1f2a44";
@@ -103,15 +127,17 @@ export function drawBoard(ctx: CanvasRenderingContext2D, heading: string, lines:
     if (title !== line.title) title = `${title.trimEnd()}…`;
     ctx.fillText(title, tagW + 50, y + rowH / 2);
   });
-  if (lines.length > shown.length) {
+  if (layout.footerY !== null) {
     ctx.fillStyle = "#7b8499";
     ctx.font = "26px system-ui, sans-serif";
-    ctx.fillText(`+${lines.length - shown.length} more · click to open`, w - 400, h - 22);
+    ctx.textAlign = "right";
+    ctx.fillText(`+${lines.length - shown.length} more · click to open`, w - 36, layout.footerY);
+    ctx.textAlign = "left";
   }
 }
 
 /** The readable face, mounted only while walking; redraws at most once per second and only when near. */
-function BoardFace({ space, heading, world }: { space: Space; heading: string; world: THREE.Vector3 }) {
+function BoardFace({ space, heading, world, near, setNear }: { space: Space; heading: string; world: THREE.Vector3; near: boolean; setNear: (near: boolean) => void }) {
   const texture = useMemo(() => {
     const canvas = document.createElement("canvas");
     canvas.width = TEX_W;
@@ -123,7 +149,8 @@ function BoardFace({ space, heading, world }: { space: Space; heading: string; w
   }, []);
   useEffect(() => () => texture.dispose(), [texture]);
   const last = useRef({ at: 0, sig: "" });
-  const [near, setNear] = useState(false);
+  // Leaving walk mode unmounts the face: hand the board back to the overview sticky notes.
+  useEffect(() => () => setNear(false), [setNear]);
 
   useFrame(({ camera }) => {
     const now = performance.now();
@@ -147,7 +174,8 @@ function BoardFace({ space, heading, world }: { space: Space; heading: string; w
   return (
     <mesh position={[0, WHITEBOARD_FACE.y, BOARD_OVERLAY_Z]} raycast={() => null}>
       <planeGeometry args={[BOARD_W, BOARD_H]} />
-      <meshBasicMaterial map={texture} toneMapped={false} />
+      {/* Polygon offset on top of the few-mm nudge: no depth fighting with the board at long range. */}
+      <meshBasicMaterial map={texture} toneMapped={false} polygonOffset polygonOffsetFactor={-1} polygonOffsetUnits={-1} />
     </mesh>
   );
 }
@@ -156,6 +184,8 @@ export function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Sp
   const [hovered, setHovered] = useState(false);
   useCursor(hovered);
   const walking = useWalk((s) => s.walking);
+  const [near, setNear] = useState(false);
+  const faceShown = walking && near;
   const agents = useStore((s) => s.agents);
   const tasks = useStore((s) => s.tasks);
   const layout = useStore((s) => s.layout);
@@ -177,8 +207,9 @@ export function Whiteboard({ space, onOpen }: { space: Space; onOpen: (space: Sp
       <boxGeometry args={[1.72, 1.02, 0.055]} />
       <meshBasicMaterial color="#78baff" transparent opacity={hovered ? 0.24 : 0} depthWrite={false} />
     </mesh>
-    {walking && <BoardFace space={space} heading={heading} world={world} />}
-    {isTeamRoom(space) && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + ((i % cols) + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, BOARD_OVERLAY_Z + 0.001]} raycast={() => null}>
+    {walking && <BoardFace space={space} heading={heading} world={world} near={near} setNear={setNear} />}
+    {/* Overview sticky notes; while the walk-mode rows are up close they are hidden so they never cover the pills and titles. */}
+    {isTeamRoom(space) && !faceShown && active.map(({ task, status }, i) => <mesh key={task.id} position={[-0.7 + ((i % cols) + 0.5) * 1.4 / cols, 1.5 - (Math.floor(i / cols) + 0.5) * 0.75 / rows, BOARD_OVERLAY_Z + 0.001]} raycast={() => null}>
       <planeGeometry args={[1.12 / cols, 0.57 / rows]} /><meshBasicMaterial color={BOARD_COLORS[status]} side={THREE.DoubleSide} />
     </mesh>)}
     {/* Overview control only: in walk mode the board is read up close and opened with the crosshair. */}
