@@ -275,3 +275,25 @@ describe("Manager end-of-request failed sweep", () => {
     expect(tools.find((t) => t.name === "retry_task")!.description).toContain("already covered by <task>: marked solved");
   });
 });
+
+describe("recordFailure limits only real limits", () => {
+  it("a crash or auth failure never marks the provider or agent limited", async () => {
+    const { UsageTracker } = await import("../../src/manager/usageTracker.js");
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = await mkdtemp(join(tmpdir(), "av-ut-"));
+    try {
+      const ut = new UsageTracker(dir);
+      const agent = { id: "a1", model: null } as never;
+      expect(ut.recordFailure(agent, "codex", "m", "Codex Exec exited with code 1: boom stacktrace")).toBeUndefined();
+      expect(ut.recordFailure(agent, "codex", "m", "401 unauthorized: invalid api key")).toBeUndefined();
+      expect(ut.getProviderLimit("codex").limited).toBe(false);
+      const lim = ut.recordFailure(agent, "codex", "m", "You've hit your usage limit. Try again at 7:12 AM.");
+      expect(lim?.limited).toBe(true);
+      expect(ut.getProviderLimit("codex")?.limited).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+});

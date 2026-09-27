@@ -818,9 +818,11 @@ export class Orchestrator {
         final = await this.finish(task, "failed", { error: errorText, result: result.text || undefined, session });
         if (this.deps.usageTracker) {
           const lim = this.deps.usageTracker.recordFailure(agent, provider, req.model ?? agent.model ?? "default", errorText);
-          const updatedAgent = await registry.update(agent.id, { limit: lim });
-          this.emitAgent(updatedAgent);
-          await this.deps.emitProviders?.();
+          if (lim) {
+            const updatedAgent = await registry.update(agent.id, { limit: lim });
+            this.emitAgent(updatedAgent);
+            await this.deps.emitProviders?.();
+          }
           // Trigger revive for workers whose provider hit a quota, rate-limit, or crash.
           const cls = classifyError(errorText ?? "");
           if (agent.role === "worker" && (cls === "quota" || cls === "rate-limit" || cls === "crash")) {
@@ -849,9 +851,11 @@ export class Orchestrator {
       final = await this.finish(task, "failed", { error: errorText });
       if (this.deps.usageTracker && runAgent && runProvider) {
         const lim = this.deps.usageTracker.recordFailure(runAgent, runProvider, runAgent.model ?? "default", errorText);
-        const updatedAgent = await registry.update(runAgent.id, { limit: lim });
-        this.emitAgent(updatedAgent);
-        await this.deps.emitProviders?.();
+        if (lim) {
+          const updatedAgent = await registry.update(runAgent.id, { limit: lim });
+          this.emitAgent(updatedAgent);
+          await this.deps.emitProviders?.();
+        }
         const cls = classifyError(errorText ?? "");
         if (runAgent.role === "worker" && (cls === "quota" || cls === "rate-limit" || cls === "crash")) {
           void this.triggerRevive(runAgent, runProvider, task.id, errorText ?? "", cls === "crash" ? "crash" : "limit");

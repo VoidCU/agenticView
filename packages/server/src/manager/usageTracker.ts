@@ -293,8 +293,14 @@ export class UsageTracker {
     return Object.fromEntries(byModel.entries());
   }
 
-  recordFailure(agent: Agent, provider: Provider, model: string, errorText: string): LimitInfo {
+  /**
+   * Records a failed run. Only quota and rate-limit failures mark the provider (and the agent's
+   * chip) as LIMITED: a crash or auth error says nothing about the provider's remaining quota, and
+   * marking those limited left "LIMITED" chips stuck on agents after unrelated failures.
+   */
+  recordFailure(agent: Agent, provider: Provider, model: string, errorText: string): LimitInfo | undefined {
     const errorType: ErrorClassification = classifyError(errorText);
+    if (errorType !== "quota" && errorType !== "rate-limit") return undefined;
     const resetAt = parseResetAt(errorText);
     const limitInfo: LimitInfo = {
       limited: true,
