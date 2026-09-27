@@ -165,8 +165,14 @@ export class AgentRegistry {
     const cur = await this.get(id);
     if (!cur) throw new Error(`Unknown agent ${id}`);
     if (patch.workSeat) await this.assertDeskFree(id, patch.workSeat);
+    // Limits are recorded per provider (UsageTracker.providerLimits), and agent.limit is the agent's copy
+    // of the limit it hit. Moving the agent to another provider leaves that limit behind, so any provider
+    // change clears it (unless the patch sets limit itself). A model change on the same provider keeps it:
+    // the provider is still limited.
+    const providerChanged = "provider" in patch && (patch.provider ?? null) !== (cur.provider ?? null);
     const next = normalizeAgent(AgentSchema.parse({
       ...cur,
+      ...(providerChanged && !("limit" in patch) ? { limit: undefined } : {}),
       ...patch,
       id: cur.id,
       role: cur.role,
