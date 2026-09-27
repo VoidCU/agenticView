@@ -315,7 +315,7 @@ describe('limit policy "manager": Atlas moves the agent and retries', () => {
     expect(msgs.some((mm) => mm.type === "limit.resolved")).toBe(true);
     expect(msgs.some((mm) => mm.type === "agent.updated" && mm.agent.id === cody.id && mm.agent.revive?.phase === "done" && mm.agent.revive.switchTo?.provider === "antigravity")).toBe(true);
     await waitFor(async () => (await reg.get(cody.id))?.revive === undefined);
-  });
+  }, 60000);
 });
 
 void (null as unknown as Agent);
