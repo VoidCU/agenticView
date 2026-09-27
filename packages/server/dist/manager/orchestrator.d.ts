@@ -104,6 +104,8 @@ export declare class Orchestrator {
         limits: PendingLimitInfo[];
     };
     respondLimit(id: string, answer: "accept" | "choose" | "dismiss", provider?: Provider, model?: string): void;
+    /** The agent's limit was decided elsewhere (the Manager, another answer): close its open Inbox limit items. */
+    private settleLimitsFor;
     /** Returns the cheapest available provider when preferCheapModels is on, or undefined. */
     cheapProvider(): Promise<{
         provider: Provider;

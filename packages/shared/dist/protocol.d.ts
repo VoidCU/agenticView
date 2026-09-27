@@ -153,6 +153,18 @@ export declare const AgentPatchSchema: z.ZodObject<{
             reviving: "reviving";
             done: "done";
         }>;
+        cause: z.ZodOptional<z.ZodEnum<{
+            crash: "crash";
+            limit: "limit";
+        }>>;
+        failedProvider: z.ZodOptional<z.ZodEnum<{
+            claude: "claude";
+            "claude-session": "claude-session";
+            codex: "codex";
+            copilot: "copilot";
+            antigravity: "antigravity";
+            gemini: "gemini";
+        }>>;
         managerId: z.ZodOptional<z.ZodString>;
         suggested: z.ZodOptional<z.ZodObject<{
             provider: z.ZodEnum<{
@@ -164,6 +176,17 @@ export declare const AgentPatchSchema: z.ZodObject<{
                 gemini: "gemini";
             }>;
             model: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
+        switchTo: z.ZodOptional<z.ZodObject<{
+            provider: z.ZodNullable<z.ZodEnum<{
+                claude: "claude";
+                "claude-session": "claude-session";
+                codex: "codex";
+                copilot: "copilot";
+                antigravity: "antigravity";
+                gemini: "gemini";
+            }>>;
+            model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         }, z.core.$strip>>;
         failedTaskId: z.ZodOptional<z.ZodString>;
         resetAt: z.ZodOptional<z.ZodString>;
@@ -299,6 +322,18 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 reviving: "reviving";
                 done: "done";
             }>;
+            cause: z.ZodOptional<z.ZodEnum<{
+                crash: "crash";
+                limit: "limit";
+            }>>;
+            failedProvider: z.ZodOptional<z.ZodEnum<{
+                claude: "claude";
+                "claude-session": "claude-session";
+                codex: "codex";
+                copilot: "copilot";
+                antigravity: "antigravity";
+                gemini: "gemini";
+            }>>;
             managerId: z.ZodOptional<z.ZodString>;
             suggested: z.ZodOptional<z.ZodObject<{
                 provider: z.ZodEnum<{
@@ -310,6 +345,17 @@ export declare const ClientMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                     gemini: "gemini";
                 }>;
                 model: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            switchTo: z.ZodOptional<z.ZodObject<{
+                provider: z.ZodNullable<z.ZodEnum<{
+                    claude: "claude";
+                    "claude-session": "claude-session";
+                    codex: "codex";
+                    copilot: "copilot";
+                    antigravity: "antigravity";
+                    gemini: "gemini";
+                }>>;
+                model: z.ZodOptional<z.ZodNullable<z.ZodString>>;
             }, z.core.$strip>>;
             failedTaskId: z.ZodOptional<z.ZodString>;
             resetAt: z.ZodOptional<z.ZodString>;
