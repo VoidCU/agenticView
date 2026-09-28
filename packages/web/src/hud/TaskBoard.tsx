@@ -12,6 +12,7 @@ const STATUS_WORD: Record<TaskStatus, string> = {
   queued: "queued",
   assigned: "assigned",
   waiting: "waiting on you",
+  delegated: "with the team",
   done: "Done",
   failed: "failed",
   cancelled: "cancelled",
@@ -26,7 +27,7 @@ function TaskRow({ task, onOpenInbox }: { task: Task; onOpenInbox?: () => void }
   const select = useStore((s) => s.select);
   const selected = useStore((s) => s.selectedAgentId === task.assigneeId);
   const when = task.finishedAt ?? task.startedAt ?? task.createdAt;
-  const cancellable = ["queued", "assigned", "running", "waiting"].includes(task.status);
+  const cancellable = ["queued", "assigned", "running", "waiting", "delegated"].includes(task.status);
   const isSolved = task.status === "failed" && !!task.resolution;
   const retryable = task.status === "failed" && !isSolved;
   // Only a real pending question or permission counts as "waiting on you": the Inbox shows exactly those,

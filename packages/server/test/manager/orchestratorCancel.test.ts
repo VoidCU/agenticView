@@ -51,9 +51,7 @@ describe("Orchestrator cancel cascade and pending prompts", () => {
         const w = (await ctx.reg.list()).find((a) => a.role === "worker")!;
         yield { type: "call", tool: "assign_task", args: { agentId: w.id, title: "a", description: "" } };
         yield { type: "call", tool: "assign_task", args: { agentId: w.id, title: "b", description: "" } };
-        const ids = (await ctx.tasks.list()).filter((t) => t.kind === "work").map((t) => t.id);
-        yield { type: "call", tool: "await_tasks", args: { taskIds: ids } };
-        yield { type: "text", text: "done" };
+        yield { type: "text", text: "on it" };
       } else {
         await new Promise(() => {});
       }
@@ -61,9 +59,8 @@ describe("Orchestrator cancel cascade and pending prompts", () => {
     await ctx.reg.create({ name: "Nova", specialty: "" });
     const m = await ctx.reg.ensureManager();
     const t = await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" });
-    await waitFor(async () => (await ctx.tasks.list()).filter((x) => x.kind === "work").length === 2 && (await ctx.tasks.get(t.id))!.status === "running");
-    // Waiting on its own workers is not "waiting on you": the request stays running (only questions and permissions wait).
-    expect((await ctx.tasks.get(t.id))!.status).toBe("running");
+    // Handing out work is not "waiting on you": the request is delegated (only questions and permissions wait).
+    await waitFor(async () => (await ctx.tasks.list()).filter((x) => x.kind === "work").length === 2 && (await ctx.tasks.get(t.id))!.status === "delegated");
     await ctx.orch.cancel(t.id);
     const all = await ctx.tasks.list();
     expect(all.find((x) => x.id === t.id)!.status).toBe("cancelled");

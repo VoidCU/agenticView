@@ -30,7 +30,7 @@ export declare function cleanSessionId(v: unknown): string | undefined;
 /**
  * POST JSON to the office with node:http. Deliberately not `fetch`: Node's fetch (undici) aborts
  * any response whose headers take longer than 300s (headersTimeout), which broke long bridge calls
- * such as a Manager's await_tasks. node:http has no such default; the caller's signal is the limit.
+ * such as a Manager's brainstorm. node:http has no such default; the caller's signal is the limit.
  */
 export declare function postJson<T>(url: string, headers: Record<string, string>, body: unknown, signal?: AbortSignal): Promise<{
     status: number;

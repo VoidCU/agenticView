@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ProviderSchema } from "./agent.js";
 import { EffortSchema } from "./models.js";
 
-export const TaskStatusSchema = z.enum(["queued", "assigned", "running", "waiting", "done", "failed", "cancelled"]);
+export const TaskStatusSchema = z.enum(["queued", "assigned", "running", "waiting", "delegated", "done", "failed", "cancelled"]);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 export const TaskKindSchema = z.enum(["request", "work", "chat"]);
 export type TaskKind = z.infer<typeof TaskKindSchema>;
@@ -10,8 +10,10 @@ export type TaskKind = z.infer<typeof TaskKindSchema>;
 export const TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   queued: ["assigned", "cancelled"],
   assigned: ["running", "queued", "cancelled"],
-  running: ["waiting", "done", "failed", "cancelled"],
+  running: ["waiting", "delegated", "done", "failed", "cancelled"],
   waiting: ["running", "failed", "cancelled"],
+  /** A Manager request whose turn ended with work handed out: no run is live until the workers report back. */
+  delegated: ["assigned", "done", "failed", "cancelled"],
   done: [],
   failed: ["queued"],
   cancelled: [],
@@ -78,6 +80,8 @@ export const TaskSchema = z.object({
   error: z.string().optional(),
   /** Set when a failed task has been marked as resolved (fixed by another task or noted as acceptable). */
   resolution: TaskResolutionSchema.optional(),
+  /** Requests: child task id -> that child's finishedAt when its outcome was handed to the Manager. */
+  reported: z.record(z.string(), z.string()).optional(),
   log: z.array(TaskLogEntrySchema),
   createdAt: z.string(),
   startedAt: z.string().optional(),

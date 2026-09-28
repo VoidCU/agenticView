@@ -32,8 +32,9 @@ describe("TaskSchema", () => {
     expect(TRANSITIONS).toEqual({
       queued: ["assigned", "cancelled"],
       assigned: ["running", "queued", "cancelled"],
-      running: ["waiting", "done", "failed", "cancelled"],
+      running: ["waiting", "delegated", "done", "failed", "cancelled"],
       waiting: ["running", "failed", "cancelled"],
+      delegated: ["assigned", "done", "failed", "cancelled"],
       done: [],
       failed: ["queued"],
       cancelled: [],

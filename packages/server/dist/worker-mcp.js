@@ -84,7 +84,7 @@ export function cleanSessionId(v) {
 /**
  * POST JSON to the office with node:http. Deliberately not `fetch`: Node's fetch (undici) aborts
  * any response whose headers take longer than 300s (headersTimeout), which broke long bridge calls
- * such as a Manager's await_tasks. node:http has no such default; the caller's signal is the limit.
+ * such as a Manager's brainstorm. node:http has no such default; the caller's signal is the limit.
  */
 export function postJson(url, headers, body, signal) {
     return new Promise((resolvePost, reject) => {
@@ -106,7 +106,7 @@ export function postJson(url, headers, body, signal) {
             });
         });
         req.on("error", reject);
-        // No socket idle timeout: an await_tasks call may legitimately wait for minutes.
+        // No socket idle timeout: a bridge call (a brainstorm) may legitimately take minutes.
         req.setTimeout(0);
         req.end(data);
     });
@@ -159,8 +159,8 @@ export function formatTask(t) {
         "",
         "## Office tools (call with agenticview_bridge {run_id, tool, args})",
         bridge,
-        t.bridgeTools.some((b) => b.name === "await_tasks")
-            ? '(await_tasks returns after about 4 minutes with "stillRunning" when tasks are not done yet: call it again with those ids until everything has finished.)'
+        t.bridgeTools.some((b) => b.name === "assign_task")
+            ? "(Never wait for workers: after assign_task, complete this run with a short note. The office starts a new Manager run with the results when they finish.)"
             : "",
         "",
         "## Agent system prompt",
@@ -404,7 +404,7 @@ export async function main() {
         },
     }, async (args) => complete(args));
     server.registerTool("agenticview_bridge", {
-        description: "Call one of a task's office tools (listed under 'Office tools' in the task), e.g. assign_task/await_tasks for a Manager, or take_screenshot for workers. Pass run_id. await_tasks returns after about 4 minutes with 'stillRunning' ids if tasks are not done; call it again with those ids.",
+        description: "Call one of a task's office tools (listed under 'Office tools' in the task), e.g. assign_task for a Manager, or take_screenshot for workers. Pass run_id.",
         inputSchema: {
             run_id: z.string().optional().describe(RUN_ID_HINT),
             tool: z.string().describe("Office tool name"),

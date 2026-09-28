@@ -3,12 +3,6 @@ import { BridgeAuthError, type ToolRegistry } from "../bridge/toolRegistry.js";
 import { SessionRuntime, type WorkerReport } from "../runtimes/session.js";
 
 const MAX_WAIT_MS = 25_000;
-/**
- * Long bridge calls from a session (await_tasks) return early after this long with the tasks still
- * running, so no HTTP or MCP tool-call timeout between the session and the office can cut them off;
- * the session calls again to keep waiting.
- */
-export const BRIDGE_AWAIT_CHUNK_SECONDS = 240;
 
 const str = (v: unknown, max: number): string | undefined => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
 
@@ -64,7 +58,6 @@ export function workerRoutes(session: SessionRuntime, toolRegistry: ToolRegistry
     const b = await body(c);
     const name = String(b.name ?? "");
     const args = b.args && typeof b.args === "object" ? { ...(b.args as Record<string, unknown>) } : {};
-    if (name === "await_tasks" && args.maxWaitSeconds === undefined) args.maxWaitSeconds = Number(process.env.AGENTICVIEW_AWAIT_CHUNK_SECONDS) || BRIDGE_AWAIT_CHUNK_SECONDS;
     const access = session.bridgeAccess(runId, workerOf(c.req.header("x-agenticview-worker")));
     if (!("token" in access)) return c.json(access);
     session.emit(runId, { type: "tool_start", name, input: args });

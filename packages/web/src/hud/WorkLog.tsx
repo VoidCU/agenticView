@@ -10,6 +10,7 @@ const STATUS_WORD: Record<TaskStatus, string> = {
   assigned: "queued",
   running: "running",
   waiting: "waiting",
+  delegated: "with the team",
   done: "done",
   failed: "failed",
   cancelled: "cancelled",

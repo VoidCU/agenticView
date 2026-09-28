@@ -31,6 +31,8 @@ export declare class TaskService {
     transition(id: string, to: TaskStatus, patch?: TaskPatch): Promise<Task>;
     /** Mark a failed (or cancelled) task as resolved without changing its status. */
     setResolution(id: string, resolution: TaskResolution): Promise<Task>;
+    /** Record on a request which child outcomes (child id -> its finishedAt) the Manager has been given. */
+    markReported(id: string, entries: Record<string, string>): Promise<Task | undefined>;
     /** Remove the resolution from a task (undo resolve). */
     clearResolution(id: string): Promise<Task>;
     log(id: string, type: string, text: string): Promise<void>;

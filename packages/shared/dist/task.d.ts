@@ -5,6 +5,7 @@ export declare const TaskStatusSchema: z.ZodEnum<{
     assigned: "assigned";
     running: "running";
     waiting: "waiting";
+    delegated: "delegated";
     failed: "failed";
     cancelled: "cancelled";
 }>;
@@ -54,6 +55,7 @@ export declare const TaskSchema: z.ZodObject<{
         assigned: "assigned";
         running: "running";
         waiting: "waiting";
+        delegated: "delegated";
         failed: "failed";
         cancelled: "cancelled";
     }>;
@@ -110,6 +112,7 @@ export declare const TaskSchema: z.ZodObject<{
         note: z.ZodString;
         at: z.ZodString;
     }, z.core.$strip>>;
+    reported: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     log: z.ZodArray<z.ZodObject<{
         ts: z.ZodString;
         type: z.ZodString;

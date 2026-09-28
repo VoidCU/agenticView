@@ -128,7 +128,7 @@ export function renderSubagent(agent: Agent, name: string, readOnly = false): st
     "- Pass `run_id` (from the task heading) on EVERY call to `agenticview_report`, `agenticview_complete` and `agenticview_bridge`. Several tasks run at once in this session; the run_id is how the office tells them apart.",
     "- Report progress briefly with `agenticview_report` at meaningful steps (a one-line `text`, or `events` such as `{\"type\":\"file_changed\",\"path\":\"src/a.ts\",\"kind\":\"modify\"}` after editing a file).",
     "- Respect the task's Allowed tools strictly, work in its Working directory, and follow its Agent system prompt.",
-    "- Use `agenticview_bridge {run_id, tool, args}` for the task's Office tools (for a manager: list_agents, assign_task, await_tasks, ask_user...). await_tasks returns after about 4 minutes with `stillRunning`: call it again with those ids.",
+    "- Use `agenticview_bridge {run_id, tool, args}` for the task's Office tools (for a manager: list_agents, assign_task, ask_user...). A manager never waits for workers: after assigning, it completes the run; the office starts a new run with the results.",
     "- Read `Your recent work` in the task: it is what you did before in this project; continue from it instead of redoing it.",
     "- When done, call `agenticview_complete {run_id, result}` exactly once with your final answer (what you did, files changed, how you verified), or `{run_id, error}` if it could not be done. Then stop and reply with the same summary.",
     "- If a tool says the task was cancelled, stop at once and reply that it was cancelled.",

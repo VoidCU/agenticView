@@ -106,6 +106,11 @@ async function demoRuntimes() {
         const user = text.includes("## User request") ? text.split("## User request")[1].trim() : text;
         yield { type: "status", text: "thinking" };
         await new Promise((r) => setTimeout(r, 400));
+        if (req.agent.role === "manager" && text.includes("## Worker results")) {
+            // Woken with the workers' outcomes: report, hand out nothing new.
+            yield { type: "text", text: `${req.agent.name} (demo mode): the team finished. ${text.split("## Worker results")[1].split("\n\n")[1]?.slice(0, 200) ?? ""}` };
+            return;
+        }
         if (req.agent.role === "manager") {
             // Exercise the real Manager bridge tools so the office animates: "move <worker> to <space>" reseats,
             // anything else hands a demo task to the first worker on the roster.

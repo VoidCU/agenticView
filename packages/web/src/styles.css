@@ -560,7 +560,7 @@ h3 {
 .panel-tasks .task-title { white-space: normal; overflow-wrap: anywhere; }
 .panel-tasks .task-meta { flex-wrap: wrap; gap: 2px 8px; }
 .panel-tasks .task-error { overflow-wrap: anywhere; }
-.task-running .task-status { color: var(--thinking); }
+.task-running .task-status, .task-delegated .task-status { color: var(--thinking); }
 .task-waiting .task-status { color: var(--waiting); }
 .task-failed .task-status { color: var(--error); }
 .task-done .task-status { color: var(--editing); }
@@ -2836,6 +2836,7 @@ h3 {
 }
 
 .worklog-running,
+.worklog-delegated,
 .worklog-waiting {
   color: var(--blue);
 }
@@ -4120,7 +4121,7 @@ kbd {
 }
 .tl-status-done { color: var(--green); }
 .tl-status-failed, .tl-status-cancelled { color: var(--red); }
-.tl-status-running, .tl-status-assigned { color: var(--blue); }
+.tl-status-running, .tl-status-assigned, .tl-status-delegated { color: var(--blue); }
 .tl-status-waiting { color: var(--amber); }
 .tl-request-title { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .tl-request-meta { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }

@@ -128,6 +128,18 @@ export class TaskService {
     });
   }
 
+  /** Record on a request which child outcomes (child id -> its finishedAt) the Manager has been given. */
+  markReported(id: string, entries: Record<string, string>): Promise<Task | undefined> {
+    return this.locked(id, async () => {
+      const cur = await this.store.read(id);
+      if (!cur) return undefined;
+      const next: Task = { ...cur, reported: { ...cur.reported, ...entries } };
+      await this.store.write(id, next);
+      this.onChange(next, "state");
+      return next;
+    });
+  }
+
   /** Remove the resolution from a task (undo resolve). */
   clearResolution(id: string): Promise<Task> {
     return this.locked(id, async () => {

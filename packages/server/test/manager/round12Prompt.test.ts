@@ -15,8 +15,8 @@ describe("round12: manager prompt gating for production and research", () => {
     expect(MANAGER_SYSTEM_PROMPT).toContain("If that team does not exist, tell the user rather than improvising");
   });
 
-  it("reports results through the normal assign_task + await_tasks flow", () => {
-    expect(MANAGER_SYSTEM_PROMPT).toContain("Results come back through the normal assign_task + await_tasks flow and are reported like any other task.");
+  it("reports production and research results like any other task", () => {
+    expect(MANAGER_SYSTEM_PROMPT).toContain("Results come back as \"## Worker results\" like any other task.");
   });
 
   it("mentions the new rooms and defers layout edits to explicit user requests", () => {

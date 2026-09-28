@@ -424,6 +424,8 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     memory,
   };
   const orchestrator = new Orchestrator(deps);
+  // Requests delegated before a restart: children that finished (or were interrupted) wake their Manager.
+  void orchestrator.resumeDelegated();
 
   // Claude Code sessions (claude-session workers): records persist next to the agents, and the
   // agent<->session binding persists on each agent.

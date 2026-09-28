@@ -8,7 +8,7 @@ import type { Runtime } from "../../src/runtimes/types.js";
 import { ToolRegistry } from "../../src/bridge/toolRegistry.js";
 import { EventBus } from "../../src/events/bus.js";
 import { createWorld, type World } from "../../src/world.js";
-import { FAILED_UNRESOLVED_HINT, MANAGER_SYSTEM_PROMPT, managerTools, type ManagerToolContext } from "../../src/manager/tools.js";
+import { MANAGER_SYSTEM_PROMPT, managerTools, type ManagerToolContext } from "../../src/manager/tools.js";
 import { findReplacement } from "../../src/tasks/retryGuard.js";
 
 let home: string;
@@ -235,28 +235,16 @@ describe("retry does not re-run work that is already covered", () => {
 });
 
 describe("Manager end-of-request failed sweep", () => {
-  it("await_tasks flags failedUnresolved; resolve_task marks solved and clears the flag", async () => {
+  it("resolve_task marks a failure solved, with a note or the covering task", async () => {
     const { world, reg, tasks } = await setup();
     const a = await reg.create({ name: "Ada", specialty: "", provider: "codex", model: "gpt-6-luna" });
     const ok = await makeTask(world, a, "Docs", "done");
     const bad = await makeTask(world, a, "Fix api", "failed");
     const tools = managerTools(toolCtx(world));
 
-    const first = JSON.parse(await call(tools, "await_tasks", { taskIds: [ok.id, bad.id] }));
-    expect(first.failedUnresolved).toEqual([bad.id]);
-    expect(first.tasks.map((t: { id: string }) => t.id)).toEqual([ok.id, bad.id]);
-    expect(first.message).toBe(FAILED_UNRESOLVED_HINT);
-    // With maxWaitSeconds too.
-    const early = JSON.parse(await call(tools, "await_tasks", { taskIds: [bad.id], maxWaitSeconds: 1 }));
-    expect(early.failedUnresolved).toEqual([bad.id]);
-
     // Resolve with a note only (byTaskId and note are both optional).
     expect(await call(tools, "resolve_task", { taskId: bad.id })).toContain(`Resolved task ${bad.id}`);
     expect((await tasks.get(bad.id))!.resolution?.note).toBe("Marked solved by the Manager");
-    const second = JSON.parse(await call(tools, "await_tasks", { taskIds: [ok.id, bad.id] }));
-    // No open failures: the plain array again, with the resolution on the failed line.
-    expect(Array.isArray(second)).toBe(true);
-    expect(second[1].resolution.note).toBe("Marked solved by the Manager");
 
     // resolve_task with byTaskId links the covering task.
     const bad2 = await makeTask(world, a, "Fix db", "failed");
@@ -265,13 +253,13 @@ describe("Manager end-of-request failed sweep", () => {
   });
 
   it("the system prompt and tool descriptions carry the closing rule", async () => {
-    expect(MANAGER_SYSTEM_PROMPT).toContain("Closing rule: before writing the final report, call list_tasks with includeDone");
+    expect(MANAGER_SYSTEM_PROMPT).toContain("Closing rule. Never silently abandon a failure from \"## Worker results\"");
     expect(MANAGER_SYSTEM_PROMPT).toContain("Never silently abandon a failure");
     expect(MANAGER_SYSTEM_PROMPT).toContain("mark it solved with resolve_task");
+    expect(MANAGER_SYSTEM_PROMPT).toContain("Never wait for workers.");
     expect(MANAGER_SYSTEM_PROMPT).toContain("Say what was done about each failed task");
-    expect(MANAGER_SYSTEM_PROMPT).toContain("When await_tasks returns failedUnresolved");
     const tools = managerTools(toolCtx((await setup()).world));
-    expect(tools.find((t) => t.name === "await_tasks")!.description).toContain("failedUnresolved");
+    expect(tools.some((t) => t.name === "await_tasks")).toBe(false);
     expect(tools.find((t) => t.name === "retry_task")!.description).toContain("already covered by <task>: marked solved");
   });
 });

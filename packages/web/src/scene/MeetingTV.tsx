@@ -144,7 +144,7 @@ function drawDashboard(
   const now = Date.now();
   const dayMs = 24 * 60 * 60 * 1000;
   const allTasks = Object.values(tasks);
-  const activeRequests = allTasks.filter((t) => t.kind === "request" && (t.status === "running" || t.status === "queued" || t.status === "waiting")).length;
+  const activeRequests = allTasks.filter((t) => t.kind === "request" && (t.status === "running" || t.status === "queued" || t.status === "waiting" || t.status === "delegated")).length;
   const doneToday = allTasks.filter((t) => {
     if (t.status !== "done") return false;
     const at = Date.parse(t.finishedAt ?? t.createdAt);

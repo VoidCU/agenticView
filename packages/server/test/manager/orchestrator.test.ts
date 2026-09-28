@@ -51,6 +51,9 @@ async function waitFor<T>(fn: () => Promise<T | undefined | false> | T | undefin
   }
 }
 
+/** The text of a run's prompt; a woken Manager's prompt has "## Worker results". */
+const promptText = (req: { prompt: { type: string; text?: string }[] }) => req.prompt.map((p) => (p.type === "text" ? p.text : "")).join("");
+
 const deferred = <T,>() => {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((r) => (resolve = r));
@@ -58,16 +61,20 @@ const deferred = <T,>() => {
 };
 
 describe("Orchestrator", () => {
-  it("runs a manager request end to end with delegation", async () => {
+  it("runs a manager request end to end: delegate, go free, wake with the results, report", async () => {
+    const gate = deferred<void>();
     const ctx = await setup(async function* (req) {
       if (req.agent.role === "manager") {
+        if (promptText(req).includes("## Worker results")) {
+          yield { type: "text", text: "All done." };
+          return;
+        }
         yield { type: "call", tool: "create_agent", args: { name: "Nova", specialty: "frontend" } };
         const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
         yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "CSS", description: "add vars" } };
-        const child = (await ctx.tasks.list()).find((t) => t.kind === "work")!;
-        yield { type: "call", tool: "await_tasks", args: { taskIds: [child.id] } };
-        yield { type: "text", text: "All done." };
+        yield { type: "text", text: "Nova is on it." };
       } else {
+        await gate.promise;
         yield { type: "file_changed", path: "src/vars.css", kind: "create" };
         yield { type: "text", text: "vars added" };
       }
@@ -75,6 +82,14 @@ describe("Orchestrator", () => {
     const m = await ctx.reg.ensureManager();
     const t = await ctx.orch.handleUserMessage({ agentId: m.id, text: "Add dark mode" });
     expect(t.kind).toBe("request");
+    // The Manager's turn ended while Nova works: the request is delegated and no Manager run is live.
+    const delegated = await waitFor(async () => {
+      const r = (await ctx.tasks.get(t.id))!;
+      return r.status === "delegated" && r;
+    });
+    expect(delegated.result).toBe("Nova is on it.");
+    expect(ctx.fake.runs.filter((r) => r.agent.role === "manager")).toHaveLength(1);
+    gate.resolve();
     const final = await ctx.orch.awaitTask(t.id);
     expect(final.status).toBe("done");
     expect(final.result).toBe("All done.");
@@ -92,9 +107,16 @@ describe("Orchestrator", () => {
     expect(wp).toContain("You are Nova, expert in");
     expect(wp).toContain("## Task\nCSS\n\nadd vars");
     expect(workerReq.systemPrompt).toContain("Nova");
-    const managerReq = ctx.fake.runs.find((r) => r.agent.role === "manager")!;
-    expect(managerReq.prompt.map((p) => (p.type === "text" ? p.text : ""))[0]).toContain("## Roster");
-    expect(managerReq.bridgeTools.map((b) => b.name).sort()).toEqual(["add_room", "arrange_workers", "ask_user", "assign_session", "assign_task", "await_tasks", "brainstorm", "create_agent", "list_agents", "list_sessions", "list_spaces", "list_tasks", "move_room", "move_worker", "remove_room", "rename_space", "resolve_task", "retry_task", "revive_agent", "set_layout", "set_room_kind", "update_agent"]);
+    const [managerReq, wakeReq] = ctx.fake.runs.filter((r) => r.agent.role === "manager");
+    expect(managerReq!.prompt.map((p) => (p.type === "text" ? p.text : ""))[0]).toContain("## Roster");
+    // The wake resumes the same conversation and hands over just the outcome.
+    expect(wakeReq!.sessionId).toBe(`fake-${managerReq!.runId}`);
+    const wp2 = promptText(wakeReq!);
+    expect(wp2).toMatch(/## Worker results\n\n- t_\w+ "CSS" by Nova: done\n  vars added/);
+    expect(wp2).toContain(`Request: "Add dark mode".`);
+    expect(wp2).not.toContain("## User request");
+    expect((await ctx.tasks.get(t.id))!.reported).toEqual({ [child.id]: child.finishedAt });
+    expect(managerReq!.bridgeTools.map((b) => b.name).sort()).toEqual(["add_room", "arrange_workers", "ask_user", "assign_session", "assign_task", "brainstorm", "create_agent", "list_agents", "list_sessions", "list_spaces", "list_tasks", "move_room", "move_worker", "remove_room", "rename_space", "resolve_task", "retry_task", "revive_agent", "set_layout", "set_room_kind", "update_agent"]);
     expect(ctx.orch.running()).toBe(0);
     const log = (await ctx.tasks.get(child.id))!.log;
     expect(log.some((l) => l.type === "file_changed")).toBe(true);
@@ -104,15 +126,19 @@ describe("Orchestrator", () => {
     const replies: string[] = [];
     const ctx = await setup(async function* (req) {
       if (req.agent.role === "manager") {
-        const create = req.bridgeTools.find((b) => b.name === "create_agent")!;
-        replies.push(await create.handler({ name: "Nova", specialty: "", provider: "claude", model: "opus", effort: "max" }));
-        const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
-        yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "a", description: "b" } };
-        yield { type: "call", tool: "await_tasks", args: { taskIds: (await ctx.tasks.list()).filter((t) => t.kind === "work").map((t) => t.id) } };
-        const update = req.bridgeTools.find((b) => b.name === "update_agent")!;
-        replies.push(await update.handler({ agentId: nova.id, model: "haiku" }));
-        yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "c", description: "d" } };
-        yield { type: "call", tool: "await_tasks", args: { taskIds: (await ctx.tasks.list()).filter((t) => t.kind === "work" && t.title === "c").map((t) => t.id) } };
+        const work = (await ctx.tasks.list()).filter((t) => t.kind === "work");
+        if (work.length === 0) {
+          const create = req.bridgeTools.find((b) => b.name === "create_agent")!;
+          replies.push(await create.handler({ name: "Nova", specialty: "", provider: "claude", model: "opus", effort: "max" }));
+          const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
+          yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "a", description: "b" } };
+        } else if (work.length === 1) {
+          // Woken with task a's outcome: switch the model and hand out the next task.
+          const nova = (await ctx.reg.list()).find((a) => a.name === "Nova")!;
+          const update = req.bridgeTools.find((b) => b.name === "update_agent")!;
+          replies.push(await update.handler({ agentId: nova.id, model: "haiku" }));
+          yield { type: "call", tool: "assign_task", args: { agentId: nova.id, title: "c", description: "d" } };
+        }
         yield { type: "text", text: "ok" };
       } else {
         yield { type: "text", text: "done" };
@@ -148,33 +174,112 @@ describe("Orchestrator", () => {
     expect((await ctx.tasks.list()).filter((x) => x.kind === "work")).toHaveLength(0);
   });
 
-  it("runs a second Manager request at once, in a fresh conversation, while the first is still waiting", async () => {
+  it("a message sent during a Manager run rides on its next tool result, in the same run", async () => {
+    const sent = deferred<void>();
+    const inRun = deferred<void>();
+    const replies: string[] = [];
+    const ctx = await setup(async function* (req) {
+      const list = req.bridgeTools.find((b) => b.name === "list_agents")!;
+      replies.push(await list.handler({}));
+      inRun.resolve();
+      await sent.promise;
+      replies.push(await list.handler({}));
+      replies.push(await list.handler({}));
+      yield { type: "text", text: "Going well." };
+    });
+    const m = await ctx.reg.ensureManager();
+    const req = await ctx.orch.handleUserMessage({ agentId: m.id, text: "build it" });
+    await inRun.promise;
+    expect((await ctx.orch.handleUserMessage({ agentId: m.id, text: "how is it going?" })).id).toBe(req.id);
+    sent.resolve();
+    expect((await ctx.orch.awaitTask(req.id)).status).toBe("done");
+    expect(replies[0]).not.toMatch(/New message/);
+    expect(replies[1]).toMatch(/## New message from the user[^]*how is it going\?/);
+    // Delivered once.
+    expect(replies[2]).not.toMatch(/New message/);
+    // One request, one Manager run: no side conversation was started.
+    expect((await ctx.tasks.list()).filter((t) => t.kind === "request")).toHaveLength(1);
+    expect(ctx.fake.runs).toHaveLength(1);
+    expect((await ctx.tasks.get(req.id))!.log.filter((l) => l.type === "user").map((l) => l.text)).toEqual(["build it", "how is it going?"]);
+  });
+
+  it("while its request is delegated the Manager is free: a message is answered at once on the same conversation", async () => {
+    const gate = deferred<void>();
+    const ctx = await setup(async function* (req) {
+      if (req.agent.role === "worker") {
+        await gate.promise;
+        yield { type: "text", text: "worked" };
+        return;
+      }
+      const text = promptText(req);
+      if (text.includes("## Worker results")) yield { type: "text", text: "Report: built." };
+      else if (text.includes("how is it going?")) yield { type: "text", text: "Nova is still building it." };
+      else {
+        const w = (await ctx.reg.list()).find((a) => a.role === "worker")!;
+        yield { type: "call", tool: "assign_task", args: { agentId: w.id, title: "x", description: "y" } };
+        yield { type: "text", text: "Nova is on it." };
+      }
+    });
+    await ctx.reg.create({ name: "Nova", specialty: "" });
+    const m = await ctx.reg.ensureManager();
+    const req = await ctx.orch.handleUserMessage({ agentId: m.id, text: "build it" });
+    await waitFor(async () => (await ctx.tasks.get(req.id))!.status === "delegated");
+    const ask = await ctx.orch.handleUserMessage({ agentId: m.id, text: "how is it going?" });
+    expect(ask.id).not.toBe(req.id);
+    expect((await ctx.orch.awaitTask(ask.id)).result).toBe("Nova is still building it.");
+    // The progress question saw the open work in its preamble and did not disturb the delegated request.
+    const askRun = ctx.fake.runs.find((r) => promptText(r).includes("how is it going?"))!;
+    expect(promptText(askRun)).toMatch(new RegExp(`${req.id} request "build it" \\(delegated\\)`));
+    expect((await ctx.tasks.get(req.id))!.status).toBe("delegated");
+    gate.resolve();
+    expect((await ctx.orch.awaitTask(req.id)).result).toBe("Report: built.");
+    // Every Manager run after the first resumed the one conversation.
+    const main = `fake-${ctx.fake.runs[0]!.runId}`;
+    expect(ctx.fake.runs.filter((r) => r.agent.role === "manager").map((r) => r.sessionId)).toEqual([undefined, main, main]);
+  });
+
+  it("a message the run ends before reading becomes one follow-up request on the same conversation", async () => {
     const gate = deferred<void>();
     const seen: (string | undefined)[] = [];
+    const prompts: string[] = [];
     let n = 0;
     const ctx = await setup(async function* (req) {
       seen.push(req.sessionId);
-      const me = ++n;
-      if (me === 2) await gate.promise;
-      yield { type: "text", text: `run ${me}` };
+      prompts.push(req.prompt.map((p) => (p.type === "text" ? p.text : "")).join(""));
+      if (++n === 2) await gate.promise;
+      yield { type: "text", text: `run ${n}` };
     });
-    // Give the Manager a saved conversation first (the fake names a new conversation fake-<runId>).
     const m = await ctx.reg.ensureManager();
     expect((await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "warm up" })).id)).status).toBe("done");
     const main = `fake-${ctx.fake.runs[0]!.runId}`;
     const slow = await ctx.orch.handleUserMessage({ agentId: m.id, text: "slow one" });
     await waitFor(async () => (await ctx.tasks.get(slow.id))!.status === "running");
-    const quick = await ctx.orch.handleUserMessage({ agentId: m.id, text: "quick one" });
-    // The second request finishes while the first is still blocked.
-    expect((await ctx.orch.awaitTask(quick.id)).status).toBe("done");
-    expect((await ctx.tasks.get(slow.id))!.status).toBe("running");
+    expect((await ctx.orch.handleUserMessage({ agentId: m.id, text: "also this" })).id).toBe(slow.id);
+    expect((await ctx.orch.handleUserMessage({ agentId: m.id, text: "and that" })).id).toBe(slow.id);
     gate.resolve();
     expect((await ctx.orch.awaitTask(slow.id)).status).toBe("done");
-    // First run resumed the saved conversation; the concurrent one started fresh.
-    expect(seen).toEqual([undefined, main, undefined]);
-    // The next request resumes the main conversation, not the side one.
-    await ctx.orch.awaitTask((await ctx.orch.handleUserMessage({ agentId: m.id, text: "after" })).id);
-    expect(seen.at(-1)).toBe(main);
+    const follow = await waitFor(async () => (await ctx.tasks.list()).find((t) => t.kind === "request" && t.id !== slow.id && t.description.includes("also this")));
+    expect((await ctx.orch.awaitTask(follow.id)).status).toBe("done");
+    // Both unread messages went into a single follow-up, which resumed the main conversation.
+    expect(follow.description).toMatch(`request ${slow.id}`);
+    expect(follow.description).toMatch(/also this\n\nand that/);
+    expect(seen).toEqual([undefined, main, main]);
+    expect(ctx.fake.runs).toHaveLength(3);
+  });
+
+  it("a message sent while the Manager waits on ask_user answers the question", async () => {
+    let answer = "";
+    const ctx = await setup(async function* (req) {
+      answer = await req.bridgeTools.find((b) => b.name === "ask_user")!.handler({ question: "Which color?" });
+      yield { type: "text", text: "ok" };
+    });
+    const m = await ctx.reg.ensureManager();
+    const req = await ctx.orch.handleUserMessage({ agentId: m.id, text: "theme it" });
+    await waitFor(() => ctx.orch.pending().questions.length === 1);
+    expect((await ctx.orch.handleUserMessage({ agentId: m.id, text: "blue" })).id).toBe(req.id);
+    expect((await ctx.orch.awaitTask(req.id)).status).toBe("done");
+    expect(answer).toBe("blue");
+    expect(ctx.orch.pending().questions).toHaveLength(0);
   });
 
   it("runs Claude Code session tasks outside maxConcurrentRuns, even behind a queued limited task", async () => {
@@ -208,12 +313,15 @@ describe("Orchestrator", () => {
     const ctx = await setup(
       async function* (req) {
         if (req.agent.role === "manager") {
+          // One wake once both are done (a finishing first wakes nobody).
+          if (promptText(req).includes("## Worker results")) {
+            yield { type: "text", text: promptText(req).match(/: done/g)?.length === 2 ? "both" : "early wake" };
+            return;
+          }
           const w = (await ctx.reg.list()).find((a) => a.role === "worker")!;
           yield { type: "call", tool: "assign_task", args: { agentId: w.id, title: "a", description: "" } };
           yield { type: "call", tool: "assign_task", args: { agentId: w.id, title: "b", description: "" } };
-          const ids = (await ctx.tasks.list()).filter((t) => t.kind === "work").map((t) => t.id);
-          yield { type: "call", tool: "await_tasks", args: { taskIds: ids } };
-          yield { type: "text", text: "both" };
+          yield { type: "text", text: "on it" };
         } else {
           await gate.promise;
           yield { type: "text", text: "w" };
@@ -233,17 +341,61 @@ describe("Orchestrator", () => {
     gate.resolve();
     const final = await ctx.orch.awaitTask(t.id);
     expect(final.result).toBe("both");
+    expect(ctx.fake.runs.filter((r) => r.agent.role === "manager")).toHaveLength(2);
     expect((await ctx.tasks.list()).filter((x) => x.kind === "work").every((x) => x.status === "done")).toBe(true);
   });
 
-  it("cancel aborts a hung worker and unblocks await_tasks", async () => {
+  it("a failure wakes the Manager early while other work runs; it stays open until that work reports", async () => {
+    const gate = deferred<void>();
+    const wakes: string[] = [];
+    const ctx = await setup(async function* (req) {
+      if (req.agent.role === "worker") {
+        if (promptText(req).includes("bad")) throw new Error("broke");
+        await gate.promise;
+        yield { type: "text", text: "slow done" };
+        return;
+      }
+      const text = promptText(req);
+      if (!text.includes("## Worker results")) {
+        const all = await ctx.reg.list();
+        const nova = all.find((a) => a.name === "Nova");
+        const rex = all.find((a) => a.name === "Rex");
+        yield { type: "call", tool: "assign_task", args: { agentId: nova!.id, title: "slow", description: "slow" } };
+        yield { type: "call", tool: "assign_task", args: { agentId: rex!.id, title: "bad", description: "bad" } };
+        yield { type: "text", text: "on it" };
+        return;
+      }
+      wakes.push(text);
+      if (wakes.length === 1) {
+        const bad = (await ctx.tasks.list()).find((t) => t.title === "bad")!;
+        yield { type: "call", tool: "resolve_task", args: { taskId: bad.id, note: "not needed" } };
+        yield { type: "text", text: "resolved bad; slow still running" };
+      } else yield { type: "text", text: "final" };
+    });
+    await ctx.reg.create({ name: "Nova", specialty: "" });
+    await ctx.reg.create({ name: "Rex", specialty: "" });
+    const m = await ctx.reg.ensureManager();
+    const req = await ctx.orch.handleUserMessage({ agentId: m.id, text: "go" });
+    await waitFor(() => wakes.length === 1);
+    expect(wakes[0]).toMatch(/"bad" by Rex: failed\n  broke/);
+    expect(wakes[0]).toMatch(/Still running: t_\w+ "slow"/);
+    await waitFor(async () => (await ctx.tasks.get(req.id))!.status === "delegated" && (await ctx.tasks.get(req.id))!.result === "resolved bad; slow still running");
+    gate.resolve();
+    expect((await ctx.orch.awaitTask(req.id)).result).toBe("final");
+    // The second wake reports only the new outcome.
+    expect(wakes[1]).toMatch(/"slow" by Nova: done/);
+    expect(wakes[1]).not.toMatch(/"bad"/);
+  });
+
+  it("cancel aborts a hung worker and wakes its Manager with the outcome", async () => {
     const ctx = await setup(async function* (req) {
       if (req.agent.role === "manager") {
+        if (promptText(req).includes("## Worker results")) {
+          yield { type: "text", text: "manager saw it" };
+          return;
+        }
         const w = (await ctx.reg.list()).find((a) => a.role === "worker")!;
         yield { type: "call", tool: "assign_task", args: { agentId: w.id, title: "hang", description: "" } };
-        const child = (await ctx.tasks.list()).find((t) => t.kind === "work")!;
-        yield { type: "call", tool: "await_tasks", args: { taskIds: [child.id] } };
-        yield { type: "text", text: "manager saw it" };
       } else {
         await new Promise(() => {});
       }
@@ -257,8 +409,8 @@ describe("Orchestrator", () => {
     const final = await ctx.orch.awaitTask(t.id);
     expect((await ctx.tasks.get(child.id))!.status).toBe("cancelled");
     expect(final.status).toBe("done");
-    const toolEnd = ctx.msgs.find((x) => x.type === "run.event" && x.event.type === "tool_end" && x.event.name === "await_tasks");
-    expect(toolEnd && toolEnd.type === "run.event" && toolEnd.event.type === "tool_end" ? toolEnd.event.summary : "").toContain("cancelled");
+    expect(final.result).toBe("manager saw it");
+    expect(promptText(ctx.fake.runs.at(-1)!)).toContain(`${child.id} "hang" by Nova: cancelled`);
     expect(ctx.orch.running()).toBe(0);
     expect((await ctx.reg.list()).find((a) => a.role === "worker")!.stats.tasksFailed).toBe(0);
   });
@@ -350,13 +502,13 @@ describe("Orchestrator", () => {
     const ctx = await setup(
       async function* (req) {
         if (req.agent.role === "manager") {
-          const w = (await ctx.reg.list()).find((a) => a.role === "worker")!;
-          const assign = req.bridgeTools.find((b) => b.name === "assign_task")!;
-          replies.push(await assign.handler({ agentId: w.id, title: "x", description: "y" }));
-          replies.push(await assign.handler({ agentId: w.id, title: "x", description: "y", projectPath: "C:/nope" }));
-          replies.push(await assign.handler({ agentId: w.id, title: "x", description: "y", projectPath: other }));
-          const child = (await ctx.tasks.list()).find((t) => t.kind === "work")!;
-          yield { type: "call", tool: "await_tasks", args: { taskIds: [child.id] } };
+          if (!promptText(req).includes("## Worker results")) {
+            const w = (await ctx.reg.list()).find((a) => a.role === "worker")!;
+            const assign = req.bridgeTools.find((b) => b.name === "assign_task")!;
+            replies.push(await assign.handler({ agentId: w.id, title: "x", description: "y" }));
+            replies.push(await assign.handler({ agentId: w.id, title: "x", description: "y", projectPath: "C:/nope" }));
+            replies.push(await assign.handler({ agentId: w.id, title: "x", description: "y", projectPath: other }));
+          }
           yield { type: "text", text: "done" };
         } else {
           yield { type: "text", text: "worked in " + req.cwd };

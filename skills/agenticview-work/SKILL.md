@@ -43,10 +43,9 @@ Never do the agents' work in the main thread yourself (except the no-subagent ca
 
 ## What the subagents do (for reference)
 
-Each subagent follows the protocol in its definition and task text: work in the task's working directory, respect its allowed tools, report progress with `agenticview_report {run_id, text}`, use `agenticview_bridge {run_id, tool, args}` for office tools (a Manager's `list_agents`, `assign_task`, `await_tasks`, `ask_user`; a worker's `take_screenshot`), and finish with `agenticview_complete {run_id, result}` exactly once. `run_id` is required on every call while this session runs more than one task.
+Each subagent follows the protocol in its definition and task text: work in the task's working directory, respect its allowed tools, report progress with `agenticview_report {run_id, text}`, use `agenticview_bridge {run_id, tool, args}` for office tools (a Manager's `list_agents`, `assign_task`, `ask_user`; a worker's `take_screenshot`), and finish with `agenticview_complete {run_id, result}` exactly once. `run_id` is required on every call while this session runs more than one task.
 
-- The Manager (Atlas) runs as a subagent too. It may assign work to agents bound to this same session: their tasks arrive at your next poll and run in parallel in their own subagents, as long as the session has a free slot. `await_tasks` returns after about 4 minutes with a `stillRunning` list; the Manager calls it again. That is normal, not an error.
-- If `assign_task` or `await_tasks` says waiting would deadlock, every slot of this session is taken by waiting Managers: tell the user to raise the session's capacity in the office (Sessions panel), open another Claude Code session for that agent, or move the agent to another session.
+- The Manager (Atlas) runs as a subagent too. It may assign work to agents bound to this same session: their tasks arrive at your next poll and run in their own subagents. The Manager never waits for them: it completes its run right after assigning, which frees its slot, and when the workers finish the office queues a new Manager run with their results. That is normal, not a repeat.
 
 ## Continuity
 

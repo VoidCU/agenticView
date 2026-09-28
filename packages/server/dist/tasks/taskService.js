@@ -92,6 +92,18 @@ export class TaskService {
             return next;
         });
     }
+    /** Record on a request which child outcomes (child id -> its finishedAt) the Manager has been given. */
+    markReported(id, entries) {
+        return this.locked(id, async () => {
+            const cur = await this.store.read(id);
+            if (!cur)
+                return undefined;
+            const next = { ...cur, reported: { ...cur.reported, ...entries } };
+            await this.store.write(id, next);
+            this.onChange(next, "state");
+            return next;
+        });
+    }
     /** Remove the resolution from a task (undo resolve). */
     clearResolution(id) {
         return this.locked(id, async () => {

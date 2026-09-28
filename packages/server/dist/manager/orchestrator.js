@@ -21,6 +21,8 @@ function delay(ms) {
 }
 const SessionFileSchema = z.record(z.string(), z.object({ provider: ProviderSchema, sessionId: z.string() }));
 const LOG_COALESCE_LIMIT = 2000;
+/** Longest worker result handed to a woken Manager in full. */
+const RESULT_CLIP = 1500;
 /** Runs tasks on runtimes, keeps the Manager's map truthful, and mediates permissions and questions. */
 export class Orchestrator {
     deps;
@@ -29,6 +31,10 @@ export class Orchestrator {
     /** Agent+conversation keys a run is currently resuming (see execute). */
     resuming = new Set();
     queue = [];
+    /** Manager agent id -> the request run holding its main conversation right now. */
+    liveRequests = new Map();
+    /** Chat messages waiting for a live Manager request run, by task id (see interruptManager). */
+    inbox = new Map();
     waiters = new Map();
     pendingPermissions = new Map();
     pendingQuestions = new Map();
@@ -122,10 +128,16 @@ export class Orchestrator {
             projectPath = input.projectPath;
         }
         const isManager = agent.role === "manager";
+        if (isManager) {
+            // The Manager is mid-request: the message joins that run instead of starting a second conversation.
+            const live = await this.liveRequest(agent.id, projectPath);
+            if (live)
+                return this.interruptManager(live, input);
+        }
         const task = await this.deps.tasks.create({
             kind: isManager ? "request" : "chat",
             title: input.text.length > 80 ? `${input.text.slice(0, 77)}...` : input.text,
-            description: input.text,
+            description: input.followUpOf ? `(Sent while you were finishing request ${input.followUpOf}.)\n\n${input.text}` : input.text,
             createdBy: "user",
             assigneeId: agent.id,
             projectPath,
@@ -135,6 +147,52 @@ export class Orchestrator {
         await this.deps.tasks.transition(task.id, "assigned");
         this.startTask(task.id);
         return task;
+    }
+    /** The Manager's request run that holds its main conversation for `projectPath`, if one is live. */
+    async liveRequest(agentId, projectPath) {
+        const id = this.liveRequests.get(agentId);
+        const t = id ? await this.deps.tasks.get(id) : undefined;
+        return t && !isTerminal(t.status) && t.projectPath === projectPath ? t : undefined;
+    }
+    /**
+     * A chat message for a Manager that is working. A question it is waiting on takes the message as its
+     * answer; otherwise it rides on the run's next tool result (withInbox), so the Manager handles it in
+     * context without aborting or re-reading anything. A Manager with no live run (idle, or delegated
+     * and waiting for workers) is free: the message starts a request on the same conversation.
+     */
+    async interruptManager(live, input) {
+        await this.deps.tasks.log(live.id, "user", input.text);
+        const text = input.images?.length ? `${input.text}\n(Attached images: ${input.images.join(", ")})` : input.text;
+        const question = [...this.pendingQuestions.values()].find((q) => q.info.taskId === live.id);
+        if (question) {
+            this.respondQuestion(question.info.id, text);
+            return live;
+        }
+        this.inbox.set(live.id, [...(this.inbox.get(live.id) ?? []), text]);
+        this.deps.bus.emit({ type: "run.event", taskId: live.id, agentId: live.assigneeId, event: { type: "status", text: "Got your message; reading it next" } });
+        return live;
+    }
+    /** Waiting user messages as one block for the Manager, or undefined. Consumes them. */
+    takeMessages(taskId) {
+        const texts = this.inbox.get(taskId)?.splice(0);
+        if (!texts?.length)
+            return undefined;
+        return [
+            `## New message${texts.length > 1 ? "s" : ""} from the user (sent while you were working on this request)`,
+            texts.join("\n---\n"),
+            "Deal with this first. A progress question: answer in a few lines from what you already know, without extra tool calls. A change or addition: adjust the work in place (cancel_task, assign_task, retry_task), do not restart it. Then carry on; tasks you already started keep running.",
+        ].join("\n\n");
+    }
+    /** Manager tools whose results carry any user message that arrived during the call. */
+    withInbox(taskId, tools) {
+        return tools.map((t) => ({
+            ...t,
+            handler: async (args) => {
+                const out = await t.handler(args);
+                const msgs = this.takeMessages(taskId);
+                return msgs ? `${out}\n\n${msgs}` : out;
+            },
+        }));
     }
     startTask(taskId) {
         void (async () => {
@@ -201,6 +259,9 @@ export class Orchestrator {
         this.waiters.delete(task.id);
         for (const fn of list ?? [])
             fn(task);
+        // A finished child may be what its delegated request is waiting for.
+        if (task.parentId && !task.meeting)
+            this.scheduleWake(task.parentId);
     }
     /** Cancel a task; a request also cancels every non-terminal child it spawned. */
     async cancel(taskId) {
@@ -354,6 +415,8 @@ export class Orchestrator {
                         const cleared = await registry.update(agent.id, { revive: undefined });
                         this.emitAgent(cleared);
                     }
+                    // No automatic retry after all: the failure is the Manager's to handle now.
+                    await this.wakeParentOf(failedTaskId);
                     return;
                 }
                 const chosenProvider = answer.answer === "choose" ? answer.provider : suggested?.provider;
@@ -397,6 +460,8 @@ export class Orchestrator {
                     await tasks.transition(failedTaskId, "queued", { error: undefined, result: undefined });
                     this.startTask(failedTaskId);
                 }
+                // Covered instead of re-run, or not retried: its delegated request may be ready now.
+                await this.wakeParentOf(failedTaskId);
             }
             // Clear revive state after a brief window so the client can show the "done" phase.
             const clearMs = this.deps.reviveClearMs ?? 5000;
@@ -487,16 +552,20 @@ export class Orchestrator {
         file[key] = { provider, sessionId };
         await writeJsonFile(this.sessionFile(agent.id), file);
     }
-    async buildPrompt(task, agent, provider) {
+    async buildPrompt(task, agent, provider, resumed = false) {
         let text;
         if (task.kind === "request") {
-            const preamble = buildRosterPreamble(await this.deps.info(), await this.deps.registry.list(), await this.deps.tasks.list());
+            const all = await this.deps.tasks.list();
+            const preamble = buildRosterPreamble(await this.deps.info(), await this.deps.registry.list(), all);
             const target = this.deps.world.kind === "hub" && task.projectPath ? `\n\nTarget project: ${task.projectPath} (pass this as projectPath to assign_task)` : "";
             const notes = this.takeProviderNotes();
             const notesBlock = notes.length ? `\n\n## Provider notes\n${notes.map((n) => `- ${n}`).join("\n")}` : "";
             // The request's own id: tasks assigned now get it as parentId (the closing rule's failed children).
             const self = `\n\nThis request is task ${task.id}; the tasks you assign are its children (parentId ${task.id}).`;
-            text = `${preamble}${target}${notesBlock}${self}\n\n## User request\n${task.description}`;
+            const kids = all.filter((t) => t.parentId === task.id && !t.meeting);
+            // A wake (see checkWake): only the new worker outcomes, plus the request itself when the conversation is not resumed.
+            const body = kids.length ? await this.wakeBlock(task, kids, resumed) : `## User request\n${task.description}`;
+            text = `${preamble}${target}${notesBlock}${self}\n\n${body}`;
         }
         else {
             const body = task.kind === "work" ? `${task.title}\n\n${task.description}` : task.description;
@@ -518,6 +587,89 @@ export class Orchestrator {
             }
         }
         return [{ type: "text", text }, ...task.images.map((path) => ({ type: "image", path }))];
+    }
+    /** The "## Worker results" wake prompt for a request; marks the outcomes it hands over as reported. */
+    async wakeBlock(task, kids, resumed) {
+        const agents = new Map((await this.deps.registry.list()).map((a) => [a.id, a]));
+        const fresh = kids.filter((t) => isTerminal(t.status) && t.finishedAt && task.reported?.[t.id] !== t.finishedAt);
+        const open = kids.filter((t) => !isTerminal(t.status));
+        const clip = (s) => (s.length > RESULT_CLIP ? `${s.slice(0, RESULT_CLIP)}… (truncated; list_tasks has the rest)` : s);
+        const lines = fresh.map((t) => {
+            const who = agents.get(t.assigneeId)?.name ?? t.assigneeId;
+            const reviving = agents.get(t.assigneeId)?.revive?.failedTaskId === t.id && agents.get(t.assigneeId)?.revive?.phase === "reviving" ? " (switching provider and retrying automatically; no action needed)" : "";
+            const out = t.status === "done" ? t.result : (t.error ?? t.result);
+            return `- ${t.id} "${t.title}" by ${who}: ${t.status}${t.resolution ? " (resolved)" : ""}${reviving}${out ? `\n  ${clip(out.trim()).replace(/\n/g, "\n  ")}` : ""}`;
+        });
+        if (fresh.length)
+            await this.deps.tasks.markReported(task.id, Object.fromEntries(fresh.map((t) => [t.id, t.finishedAt])));
+        const parts = ["## Worker results", lines.join("\n") || "- (nothing new)"];
+        if (open.length)
+            parts.push(`Still running: ${open.map((t) => `${t.id} "${t.title}"`).join(", ")}. You will be woken again when they finish.`);
+        parts.push(resumed ? `Request: "${task.title}".` : `## User request\n${task.description}`);
+        parts.push("Next: assign follow-up work if needed, retry_task or resolve_task each failure, then end your turn. When nothing is left open, write the final report for the user.");
+        return parts.join("\n\n");
+    }
+    /**
+     * A delegated request's children: still open (a failure being retried automatically counts as open)
+     * and not yet reported. Brainstorm (meeting) tasks are left out: the brainstorm tool collects them in the run.
+     */
+    async delegation(task) {
+        const kids = (await this.deps.tasks.children(task.id)).filter((t) => !t.meeting);
+        const agents = new Map((await this.deps.registry.list()).map((a) => [a.id, a]));
+        // Only a provider switch already under way; a failure waiting on the user's Inbox answer goes to the Manager too.
+        const retrying = (t) => t.status === "failed" && agents.get(t.assigneeId)?.revive?.failedTaskId === t.id && agents.get(t.assigneeId)?.revive?.phase === "reviving";
+        return {
+            open: kids.filter((t) => !isTerminal(t.status) || retrying(t)),
+            fresh: kids.filter((t) => isTerminal(t.status) && !retrying(t) && task.reported?.[t.id] !== t.finishedAt),
+        };
+    }
+    wakeTimers = new Map();
+    /** Check a delegated request soon; several children finishing together cause one wake. */
+    scheduleWake(requestId) {
+        if (this.wakeTimers.has(requestId))
+            return;
+        this.wakeTimers.set(requestId, setTimeout(() => {
+            this.wakeTimers.delete(requestId);
+            void this.checkWake(requestId).catch((e) => console.error("[agenticview] wake check failed", e.message));
+        }, this.deps.wakeDelayMs ?? 400));
+    }
+    async wakeParentOf(taskId) {
+        const t = await this.deps.tasks.get(taskId);
+        if (t?.parentId)
+            this.scheduleWake(t.parentId);
+    }
+    /** Check every delegated request (boot, or after a Manager's run freed its conversation). */
+    async resumeDelegated(managerId) {
+        for (const t of await this.deps.tasks.list()) {
+            if (t.kind === "request" && t.status === "delegated" && (!managerId || t.assigneeId === managerId))
+                this.scheduleWake(t.id);
+        }
+    }
+    /**
+     * Wake a delegated request's Manager once every child is finished, or earlier when one failed and
+     * needs a decision. It waits while the Manager has another run live, so one conversation stays one
+     * line of thought (execute re-checks when that run ends).
+     */
+    async checkWake(requestId) {
+        const r = await this.deps.tasks.get(requestId);
+        if (!r || r.status !== "delegated")
+            return;
+        if (this.liveRequests.has(r.assigneeId))
+            return;
+        const { open, fresh } = await this.delegation(r);
+        if (!fresh.length) {
+            if (open.length)
+                return;
+            // Nothing left to run or report: the last turn's text is the final report.
+            const done = await this.deps.tasks.transition(r.id, "done");
+            await this.deps.tasks.awardXp(this.deps.registry, done);
+            this.settle(done);
+            return;
+        }
+        if (open.length && !fresh.some((t) => t.status === "failed" && !t.resolution))
+            return;
+        await this.deps.tasks.transition(r.id, "assigned");
+        this.startTask(r.id);
     }
     /** Project path the agent memory of a task is kept under ("" = the world root). */
     memoryKey(task) {
@@ -595,7 +747,7 @@ export class Orchestrator {
     }
     bridgeToolsFor(task, agent, runId) {
         if (agent.role === "manager") {
-            return managerTools({
+            return this.withInbox(task.id, managerTools({
                 spaceNames: this.deps.spaceNames,
                 renameSpace: this.deps.renameSpace,
                 world: this.deps.world,
@@ -624,7 +776,7 @@ export class Orchestrator {
                 emitBrainstorm: (ev) => this.deps.bus.emit(ev),
                 sessions: this.deps.sessions,
                 providerOf: async (a) => (await this.resolveProviderLive(a)).provider,
-            });
+            }));
         }
         return task.readOnly ? [] : this.deps.workerTools?.(agent, task) ?? [];
     }
@@ -655,6 +807,20 @@ export class Orchestrator {
             if (cur.status === "queued" || cur.status === "assigned" || cur.status === "waiting")
                 await this.deps.tasks.transition(task.id, "running");
             return await this.deps.tasks.transition(task.id, status, patch);
+        }
+        catch {
+            return this.deps.tasks.get(task.id);
+        }
+    }
+    /** running -> delegated; the wake check then runs once the run has released the conversation. */
+    async delegate(task, patch) {
+        try {
+            const cur = await this.deps.tasks.get(task.id);
+            if (!cur || isTerminal(cur.status))
+                return cur;
+            if (cur.status === "waiting")
+                await this.deps.tasks.transition(task.id, "running");
+            return await this.deps.tasks.transition(task.id, "delegated", patch);
         }
         catch {
             return this.deps.tasks.get(task.id);
@@ -706,6 +872,9 @@ export class Orchestrator {
                 if (!resumeBusy)
                     this.resuming.delete(convo);
             };
+            // The run on the main conversation receives the user's further chat messages while it works.
+            if (agent.role === "manager" && task.kind === "request" && !resumeBusy)
+                this.liveRequests.set(agent.id, task.id);
             const cwd = task.projectPath || process.cwd();
             const bridgeTools = this.bridgeToolsFor(task, agent, runId);
             const { token: bridgeToken } = this.deps.toolRegistry.register(runId, bridgeTools);
@@ -715,7 +884,7 @@ export class Orchestrator {
                 readOnly: task.readOnly,
                 agent,
                 cwd,
-                prompt: await this.buildPrompt(task, agent, provider),
+                prompt: await this.buildPrompt((await tasks.get(task.id)) ?? task, agent, provider, Boolean(sessionId)),
                 systemPrompt: task.readOnly ? `You are ${agent.name}, an expert in ${agent.specialty || "general engineering"}. Give your expert view in 5-10 bullet points. Do not edit files or run commands.` : agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
                 sessionId,
                 tools: agent.tools,
@@ -751,7 +920,15 @@ export class Orchestrator {
                 return;
             }
             if (result.stopReason === "done") {
-                final = await this.finish(task, "done", { result: result.text, session });
+                // A Manager turn that handed out work ends here: the request waits for the workers without a live run.
+                const delegating = agent.role === "manager" && task.kind === "request" && !task.readOnly;
+                const pending = delegating ? await this.delegation((await tasks.get(task.id)) ?? task) : undefined;
+                if (pending && (pending.open.length || pending.fresh.length)) {
+                    final = await this.delegate(task, { result: result.text, session });
+                }
+                else {
+                    final = await this.finish(task, "done", { result: result.text, session });
+                }
                 this.deps.usageTracker?.recordSuccess(agent, provider, req.model ?? agent.model ?? "default");
                 const liveAgent = await registry.get(agent.id);
                 if (liveAgent?.limit?.limited) {
@@ -811,6 +988,12 @@ export class Orchestrator {
         }
         finally {
             releaseConvo();
+            let unread = [];
+            if (runAgent && this.liveRequests.get(runAgent.id) === task.id) {
+                this.liveRequests.delete(runAgent.id);
+                unread = this.inbox.get(task.id) ?? [];
+            }
+            this.inbox.delete(task.id);
             this.aborts.delete(task.id);
             this.resolvePendingFor(task.id);
             const settled = final ?? (await tasks.get(task.id));
@@ -823,6 +1006,14 @@ export class Orchestrator {
                     this.emitAgent(agent);
                 this.settle(settled);
             }
+            // Messages the run ended before reading: one follow-up request, resuming the same conversation.
+            if (unread.length && runAgent) {
+                void this.handleUserMessage({ agentId: runAgent.id, text: unread.join("\n\n"), projectPath: task.projectPath || undefined, followUpOf: task.id })
+                    .catch((e) => console.error("[agenticview] follow-up request failed", e.message));
+            }
+            // The Manager's conversation is free again: its delegated requests (this one included) may wake.
+            if (runAgent?.role === "manager")
+                void this.resumeDelegated(runAgent.id);
         }
     }
 }

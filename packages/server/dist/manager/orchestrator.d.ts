@@ -56,6 +56,8 @@ export interface WorldDeps {
     reviveDelayMs?: number;
     /** Override the revive-done clear delay (ms) for tests. Default 5000. */
     reviveClearMs?: number;
+    /** Override the delay (ms) before a delegated request checks its finished children. Default 400. */
+    wakeDelayMs?: number;
     /** Claude Code sessions with live state (for list_sessions / assign_session). */
     sessions?: () => Promise<WorkerSessionInfo[]>;
     /** Per-agent task memory (see agents/memory.ts). */
@@ -66,6 +68,8 @@ export interface UserMessageInput {
     text: string;
     images?: string[];
     projectPath?: string;
+    /** Internal: the request whose run ended before it read this message (see execute). */
+    followUpOf?: string;
 }
 /** Runs tasks on runtimes, keeps the Manager's map truthful, and mediates permissions and questions. */
 export declare class Orchestrator {
@@ -75,6 +79,10 @@ export declare class Orchestrator {
     /** Agent+conversation keys a run is currently resuming (see execute). */
     private readonly resuming;
     private readonly queue;
+    /** Manager agent id -> the request run holding its main conversation right now. */
+    private readonly liveRequests;
+    /** Chat messages waiting for a live Manager request run, by task id (see interruptManager). */
+    private readonly inbox;
     private readonly waiters;
     private readonly pendingPermissions;
     private readonly pendingQuestions;
@@ -105,6 +113,19 @@ export declare class Orchestrator {
     providerProblem(agent: Agent): Promise<string | undefined>;
     emitAgent(agent: Agent): void;
     handleUserMessage(input: UserMessageInput): Promise<Task>;
+    /** The Manager's request run that holds its main conversation for `projectPath`, if one is live. */
+    private liveRequest;
+    /**
+     * A chat message for a Manager that is working. A question it is waiting on takes the message as its
+     * answer; otherwise it rides on the run's next tool result (withInbox), so the Manager handles it in
+     * context without aborting or re-reading anything. A Manager with no live run (idle, or delegated
+     * and waiting for workers) is free: the message starts a request on the same conversation.
+     */
+    private interruptManager;
+    /** Waiting user messages as one block for the Manager, or undefined. Consumes them. */
+    private takeMessages;
+    /** Manager tools whose results carry any user message that arrived during the call. */
+    private withInbox;
     startTask(taskId: string): void;
     private pump;
     awaitTask(taskId: string): Promise<Task>;
@@ -154,6 +175,25 @@ export declare class Orchestrator {
     private loadSession;
     private saveSession;
     private buildPrompt;
+    /** The "## Worker results" wake prompt for a request; marks the outcomes it hands over as reported. */
+    private wakeBlock;
+    /**
+     * A delegated request's children: still open (a failure being retried automatically counts as open)
+     * and not yet reported. Brainstorm (meeting) tasks are left out: the brainstorm tool collects them in the run.
+     */
+    private delegation;
+    private readonly wakeTimers;
+    /** Check a delegated request soon; several children finishing together cause one wake. */
+    private scheduleWake;
+    private wakeParentOf;
+    /** Check every delegated request (boot, or after a Manager's run freed its conversation). */
+    resumeDelegated(managerId?: string): Promise<void>;
+    /**
+     * Wake a delegated request's Manager once every child is finished, or earlier when one failed and
+     * needs a decision. It waits while the Manager has another run live, so one conversation stays one
+     * line of thought (execute re-checks when that run ends).
+     */
+    private checkWake;
     /** Project path the agent memory of a task is kept under ("" = the world root). */
     private memoryKey;
     /** Append a finished worker task to its agent's memory (any provider). */
@@ -177,5 +217,7 @@ export declare class Orchestrator {
     private bridgeToolsFor;
     private appendLog;
     private finish;
+    /** running -> delegated; the wake check then runs once the run has released the conversation. */
+    private delegate;
     private execute;
 }

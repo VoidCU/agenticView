@@ -8,7 +8,8 @@ export const BOARD_COLORS: Record<BoardColumn, string> = { queued: "#ffe49a", ru
 export function boardColumn(task: Task): BoardColumn | undefined {
   // Resolved failures count as done for display purposes
   if (task.status === "failed" && task.resolution) return "done";
-  return task.status === "assigned" ? "queued" : task.status === "cancelled" ? undefined : task.status;
+  // A delegated request is still in progress: the Manager is free while its workers run.
+  return task.status === "assigned" ? "queued" : task.status === "delegated" ? "running" : task.status === "cancelled" ? undefined : task.status;
 }
 export function podBoard(spaceId: string, agents: Agent[], tasks: Task[], layout?: OfficeLayout | null) {
   const { placements } = planOffice(agents, layout);

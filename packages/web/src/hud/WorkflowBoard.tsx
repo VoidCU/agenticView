@@ -19,6 +19,7 @@ export const STATUS_LABEL: Record<Task["status"], string> = {
   assigned: "Assigned",
   running: "Running",
   waiting: "Waiting on you",
+  delegated: "With the team",
   done: "Done",
   failed: "Failed",
   cancelled: "Cancelled",

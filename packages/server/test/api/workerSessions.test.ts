@@ -13,7 +13,7 @@ import { bridge, cleanSessionId, complete, nextTask, postJson, report, resetWork
 let home: string;
 let proj: string;
 let server: RunningServer | undefined;
-const saved = { home: process.env.AGENTICVIEW_HOME, project: process.env.AGENTICVIEW_PROJECT, chunk: process.env.AGENTICVIEW_AWAIT_CHUNK_SECONDS };
+const saved = { home: process.env.AGENTICVIEW_HOME, project: process.env.AGENTICVIEW_PROJECT };
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "av-h-"));
   proj = await mkdtemp(join(tmpdir(), "av-p-"));
@@ -26,8 +26,6 @@ afterEach(async () => {
   process.env.AGENTICVIEW_HOME = saved.home;
   if (saved.project === undefined) delete process.env.AGENTICVIEW_PROJECT;
   else process.env.AGENTICVIEW_PROJECT = saved.project;
-  if (saved.chunk === undefined) delete process.env.AGENTICVIEW_AWAIT_CHUNK_SECONDS;
-  else process.env.AGENTICVIEW_AWAIT_CHUNK_SECONDS = saved.chunk;
   await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   await rm(proj, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
@@ -102,39 +100,33 @@ describe("Claude Code session registry and affinity (HTTP)", () => {
     expect(events.some((e) => e.type === "sessions.updated")).toBe(true);
   });
 
-  it("guards a Manager against waiting on a task queued for its own session, and chunks long await_tasks", async () => {
-    process.env.AGENTICVIEW_AWAIT_CHUNK_SECONDS = "1";
+  it("a session Manager hands out work and completes, freeing its slot; the office wakes it with the results", async () => {
     const { s, call } = await boot();
     const manager = await s.world.registry.ensureManager();
     await s.world.registry.update(manager.id, { provider: "claude-session" });
     const orion = await s.world.registry.create({ name: "Orion", specialty: "", provider: "claude-session" });
-    await s.orchestrator.handleUserMessage({ agentId: manager.id, text: "plan it" });
+    const req = await s.orchestrator.handleUserMessage({ agentId: manager.id, text: "plan it" });
     const m = await call("sess-M", "/api/worker/claim", { waitMs: 3000 });
+    // Capacity 1 with the worker bound to the Manager's own session: no deadlock, since the Manager does not wait.
+    await s.world.sessionRuntime!.setCapacity("sess-M", 1);
+    await s.world.registry.update(orion.id, { session: { id: "sess-M", name: "M" } });
     const runId = m.task.runId as string;
-    expect(m.task.bridgeTools.map((t: { name: string }) => t.name)).toContain("await_tasks");
-
-    // Unbound worker: fine to assign; await_tasks returns early with stillRunning (no other session).
+    expect(m.task.bridgeTools.map((t: { name: string }) => t.name)).not.toContain("await_tasks");
+    expect(m.task.systemPrompt).toContain("Never wait for workers");
     const assigned = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "assign_task", args: { agentId: orion.id, title: "t", description: "do" } });
     expect(assigned.result).toMatch(/^Started task/);
-    const taskId = /Started task (\S+)/.exec(assigned.result)![1]!;
-    const waited = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "await_tasks", args: { taskIds: [taskId] } });
-    expect(JSON.parse(waited.result)).toMatchObject({ stillRunning: [{ id: taskId }], message: expect.stringContaining("await_tasks again") });
-
-    // Bound to the manager's own session with a free slot beside the manager: fine (a subagent runs it).
-    await s.world.registry.update(orion.id, { session: { id: "sess-M", name: "M" } });
-    const ok = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "await_tasks", args: { taskIds: [taskId] } });
-    expect(ok.result).not.toMatch(/deadlock/);
-    // Capacity 1: the manager holds the only slot, so both tools refuse with a clear message.
-    await s.world.sessionRuntime!.setCapacity("sess-M", 1);
-    const again = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "await_tasks", args: { taskIds: [taskId] } });
-    expect(again.result).toMatch(/deadlock/);
-    expect(again.result).toContain("open another Claude Code session");
-    expect(again.result).toContain("raise that session's capacity");
-    const assign2 = await call("sess-M", `/api/worker/${runId}/bridge`, { name: "assign_task", args: { agentId: orion.id, title: "t2", description: "do" } });
-    expect(assign2.result).toMatch(/^ERROR: Orion is bound to Claude Code session/);
-    // Let the manager run end so nothing writes into the project while it is removed.
-    await s.orchestrator.cancel(m.task.taskId);
-    await new Promise((r) => setTimeout(r, 100));
+    await call("sess-M", `/api/worker/${runId}/complete`, { text: "Orion is on it." });
+    await waitFor(async () => (await s.world.tasks.get(req.id))?.status === "delegated");
+    // The freed slot takes Orion's task.
+    const w = await call("sess-M", "/api/worker/claim", { waitMs: 3000 });
+    expect(w.task.prompt).toContain("do");
+    await call("sess-M", `/api/worker/${w.task.runId}/complete`, { text: "did it" });
+    // Then the Manager is woken with the outcome, as a new run on the session.
+    const wake = await call("sess-M", "/api/worker/claim", { waitMs: 3000 });
+    expect(wake.task.taskId).toBe(req.id);
+    expect(wake.task.prompt).toMatch(/## Worker results[^]*"t" by Orion: done[^]*did it/);
+    await call("sess-M", `/api/worker/${wake.task.runId}/complete`, { text: "Report: done." });
+    expect((await s.orchestrator.awaitTask(req.id)).result).toBe("Report: done.");
   });
 
   it("rename and forget over the session list", async () => {

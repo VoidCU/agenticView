@@ -17,6 +17,8 @@ Release notes for tagged versions are generated on GitHub. This file collects wh
 - The default plan puts the lounge in the centre with the Manager's Office beside it, and My Office, Production and Research on the west side.
 - Walk mode starts in My Office facing the wall screen; the *You* marker sits there on the mini-map, which now centres on the floor plan.
 - The Manager starts production or research work only when you explicitly ask for it, routes it to the Producer or the Research team, and says so when that team does not exist.
+- **The Manager no longer waits for workers.** `await_tasks` is gone: after `assign_task` the Manager ends its turn and its request becomes *delegated* (shown as *With the team*), so the Manager is idle and free to chat. When all of a request's workers finish, or one fails, the office wakes the Manager in the same conversation with a compact `## Worker results` block (only outcomes it has not seen yet), and it assigns follow-ups, retries, or reports. Requests delegated before a restart are woken on the next start. A session-backed Manager no longer occupies a session slot while its workers run, so the capacity-1 deadlock guard is gone.
+- Messaging the Manager while it works no longer starts a second, fresh conversation. The message joins the running turn on its next tool result; a message the turn ends before reading becomes one follow-up request on the same conversation. A message sent while the Manager waits on a question answers it.
 
 ### Fixed
 - Walk-mode whiteboards: the overview sticky notes no longer cover the task rows up close, and the *+N more* footer no longer overlaps the last row.
