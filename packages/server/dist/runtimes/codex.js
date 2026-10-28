@@ -199,6 +199,9 @@ export function codexThreadOptions(req, platform) {
         opts.model = req.model;
     if (req.effort)
         opts.modelReasoningEffort = req.effort;
+    // The user's ~/.codex config may turn web search on; an agent without web access never gets it.
+    if (!req.tools.web)
+        opts.webSearchMode = "disabled";
     return opts;
 }
 /** Env var a custom endpoint's key is passed in (model_providers.<id>.env_key); only ever in the child env. */

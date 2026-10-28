@@ -1,11 +1,11 @@
 import { z } from "zod";
 export declare const TaskStatusSchema: z.ZodEnum<{
+    done: "done";
     queued: "queued";
     assigned: "assigned";
     running: "running";
     waiting: "waiting";
     delegated: "delegated";
-    done: "done";
     failed: "failed";
     cancelled: "cancelled";
 }>;
@@ -50,12 +50,12 @@ export declare const TaskSchema: z.ZodObject<{
     title: z.ZodString;
     description: z.ZodString;
     status: z.ZodEnum<{
+        done: "done";
         queued: "queued";
         assigned: "assigned";
         running: "running";
         waiting: "waiting";
         delegated: "delegated";
-        done: "done";
         failed: "failed";
         cancelled: "cancelled";
     }>;
@@ -68,11 +68,11 @@ export declare const TaskSchema: z.ZodObject<{
     session: z.ZodOptional<z.ZodObject<{
         provider: z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
         }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
         sessionId: z.ZodString;
     }, z.core.$strip>>;
@@ -88,11 +88,11 @@ export declare const TaskSchema: z.ZodObject<{
     tier: z.ZodOptional<z.ZodObject<{
         provider: z.ZodUnion<readonly [z.ZodEnum<{
             claude: "claude";
-            "claude-session": "claude-session";
             codex: "codex";
+            gemini: "gemini";
+            "claude-session": "claude-session";
             copilot: "copilot";
             antigravity: "antigravity";
-            gemini: "gemini";
         }>, z.ZodType<`custom:${string}`, unknown, z.core.$ZodTypeInternals<`custom:${string}`, unknown>>]>;
         model: z.ZodOptional<z.ZodString>;
         effort: z.ZodOptional<z.ZodEnum<{

@@ -38,9 +38,26 @@ export class TaskService {
             task.tier = input.tier;
         if (input.parentId)
             task.parentId = input.parentId;
+        if (input.mail)
+            task.mail = { threadIds: [...new Set(input.mail.threadIds)] };
         await this.store.write(task.id, task);
         this.onChange(task, "state");
         return task;
+    }
+    /** Link more Gmail threads to a task (a live request the user forwarded more mail to). Deduplicated. */
+    addMailThreads(id, threadIds) {
+        return this.locked(id, async () => {
+            const cur = await this.store.read(id);
+            if (!cur)
+                throw new Error(`Unknown task ${id}`);
+            const merged = [...new Set([...(cur.mail?.threadIds ?? []), ...threadIds])];
+            if (merged.length === 0)
+                return cur;
+            const next = { ...cur, mail: { threadIds: merged } };
+            await this.store.write(id, next);
+            this.onChange(next, "state");
+            return next;
+        });
     }
     get(id) {
         return this.store.read(id);

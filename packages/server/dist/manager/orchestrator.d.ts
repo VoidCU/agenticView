@@ -70,7 +70,22 @@ export interface UserMessageInput {
     projectPath?: string;
     /** Internal: the request whose run ended before it read this message (see execute). */
     followUpOf?: string;
+    /** Gmail threads this message is about. The request carries them; its mail work tasks run restricted. */
+    mail?: {
+        threadIds: string[];
+    };
 }
+/**
+ * Runs that must not edit files, run commands or use worker bridge tools: read-only tasks (brainstorms)
+ * and work tasks that answer Gmail threads, whose untrusted email content must never drive an agent
+ * that can change anything. Mail *requests* are not restricted: the Manager still delegates them.
+ */
+export declare function isRestricted(task: Task): boolean;
+/**
+ * A work task answering Gmail threads. Its result is shaped by untrusted email, so it never reaches the
+ * agent's memory or recent-work digest (later unrestricted runs read those).
+ */
+export declare function isMailWork(task: Task): boolean;
 /** Runs tasks on runtimes, keeps the Manager's map truthful, and mediates permissions and questions. */
 export declare class Orchestrator {
     private readonly deps;
@@ -83,6 +98,8 @@ export declare class Orchestrator {
     private readonly liveRequests;
     /** Chat messages waiting for a live Manager request run, by task id (see interruptManager). */
     private readonly inbox;
+    /** Gmail threads that arrived with the inbox messages, by task id (carried to a follow-up request). */
+    private readonly inboxMail;
     private readonly waiters;
     private readonly pendingPermissions;
     private readonly pendingQuestions;

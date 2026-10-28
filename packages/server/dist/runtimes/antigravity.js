@@ -75,7 +75,7 @@ export function buildAgyArgs(input) {
         args.push("--effort", input.effort);
     if (input.sessionId)
         args.push("--conversation", input.sessionId);
-    args.push(...modeArgs(input.permissionMode, input.bridge));
+    args.push(...(input.readOnly && !input.bridge ? [] : modeArgs(input.permissionMode, input.bridge)));
     return args;
 }
 /** Tells the model up front which tool groups are blocked, so it does not waste turns on them. */
@@ -453,7 +453,7 @@ export class AntigravityRuntime {
                 await writeFile(promptFile, promptText, "utf8");
                 promptText = `The full task is in the file ${promptFile}. Read that whole file first with view_file, then follow it exactly.`;
             }
-            const args = buildAgyArgs({ prompt: promptText, model: req.model, effort: req.effort, sessionId: req.sessionId, permissionMode: req.permissionMode, tools: req.tools, bridge: useBridge });
+            const args = buildAgyArgs({ prompt: promptText, model: req.model, effort: req.effort, sessionId: req.sessionId, permissionMode: req.permissionMode, tools: req.tools, bridge: useBridge, readOnly: req.readOnly });
             const env = {};
             for (const [k, v] of Object.entries(process.env))
                 if (typeof v === "string")

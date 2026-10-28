@@ -45,6 +45,8 @@ export interface AgyArgsInput {
     tools: ToolAllowance;
     /** Whether the run exposes bridge tools over MCP (forces skip-permissions, see above). */
     bridge?: boolean;
+    /** Restricted run (read-only task, mail work): agy's default mode, which denies shell and MCP calls headless. */
+    readOnly?: boolean;
 }
 export declare const AGY_EDIT_TOOLS: readonly ["write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"];
 export declare const AGY_SHELL_TOOLS: readonly ["run_command", "send_command_input", "notebook_execution"];

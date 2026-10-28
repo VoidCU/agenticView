@@ -8,7 +8,7 @@ import { AgentMemory } from "./agents/memory.js";
 import { AgentRegistry } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { coverInsteadOfRetry } from "./tasks/retryGuard.js";
-import { Orchestrator } from "./manager/orchestrator.js";
+import { Orchestrator, isMailWork, isRestricted } from "./manager/orchestrator.js";
 import { readJsonFile, writeJsonFile } from "./store/jsonStore.js";
 import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.js";
 import { describeWorkSeatMoves, isTerminal, migrateWorkSeats } from "@agenticview/shared";
@@ -18,6 +18,11 @@ import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
 import { cleanupCopilotTemp } from "./runtimes/copilot.js";
 import { GameService } from "./games/gameService.js";
 import { IdleBehaviourService } from "./games/idleBehaviour.js";
+import { MailAccounts } from "./mail/accounts.js";
+import { OAuthFlow } from "./mail/oauth.js";
+import { GmailClient } from "./mail/gmail.js";
+import { MailStore } from "./mail/store.js";
+import { MailHttpError, MailService } from "./mail/service.js";
 // ─────────────────────────────────────────────────────────────────────────────
 export function globalConfigPath() {
     return join(globalRoot(), "config.json");
@@ -192,13 +197,18 @@ export async function createWorld(ref, opts) {
     registry.useLayout(() => layout, async (workerCount) => {
         await editLayout((current) => growLayout(current, workerCount));
     });
+    // The mail service is built further down; finished mail tasks reach it once it exists (drafts from results).
+    let mailService;
     // Only state changes go on the wire, and never with the log: the web feed is built from run.events.
     const tasks = new TaskService(ref.kind === "project" ? join(root, "tasks") : join(root, "hub-tasks"), (task, kind) => {
-        if (kind === "state")
+        if (kind === "state") {
             opts.bus.emit({ type: "task.updated", task: toWire(task) });
+            void mailService?.onTaskChanged(task);
+        }
     });
     await tasks.recoverInterrupted();
-    await registry.ensureManager();
+    // The manager cannot be removed, so its id is stable for this world.
+    const managerAgentId = (await registry.ensureManager()).id;
     if (ref.kind === "project") {
         await cleanupGeminiSettings(ref.projectPath);
         await cleanupAntigravityPlugins(ref.projectPath);
@@ -375,8 +385,9 @@ export async function createWorld(ref, opts) {
         }
         return historyWork(agentId, exceptTaskId);
     };
+    // Mail work tasks are left out: their results are shaped by untrusted email (see isMailWork).
     const historyWork = async (agentId, exceptTaskId) => (await tasks.list())
-        .filter((t) => t.assigneeId === agentId && t.id !== exceptTaskId && isTerminal(t.status))
+        .filter((t) => t.assigneeId === agentId && t.id !== exceptTaskId && isTerminal(t.status) && !isMailWork(t))
         .sort((a, b) => (b.finishedAt ?? b.createdAt).localeCompare(a.finishedAt ?? a.createdAt))
         .slice(0, 5)
         .map((t) => {
@@ -411,8 +422,9 @@ export async function createWorld(ref, opts) {
             sessionAgentIds: async () => (await sessionAgents()).map((a) => a.id),
             prepare: async (req) => {
                 const task = req.taskId ? await tasks.get(req.taskId) : undefined;
-                // A brainstorm must not inherit the saved subagent's editing tools or instructions.
-                const readOnly = task?.readOnly === true;
+                // A brainstorm or a mail work task (restricted run: req.readOnly) must not inherit the saved
+                // subagent's editing tools or instructions.
+                const readOnly = req.readOnly === true || (task ? isRestricted(task) : false);
                 const target = task?.projectPath || (ref.kind === "project" ? ref.projectPath : "");
                 const work = await recentWork(req.agent.id, req.taskId, task?.projectPath);
                 // Hub runs without a target project: no folder to put a subagent in, the session does it itself.
@@ -592,6 +604,28 @@ export async function createWorld(ref, opts) {
         }
         return { ok: true };
     };
+    // Gmail: global accounts + OAuth flow from createServer, or defaults (tests that call createWorld directly).
+    const mailAccounts = opts.mail?.accounts ?? new MailAccounts();
+    const mailFetch = opts.mail?.fetch ?? fetch;
+    const mailFlow = opts.mail?.flow ??
+        new OAuthFlow(mailAccounts, () => `${opts.bridgeUrl()}/oauth/google/callback`, () => opts.bus.emit({ type: "mail.changed", what: "accounts" }), mailFetch);
+    const mail = new MailService({
+        store: new MailStore(join(root, "mail")),
+        accounts: mailAccounts,
+        gmail: new GmailClient((id) => mailFlow.accessToken(id), mailFetch),
+        emit: (what) => opts.bus.emit({ type: "mail.changed", what }),
+        forgetToken: (id) => mailFlow.forget(id),
+        managerId: () => managerAgentId,
+        // Resolved at call time. The hub has no project for the manager's mail request to work in.
+        startRequest: async (input) => {
+            if (ref.kind !== "project")
+                throw new MailHttpError("Send to Atlas works in a project office: open the project's office and send the mail from there", 400);
+            return orchestrator.handleUserMessage(input);
+        },
+        agentName: async (id) => (await registry.get(id))?.name,
+        taskChildren: (id) => tasks.children(id),
+    });
+    mailService = mail;
     return {
         ref,
         root,
@@ -736,6 +770,7 @@ export async function createWorld(ref, opts) {
         }, agentId, desk.space, desk.seat),
         decorate,
         snapshot,
+        mail,
     };
 }
 /** Wire form of a task: identical minus the (potentially large) log. */

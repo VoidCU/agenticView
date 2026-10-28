@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename, readdir, unlink } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, readdir, unlink, chmod } from "node:fs/promises";
 import { dirname, join } from "node:path";
 function code(e) {
     return e?.code;
@@ -31,14 +31,20 @@ async function settled(file) {
     if (p)
         await p;
 }
-/** Atomic JSON write: temp file in the same directory, then rename over the target. Serialized per path. */
-export function writeJsonFile(file, value) {
+/**
+ * Atomic JSON write: temp file in the same directory, then rename over the target. Serialized per path.
+ * `opts.mode` (e.g. `0o600` for secrets) is set on the temp file before the rename, so the target never
+ * exists with a wider mode. Ignored by Windows.
+ */
+export function writeJsonFile(file, value, opts = {}) {
     const prev = inflight.get(file) ?? Promise.resolve();
     const work = prev.then(async () => {
         await mkdir(dirname(file), { recursive: true });
         const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
         try {
-            await writeFile(tmp, JSON.stringify(value, null, 2), "utf8");
+            await writeFile(tmp, JSON.stringify(value, null, 2), { encoding: "utf8", ...(opts.mode !== undefined ? { mode: opts.mode } : {}) });
+            if (opts.mode !== undefined)
+                await chmod(tmp, opts.mode);
             await renameWithRetry(tmp, file);
         }
         catch (e) {

@@ -9,12 +9,21 @@ import type { Runtime, BridgeTool } from "./runtimes/types.js";
 import type { ToolRegistry } from "./bridge/toolRegistry.js";
 import type { EventBus } from "./events/bus.js";
 import { type Agent, type Placement, type Task } from "@agenticview/shared";
+import { MailAccounts } from "./mail/accounts.js";
+import { OAuthFlow } from "./mail/oauth.js";
+import { MailService } from "./mail/service.js";
 export interface WorldOptions {
     runtimes: Map<Provider, Runtime>;
     bus: EventBus;
     toolRegistry: ToolRegistry;
     bridgeUrl: () => string;
     workerTools?: (agent: Agent, task: Task) => BridgeTool[];
+    /** Global Gmail accounts + the server's OAuth flow, built in createServer (consumed by mail services). */
+    mail?: {
+        accounts: MailAccounts;
+        flow: OAuthFlow;
+        fetch?: typeof fetch;
+    };
 }
 /** Outcome of World.retryTask: re-run, or already covered and marked solved. */
 export interface RetryResult {
@@ -110,6 +119,8 @@ export interface World {
      * (move_worker semantics, including the designated-desk swap). Returns the tool message ("ERROR: ..." on refusal).
      */
     moveDesk: (agentId: string, desk: Placement) => Promise<string>;
+    /** This office's Gmail sources, pulled threads and tags (accounts are global). */
+    mail: MailService;
 }
 export declare function globalConfigPath(): string;
 export declare function readGlobalConfig(): Promise<GlobalConfig>;

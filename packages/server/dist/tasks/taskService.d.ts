@@ -13,6 +13,8 @@ export interface CreateTaskInput {
     /** Brainstorm work in the Meeting Room: the assignee does not walk to its workSeat. */
     meeting?: boolean;
     tier?: Task["tier"];
+    /** Gmail threads this task answers. A work task carrying mail runs restricted (see Orchestrator). */
+    mail?: Task["mail"];
 }
 export type TaskPatch = Partial<Pick<Task, "result" | "error" | "session">>;
 /** `state`: status/result/session changed (worth broadcasting). `log`: only the log grew. */
@@ -25,6 +27,8 @@ export declare class TaskService {
     constructor(dir: string, onChange: (t: Task, kind: TaskChangeKind) => void);
     private locked;
     create(input: CreateTaskInput): Promise<Task>;
+    /** Link more Gmail threads to a task (a live request the user forwarded more mail to). Deduplicated. */
+    addMailThreads(id: string, threadIds: string[]): Promise<Task>;
     get(id: string): Promise<Task | undefined>;
     list(): Promise<Task[]>;
     children(id: string): Promise<Task[]>;
