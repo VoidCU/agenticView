@@ -186,6 +186,34 @@ describe("GmailClient", () => {
     expect(JSON.parse(c.body!)).toEqual({ message: { raw: "RAWDATA", threadId: "gt" } });
   });
 
+  it("updateDraft puts id, message.raw and threadId", async () => {
+    const { impl, calls } = fake(() => json({ id: "d1" }));
+    await client(impl).updateDraft("a1", "d1", "gt", "RAW2");
+    const c = calls[0]!;
+    expect(c.method).toBe("PUT");
+    expect(c.url).toBe("https://gmail.googleapis.com/gmail/v1/users/me/drafts/d1");
+    expect(JSON.parse(c.body!)).toEqual({ id: "d1", message: { raw: "RAW2", threadId: "gt" } });
+  });
+
+  it("sendDraftById posts the draft id to drafts/send", async () => {
+    const { impl, calls } = fake(() => json({ id: "m9" }));
+    await client(impl).sendDraftById("a1", "d1");
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.url).toBe("https://gmail.googleapis.com/gmail/v1/users/me/drafts/send");
+    expect(JSON.parse(calls[0]!.body!)).toEqual({ id: "d1" });
+  });
+
+  it("deleteDraft deletes, and a draft already gone (404) is fine", async () => {
+    const { impl, calls } = fake(() => new Response(null, { status: 204 }));
+    await client(impl).deleteDraft("a1", "d1");
+    expect(calls[0]!.method).toBe("DELETE");
+    expect(calls[0]!.url).toBe("https://gmail.googleapis.com/gmail/v1/users/me/drafts/d1");
+    const gone = fake(() => json({ error: "nope" }, 404));
+    await expect(client(gone.impl).deleteDraft("a1", "d1")).resolves.toBeUndefined();
+    const broken = fake(() => json({ error: "no" }, 403));
+    await expect(client(broken.impl).deleteDraft("a1", "d1")).rejects.toThrow(/403/);
+  });
+
   it("send and modifyThread post the right bodies", async () => {
     const { impl, calls } = fake(() => json({}));
     const gc = client(impl);

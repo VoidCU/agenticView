@@ -58,6 +58,15 @@ function fakeGmail() {
     async send(accountId: string, gid: string, raw: string) {
       calls.push({ fn: "send", args: [accountId, gid, raw] });
     },
+    async updateDraft(accountId: string, draftId: string, gid: string, raw: string) {
+      calls.push({ fn: "updateDraft", args: [accountId, draftId, gid, raw] });
+    },
+    async sendDraftById(accountId: string, draftId: string) {
+      calls.push({ fn: "sendDraftById", args: [accountId, draftId] });
+    },
+    async deleteDraft(accountId: string, draftId: string) {
+      calls.push({ fn: "deleteDraft", args: [accountId, draftId] });
+    },
   };
 }
 
@@ -232,6 +241,71 @@ describe("MailService draft actions", () => {
     expect(mime).toContain("In-Reply-To: <m3@x.com>\r\n");
     expect(mime).toContain("References: <m1@x.com> <m2@example.com> <m3@x.com> <m4@example.com>\r\n");
     expect(mime.endsWith("\r\n\r\nHi,\r\nIt is attached.")).toBe(true);
+  });
+
+  const mimeOf = (raw: unknown) => Buffer.from(raw as string, "base64url").toString("utf8");
+
+  it("an edit keeps the Gmail draft id, and saving again updates that Gmail draft", async () => {
+    const { svc, gmail, t, draftId, store } = await withDraft();
+    await svc.saveDraftToGmail(t.id, draftId);
+    const edited = await svc.editDraft(t.id, draftId, "Edited body");
+    expect(edited.gmailDraftId).toBe("gd_1");
+    expect((await store.threads.read(t.id))!.drafts[0]!.gmailDraftId).toBe("gd_1");
+    const again = await svc.saveDraftToGmail(t.id, draftId);
+    expect(again.gmailDraftId).toBe("gd_1");
+    expect(gmail.calls.filter((c) => c.fn === "createDraft")).toHaveLength(1);
+    const upd = gmail.calls.filter((c) => c.fn === "updateDraft");
+    expect(upd).toHaveLength(1);
+    expect(upd[0]!.args.slice(0, 3)).toEqual([t.accountId, "gd_1", "g1"]);
+    expect(mimeOf(upd[0]!.args[3]).endsWith("\r\n\r\nEdited body")).toBe(true);
+  });
+
+  it("sending a draft saved to Gmail updates and sends that Gmail draft (no second copy)", async () => {
+    const { svc, gmail, t, draftId, store } = await withDraft();
+    await svc.saveDraftToGmail(t.id, draftId);
+    await svc.editDraft(t.id, draftId, "Final body");
+    const sent = await svc.sendDraft(t.id, draftId);
+    expect(sent.sentAt).toBe("2026-10-28T12:00:00.000Z");
+    expect(sent.gmailDraftId).toBeUndefined();
+    expect((await store.threads.read(t.id))!.drafts[0]!.gmailDraftId).toBeUndefined();
+    expect(gmail.calls.map((c) => c.fn)).toEqual(["createDraft", "updateDraft", "sendDraftById"]);
+    expect(mimeOf(gmail.calls[1]!.args[3]).endsWith("\r\n\r\nFinal body")).toBe(true);
+    expect(gmail.calls[2]!.args).toEqual([t.accountId, "gd_1"]);
+  });
+
+  it("sending a draft never saved to Gmail uses messages/send", async () => {
+    const { svc, gmail, t, draftId } = await withDraft();
+    await svc.sendDraft(t.id, draftId);
+    expect(gmail.calls.map((c) => c.fn)).toEqual(["send"]);
+  });
+
+  it("discarding a draft saved to Gmail deletes the Gmail draft; an unsaved or sent one makes no call", async () => {
+    const { svc, gmail, t, draftId, store } = await withDraft();
+    await svc.saveDraftToGmail(t.id, draftId);
+    await svc.discardDraft(t.id, draftId);
+    expect(gmail.calls.map((c) => c.fn)).toEqual(["createDraft", "deleteDraft"]);
+    expect(gmail.calls[1]!.args).toEqual([t.accountId, "gd_1"]);
+    expect((await store.threads.read(t.id))!.drafts).toHaveLength(0);
+    // Unsaved draft: local only.
+    await svc.onTaskChanged(task({ id: "t_w2", result: "Again.", mail: { threadIds: [t.id] } }));
+    const d2 = (await store.threads.read(t.id))!.drafts[0]!.id;
+    await svc.discardDraft(t.id, d2);
+    // A sent draft (already left Gmail's drafts) is removed locally only.
+    await svc.onTaskChanged(task({ id: "t_w3", result: "Third.", mail: { threadIds: [t.id] } }));
+    const d3 = (await store.threads.read(t.id))!.drafts[0]!.id;
+    await svc.saveDraftToGmail(t.id, d3);
+    await svc.sendDraft(t.id, d3);
+    await svc.discardDraft(t.id, d3);
+    expect(gmail.calls.map((c) => c.fn)).toEqual(["createDraft", "deleteDraft", "createDraft", "updateDraft", "sendDraftById"]);
+  });
+
+  it("discarding after the account was removed drops the draft locally", async () => {
+    const { svc, gmail, t, draftId, store, accounts, account } = await withDraft();
+    await svc.saveDraftToGmail(t.id, draftId);
+    await accounts.remove(account.id);
+    await svc.discardDraft(t.id, draftId);
+    expect(gmail.calls.map((c) => c.fn)).toEqual(["createDraft"]);
+    expect((await store.threads.read(t.id))!.drafts).toHaveLength(0);
   });
 
   it("goes through the reconnect guard", async () => {

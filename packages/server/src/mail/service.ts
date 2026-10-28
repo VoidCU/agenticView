@@ -455,19 +455,27 @@ export class MailService {
     return { ...t, drafts: t.drafts.map((x) => (x.id === d.id ? d : x)) };
   }
 
-  /** New body; a Gmail copy saved earlier no longer matches, so its id is dropped. Sent drafts are final. */
+  /**
+   * New body. The Gmail draft saved earlier keeps its id: the next save or send updates that same Gmail
+   * draft, so no stale copy is left behind. Sent drafts are final.
+   */
   async editDraft(key: string, draftId: string, body: string): Promise<MailDraft> {
     return this.withDraft(key, draftId, async (t, d) => {
       if (d.sentAt) throw bad("This draft was already sent");
-      const { gmailDraftId: _old, ...rest } = d;
-      void _old;
-      const next: MailDraft = { ...rest, body };
+      const next: MailDraft = { ...d, body };
       return { next: MailService.replace(t, next), out: next };
     });
   }
 
+  /** Removes the draft; its saved Gmail copy (not yet sent) is deleted too, unless the account is gone. */
   async discardDraft(key: string, draftId: string): Promise<void> {
-    await this.withDraft(key, draftId, async (t, d) => ({ next: { ...t, drafts: t.drafts.filter((x) => x.id !== d.id) }, out: undefined }));
+    await this.withDraft(key, draftId, async (t, d) => {
+      const gmailDraftId = d.gmailDraftId;
+      if (gmailDraftId && !d.sentAt && (await this.deps.accounts.list()).some((a) => a.id === t.accountId)) {
+        await this.gmailCall(t.accountId, () => this.deps.gmail.deleteDraft(t.accountId, gmailDraftId));
+      }
+      return { next: { ...t, drafts: t.drafts.filter((x) => x.id !== d.id) }, out: undefined };
+    });
   }
 
   /** The draft as a reply MIME (base64url) to the newest message not sent by the account itself. */
@@ -488,24 +496,43 @@ export class MailService {
     });
   }
 
-  /** Saves the draft as a Gmail draft reply in its thread and records the Gmail draft id. */
+  /**
+   * Saves the draft as a Gmail draft reply in its thread and records the Gmail draft id. Saved before:
+   * that Gmail draft is updated in place instead of creating another.
+   */
   async saveDraftToGmail(key: string, draftId: string): Promise<MailDraft> {
     return this.withDraft(key, draftId, async (t, d) => {
       if (d.sentAt) throw bad("This draft was already sent");
       const raw = await this.replyRaw(t, d.body);
-      const gmailDraftId = await this.gmailCall(t.accountId, () => this.deps.gmail.createDraft(t.accountId, t.gmailThreadId, raw));
+      const saved = d.gmailDraftId;
+      const gmailDraftId = await this.gmailCall(t.accountId, async () => {
+        if (!saved) return this.deps.gmail.createDraft(t.accountId, t.gmailThreadId, raw);
+        await this.deps.gmail.updateDraft(t.accountId, saved, t.gmailThreadId, raw);
+        return saved;
+      });
       const next: MailDraft = { ...d, gmailDraftId };
       return { next: MailService.replace(t, next), out: next };
     });
   }
 
-  /** Sends the draft as a reply in its thread. Runs under the thread lock, so it can never send twice. */
+  /**
+   * Sends the draft as a reply in its thread. Runs under the thread lock, so it can never send twice. A
+   * draft saved to Gmail is updated to the current body and sent as that Gmail draft (Gmail then drops it
+   * from Drafts), so no saved copy remains; otherwise it goes out via messages/send.
+   */
   async sendDraft(key: string, draftId: string): Promise<MailDraft> {
     return this.withDraft(key, draftId, async (t, d) => {
       if (d.sentAt) throw bad("This draft was already sent");
       const raw = await this.replyRaw(t, d.body);
-      await this.gmailCall(t.accountId, () => this.deps.gmail.send(t.accountId, t.gmailThreadId, raw));
-      const next: MailDraft = { ...d, sentAt: this.now().toISOString() };
+      const saved = d.gmailDraftId;
+      await this.gmailCall(t.accountId, async () => {
+        if (!saved) return this.deps.gmail.send(t.accountId, t.gmailThreadId, raw);
+        await this.deps.gmail.updateDraft(t.accountId, saved, t.gmailThreadId, raw);
+        await this.deps.gmail.sendDraftById(t.accountId, saved);
+      });
+      const { gmailDraftId: _sent, ...rest } = d;
+      void _sent;
+      const next: MailDraft = { ...rest, sentAt: this.now().toISOString() };
       return { next: MailService.replace(t, next), out: next };
     });
   }

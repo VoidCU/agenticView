@@ -215,6 +215,28 @@ export class GmailClient {
     return d.id;
   }
 
+  /** Replaces a saved Gmail draft's message (the same draft id, so no second copy). */
+  async updateDraft(accountId: string, draftId: string, gmailThreadId: string, raw: string): Promise<void> {
+    await this.request(accountId, `drafts/${encodeURIComponent(draftId)}`, {
+      method: "PUT",
+      body: { id: draftId, message: { raw, threadId: gmailThreadId } },
+    });
+  }
+
+  /** Sends a saved Gmail draft; Gmail removes it from Drafts. */
+  async sendDraftById(accountId: string, draftId: string): Promise<void> {
+    await this.request(accountId, "drafts/send", { method: "POST", body: { id: draftId } });
+  }
+
+  /** Deletes a saved Gmail draft; one that is already gone (404) is fine. */
+  async deleteDraft(accountId: string, draftId: string): Promise<void> {
+    try {
+      await this.request(accountId, `drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
+    } catch (e) {
+      if ((e as { status?: number }).status !== 404) throw e;
+    }
+  }
+
   async send(accountId: string, gmailThreadId: string, raw: string): Promise<void> {
     await this.request(accountId, "messages/send", { method: "POST", body: { raw, threadId: gmailThreadId } });
   }
