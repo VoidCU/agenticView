@@ -82,6 +82,8 @@ export const TaskSchema = z.object({
   resolution: TaskResolutionSchema.optional(),
   /** Requests: child task id -> that child's finishedAt when its outcome was handed to the Manager. */
   reported: z.record(z.string(), z.string()).optional(),
+  /** Mail threads this task works on (Send to Atlas). */
+  mail: z.object({ threadIds: z.array(z.string()).min(1) }).optional(),
   log: z.array(TaskLogEntrySchema),
   createdAt: z.string(),
   startedAt: z.string().optional(),

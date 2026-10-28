@@ -14,3 +14,4 @@ export * from "./lounge.js";
 export * from "./providers.js";
 export * from "./migrations.js";
 export * from "./social.js";
+export * from "./mail.js";

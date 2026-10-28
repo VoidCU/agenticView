@@ -218,4 +218,5 @@ export type ServerMessage =
    * match id follows and both return to their seats.
    */
   | { type: "game.started"; matchId: string; players: [string, string]; spotIds: [string, string]; seatSpotIds: [string, string]; playMs: number }
-  | { type: "game.result"; match: Match };
+  | { type: "game.result"; match: Match }
+  | { type: "mail.changed"; what: "accounts" | "threads" | "tags" | "sources" };
