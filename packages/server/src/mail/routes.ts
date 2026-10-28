@@ -28,6 +28,16 @@ const TagBody = z.object({
 
 const TagIdsBody = z.object({ tagIds: z.array(z.string()).max(100) });
 
+const SendToAtlasBody = z.object({
+  threadKeys: z.array(z.string().max(300)).min(1).max(20),
+  note: z.string().max(2000).optional(),
+});
+
+const DraftBody = z.object({ body: z.string().max(100_000) });
+
+/** Sending is irreversible: the client must say so explicitly. */
+const ConfirmBody = z.object({ confirm: z.literal(true) });
+
 /** Route params are always present on matched routes; `wrap` erases their types. */
 const param = (c: Context, k: string): string => c.req.param(k) ?? "";
 
@@ -121,6 +131,30 @@ export function mailRoutes(mail: MailService, flow: OAuthFlow): Hono {
     const b = await body(c, TagIdsBody);
     if (!b.ok) return b.res;
     return c.json(await mail.setThreadTags(param(c, "key"), b.data.tagIds));
+  }));
+
+  app.post("/api/mail/send-to-atlas", wrap(async (c) => {
+    const b = await body(c, SendToAtlasBody);
+    if (!b.ok) return b.res;
+    const managerId = mail.managerId();
+    if (!managerId) return c.json({ error: "This office has no manager to send mail to" }, 400);
+    return c.json(await mail.sendToAtlas({ threadKeys: b.data.threadKeys, ...(b.data.note !== undefined ? { note: b.data.note } : {}), managerId }));
+  }));
+
+  app.put("/api/mail/drafts/:key/:draftId", wrap(async (c) => {
+    const b = await body(c, DraftBody);
+    if (!b.ok) return b.res;
+    return c.json(await mail.editDraft(param(c, "key"), param(c, "draftId"), b.data.body));
+  }));
+  app.delete("/api/mail/drafts/:key/:draftId", wrap(async (c) => {
+    await mail.discardDraft(param(c, "key"), param(c, "draftId"));
+    return c.json({ ok: true });
+  }));
+  app.post("/api/mail/drafts/:key/:draftId/save-gmail", wrap(async (c) => c.json(await mail.saveDraftToGmail(param(c, "key"), param(c, "draftId")))));
+  app.post("/api/mail/drafts/:key/:draftId/send", wrap(async (c) => {
+    const b = await body(c, ConfirmBody);
+    if (!b.ok) return c.json({ error: "Sending needs { confirm: true }" }, 400);
+    return c.json(await mail.sendDraft(param(c, "key"), param(c, "draftId")));
   }));
 
   app.get("/api/mail/tags", wrap(async (c) => c.json(await mail.listTags())));

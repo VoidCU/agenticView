@@ -66,7 +66,7 @@ import { MailAccounts } from "./mail/accounts.js";
 import { OAuthFlow } from "./mail/oauth.js";
 import { GmailClient } from "./mail/gmail.js";
 import { MailStore } from "./mail/store.js";
-import { MailService } from "./mail/service.js";
+import { MailHttpError, MailService } from "./mail/service.js";
 
 export interface WorldOptions {
   runtimes: Map<Provider, Runtime>;
@@ -318,12 +318,18 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
   registry.useLayout(() => layout, async (workerCount) => {
     await editLayout((current) => growLayout(current, workerCount));
   });
+  // The mail service is built further down; finished mail tasks reach it once it exists (drafts from results).
+  let mailService: MailService | undefined;
   // Only state changes go on the wire, and never with the log: the web feed is built from run.events.
   const tasks = new TaskService(ref.kind === "project" ? join(root, "tasks") : join(root, "hub-tasks"), (task, kind) => {
-    if (kind === "state") opts.bus.emit({ type: "task.updated", task: toWire(task) });
+    if (kind === "state") {
+      opts.bus.emit({ type: "task.updated", task: toWire(task) });
+      void mailService?.onTaskChanged(task);
+    }
   });
   await tasks.recoverInterrupted();
-  await registry.ensureManager();
+  // The manager cannot be removed, so its id is stable for this world.
+  const managerAgentId = (await registry.ensureManager()).id;
   if (ref.kind === "project") {
     await cleanupGeminiSettings(ref.projectPath);
     await cleanupAntigravityPlugins(ref.projectPath);
@@ -728,7 +734,16 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     gmail: new GmailClient((id) => mailFlow.accessToken(id), mailFetch),
     emit: (what) => opts.bus.emit({ type: "mail.changed", what }),
     forgetToken: (id) => mailFlow.forget(id),
+    managerId: () => managerAgentId,
+    // Resolved at call time. The hub has no project for the manager's mail request to work in.
+    startRequest: async (input) => {
+      if (ref.kind !== "project") throw new MailHttpError("Send to Atlas works in a project office: open the project's office and send the mail from there", 400);
+      return orchestrator.handleUserMessage(input);
+    },
+    agentName: async (id) => (await registry.get(id))?.name,
+    taskChildren: (id) => tasks.children(id),
   });
+  mailService = mail;
 
   return {
     ref,

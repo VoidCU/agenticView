@@ -2,15 +2,18 @@ import {
   MailSourceSchema,
   MailTagSchema,
   newId,
+  type MailDraft,
   type MailSender,
   type MailSource,
   type MailTag,
   type MailThread,
+  type Task,
 } from "@agenticview/shared";
 import type { MailAccounts } from "./accounts.js";
 import type { GmailClient } from "./gmail.js";
 import { MailReconnectError } from "./oauth.js";
 import type { MailStore } from "./store.js";
+import { buildReplyMime, looksLikeBareReply, renderThreadForTask } from "./text.js";
 
 export type MailWhat = "accounts" | "threads" | "tags" | "sources";
 
@@ -52,7 +55,19 @@ export interface MailServiceDeps {
   now?: () => Date;
   /** Drops the account's cached access token (OAuthFlow.forget) when the account is removed. */
   forgetToken?: (accountId: string) => void;
+  /** Starts (or joins) the Manager's request for these threads (Orchestrator.handleUserMessage). Resolved at call time. */
+  startRequest?: (input: { agentId: string; text: string; mail: { threadIds: string[] } }) => Promise<Task>;
+  /** This office's manager agent id, when known. */
+  managerId?: () => string | undefined;
+  /** An agent's display name, for the tag routing lines. */
+  agentName?: (agentId: string) => Promise<string | undefined>;
+  /** A request's direct child tasks (to tell whether a worker already drafted its thread). */
+  taskChildren?: (taskId: string) => Promise<Task[]>;
 }
+
+/** Sent to the Manager with every Send to Atlas request. */
+export const ATLAS_ROUTING =
+  "For each email thread below, assign one work task with assign_task and pass its threadId. The worker's whole result must be only the reply body. Prefer the tag's preferred agent when it fits.";
 
 /** One office's Gmail work: pull sources, the pulled threads, and tags (optionally mirrored as Gmail labels). */
 export class MailService {
@@ -312,6 +327,187 @@ export class MailService {
     }
     this.deps.emit("tags");
     if (touched) this.deps.emit("threads");
+  }
+
+  // ── Send to Atlas ─────────────────────────────────────────────────────────
+
+  /** This office's manager agent id, when known. */
+  managerId(): string | undefined {
+    return this.deps.managerId?.();
+  }
+
+  /**
+   * Starts the Manager's request for these threads: the user's note, one routing line per used tag, the
+   * routing instruction, then each thread fenced as data. Every thread records the request in `sentToAtlas`.
+   */
+  async sendToAtlas(input: { threadKeys: string[]; note?: string; managerId: string }): Promise<Task> {
+    const keys = [...new Set(input.threadKeys)];
+    if (keys.length === 0) throw bad("At least one thread is required");
+    const start = this.deps.startRequest;
+    if (!start) throw bad("Send to Atlas is not available in this office");
+    const threads: MailThread[] = [];
+    for (const key of keys) {
+      const t = safe(key) ? await this.deps.store.threads.read(key) : undefined;
+      if (!t) throw notFound("Unknown thread");
+      threads.push(t);
+    }
+    const tags = new Map((await this.deps.store.tags.list()).map((t) => [t.id, t]));
+    const used: MailTag[] = [];
+    for (const t of threads) {
+      for (const id of t.tags) {
+        const tag = tags.get(id);
+        if (tag && !used.includes(tag)) used.push(tag);
+      }
+    }
+    const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
+    const tagLines: string[] = [];
+    for (const tag of used) {
+      let line = `Tag "${oneLine(tag.name)}": ${oneLine(tag.meaning).replace(/\.+$/, "")}`;
+      const agentId = tag.preferredAgentId;
+      const name = agentId ? await this.deps.agentName?.(agentId) : undefined;
+      if (agentId && name) line += `. Preferred agent: ${oneLine(name)} (${agentId})`;
+      tagLines.push(line);
+    }
+    const text = [
+      input.note?.trim() ?? "",
+      tagLines.join("\n"),
+      ATLAS_ROUTING,
+      ...threads.map((t) => renderThreadForTask(t, t.tags.flatMap((id) => (tags.has(id) ? [tags.get(id)!.name] : [])))),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const task = await start({ agentId: input.managerId, text, mail: { threadIds: keys } });
+    const at = this.now().toISOString();
+    for (const key of keys) {
+      await this.withThread(key, async () => {
+        const cur = await this.deps.store.threads.read(key);
+        if (cur) await this.deps.store.threads.write(key, { ...cur, sentToAtlas: [...cur.sentToAtlas, { taskId: task.id, at }] });
+      });
+    }
+    this.deps.emit("threads");
+    return task;
+  }
+
+  // ── drafts ────────────────────────────────────────────────────────────────
+
+  /** Tasks already turned into drafts (or found to have no thread); a later state event never re-adds one. */
+  private readonly draftedTasks = new Set<string>();
+
+  /**
+   * TaskService state-change hook. A finished mail work task's result becomes a reply draft on its thread;
+   * a finished single-thread request's own result does too when none of its work tasks drafted that thread.
+   * Idempotent per task id; never throws.
+   */
+  async onTaskChanged(task: Task): Promise<void> {
+    try {
+      await this.draftFromTask(task);
+    } catch (e) {
+      console.warn(`[agenticview] mail draft from task ${task.id} failed (${(e as Error)?.name ?? "error"})`);
+    }
+  }
+
+  private async draftFromTask(task: Task): Promise<void> {
+    if (task.kind !== "work" && task.kind !== "request") return;
+    if (task.status !== "done" || !task.result?.trim() || task.mail?.threadIds.length !== 1) return;
+    if (this.draftedTasks.has(task.id)) return;
+    const key = task.mail.threadIds[0]!;
+    if (!safe(key)) return;
+    const result = task.result;
+    const childIds = task.kind === "request" ? new Set((await this.deps.taskChildren?.(task.id) ?? []).map((c) => c.id)) : undefined;
+    const added = await this.withThread(key, async () => {
+      const t = await this.deps.store.threads.read(key);
+      if (!t) return false;
+      if (t.drafts.some((d) => d.taskId === task.id)) return false;
+      if (childIds && t.drafts.some((d) => d.taskId !== undefined && childIds.has(d.taskId))) return false;
+      const draft: MailDraft = {
+        id: newId("md"),
+        body: result.trim(),
+        createdAt: this.now().toISOString(),
+        taskId: task.id,
+        agentId: task.assigneeId,
+        flagged: !looksLikeBareReply(result),
+      };
+      await this.deps.store.threads.write(key, { ...t, drafts: [draft, ...t.drafts] });
+      return true;
+    });
+    this.draftedTasks.add(task.id);
+    if (added) this.deps.emit("threads");
+  }
+
+  /** Runs `fn` on the thread and draft under the thread lock; unknown keys or draft ids are 404. */
+  private async withDraft<T>(key: string, draftId: string, fn: (t: MailThread, d: MailDraft) => Promise<{ next?: MailThread; out: T }>): Promise<T> {
+    if (!safe(key)) throw notFound("Unknown thread");
+    if (!safe(draftId)) throw notFound("Unknown draft");
+    const out = await this.withThread(key, async () => {
+      const t = await this.deps.store.threads.read(key);
+      if (!t) throw notFound("Unknown thread");
+      const d = t.drafts.find((x) => x.id === draftId);
+      if (!d) throw notFound("Unknown draft");
+      const r = await fn(t, d);
+      if (r.next) await this.deps.store.threads.write(key, r.next);
+      return r;
+    });
+    if (out.next) this.deps.emit("threads");
+    return out.out;
+  }
+
+  private static replace(t: MailThread, d: MailDraft): MailThread {
+    return { ...t, drafts: t.drafts.map((x) => (x.id === d.id ? d : x)) };
+  }
+
+  /** New body; a Gmail copy saved earlier no longer matches, so its id is dropped. Sent drafts are final. */
+  async editDraft(key: string, draftId: string, body: string): Promise<MailDraft> {
+    return this.withDraft(key, draftId, async (t, d) => {
+      if (d.sentAt) throw bad("This draft was already sent");
+      const { gmailDraftId: _old, ...rest } = d;
+      void _old;
+      const next: MailDraft = { ...rest, body };
+      return { next: MailService.replace(t, next), out: next };
+    });
+  }
+
+  async discardDraft(key: string, draftId: string): Promise<void> {
+    await this.withDraft(key, draftId, async (t, d) => ({ next: { ...t, drafts: t.drafts.filter((x) => x.id !== d.id) }, out: undefined }));
+  }
+
+  /** The draft as a reply MIME (base64url) to the newest message not sent by the account itself. */
+  private async replyRaw(t: MailThread, body: string): Promise<string> {
+    const account = (await this.deps.accounts.list()).find((a) => a.id === t.accountId);
+    if (!account) throw notFound("Unknown mail account");
+    const own = account.email.toLowerCase();
+    const target = [...t.messages].reverse().find((m) => m.fromEmail.toLowerCase() !== own);
+    if (!target) throw bad("This thread has no message from someone else to reply to");
+    const refs = t.messages.flatMap((m) => (m.messageIdHeader ? [m.messageIdHeader] : [])).join(" ");
+    return buildReplyMime({
+      from: account.email,
+      to: target.fromEmail,
+      subject: t.subject,
+      ...(target.messageIdHeader ? { inReplyTo: target.messageIdHeader } : {}),
+      ...(refs ? { references: refs } : {}),
+      body,
+    });
+  }
+
+  /** Saves the draft as a Gmail draft reply in its thread and records the Gmail draft id. */
+  async saveDraftToGmail(key: string, draftId: string): Promise<MailDraft> {
+    return this.withDraft(key, draftId, async (t, d) => {
+      if (d.sentAt) throw bad("This draft was already sent");
+      const raw = await this.replyRaw(t, d.body);
+      const gmailDraftId = await this.gmailCall(t.accountId, () => this.deps.gmail.createDraft(t.accountId, t.gmailThreadId, raw));
+      const next: MailDraft = { ...d, gmailDraftId };
+      return { next: MailService.replace(t, next), out: next };
+    });
+  }
+
+  /** Sends the draft as a reply in its thread. Runs under the thread lock, so it can never send twice. */
+  async sendDraft(key: string, draftId: string): Promise<MailDraft> {
+    return this.withDraft(key, draftId, async (t, d) => {
+      if (d.sentAt) throw bad("This draft was already sent");
+      const raw = await this.replyRaw(t, d.body);
+      await this.gmailCall(t.accountId, () => this.deps.gmail.send(t.accountId, t.gmailThreadId, raw));
+      const next: MailDraft = { ...d, sentAt: this.now().toISOString() };
+      return { next: MailService.replace(t, next), out: next };
+    });
   }
 
   // ── auto-check ────────────────────────────────────────────────────────────
