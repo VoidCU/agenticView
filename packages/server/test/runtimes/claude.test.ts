@@ -142,6 +142,27 @@ describe("ClaudeRuntime.run", () => {
     expect(cap4.options!.canUseTool).toBeUndefined();
   });
 
+  it("a restricted (readOnly) run never bypasses permissions and denies every tool outside the read allowlist", async () => {
+    const off = { edit: false, shell: false, web: false, screenshot: false };
+    const o = claudeOptionsFor(req({ readOnly: true, permissionMode: "auto", tools: off, bridgeTools: [] }));
+    expect(o.permissionMode).toBe("default");
+    expect(o.allowDangerouslySkipPermissions).toBeUndefined();
+    expect(o.tools).toEqual(["Read", "Glob", "Grep"]);
+    expect(o.allowedTools).toEqual(["Read", "Glob", "Grep"]);
+    const cap: Capture = {};
+    const asked: string[] = [];
+    await new ClaudeRuntime({ sdk: fakeSdk(cap), apiKey: "k" }).run(
+      { ...req({ readOnly: true, permissionMode: "auto", tools: off, bridgeTools: [] }), onPermission: async (p) => { asked.push(p.tool); return true; } },
+      () => {},
+      new AbortController().signal,
+    );
+    const canUse = cap.options!.canUseTool as (n: string, i: unknown, o: unknown) => Promise<{ behavior: string }>;
+    for (const tool of ["Bash", "Write", "mcp__gmail__send_message", "Task"]) expect((await canUse(tool, {}, {})).behavior).toBe("deny");
+    // The user is never asked: a restricted run cannot be talked into a tool.
+    expect(asked).toEqual([]);
+    expect(cap.options!.mcpServers).toBeUndefined();
+  });
+
   it("maps error subtypes and max turns", async () => {
     const cap: Capture = {};
     const rt = new ClaudeRuntime({ sdk: fakeSdk(cap, [{ type: "result", subtype: "error_max_turns", session_id: "s2", total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, num_turns: 60 }]), apiKey: "k" });

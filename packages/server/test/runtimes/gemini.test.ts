@@ -207,6 +207,17 @@ describe("GeminiRuntime tool allowance and concurrency", () => {
     expect(seen!.argv[seen!.argv.indexOf("--approval-mode") + 1]).toBe("default");
   });
 
+  it("a restricted (readOnly) run uses the CLI's default approval mode even for an auto agent", async () => {
+    let seen: { argv: string[] } | undefined;
+    const spawn: typeof nodeSpawn = ((cmd: string, args: string[], opts: Record<string, unknown>) => {
+      seen = { argv: args };
+      return nodeSpawn(process.execPath, [fixture, ...args], opts as never);
+    }) as never;
+    const off = { edit: false, shell: false, web: false, screenshot: false };
+    await new GeminiRuntime({ bridgeEntry: "x", bridgeUrl: () => "u", spawn, which: async () => "gemini" }).run(req({ permissionMode: "auto", readOnly: true, tools: off }), () => {}, new AbortController().signal);
+    expect(seen!.argv[seen!.argv.indexOf("--approval-mode") + 1]).toBe("default");
+  });
+
   it("two concurrent runs in one project each get their own entry and the file is restored once both finish", async () => {
     await mkdir(join(cwd, ".gemini"), { recursive: true });
     const before = JSON.stringify({ theme: "x" }, null, 2);

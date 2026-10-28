@@ -71,7 +71,9 @@ export function claudeOptionsFor(req: RunRequest): ClaudeOptionSubset {
     allowed.push(`mcp__agenticview__${t.name}`);
   }
   const modes: Record<PermissionMode, ClaudePermissionMode> = { auto: "bypassPermissions", "auto-edit": "acceptEdits", ask: "default" };
-  const permissionMode = modes[req.permissionMode];
+  // A restricted run (read-only task, mail work) never bypasses permissions: canUseTool denies anything
+  // outside allowedTools, including MCP servers from project settings.
+  const permissionMode = req.readOnly ? "default" : modes[req.permissionMode];
   const out: ClaudeOptionSubset = { tools, allowedTools: allowed, disallowedTools: disallowed, permissionMode };
   if (permissionMode === "bypassPermissions") out.allowDangerouslySkipPermissions = true;
   return out;
@@ -223,6 +225,7 @@ export class ClaudeRuntime implements Runtime {
         // `default` prompts for edits and shell; `acceptEdits` still prompts for shell. Both need a handler or the SDK denies.
         const onPermission = req.onPermission;
         options.canUseTool = async (toolName: string, input: Record<string, unknown>) => {
+          if (req.readOnly) return { behavior: "deny", message: "This run is restricted (read-only) in AgenticView" };
           if (!onPermission) return { behavior: "deny", message: "No permission handler attached in AgenticView" };
           const id = `${req.runId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
           sink({ type: "permission", id, tool: toolName, input });

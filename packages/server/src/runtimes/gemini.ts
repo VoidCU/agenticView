@@ -289,7 +289,8 @@ export class GeminiRuntime implements Runtime {
       const images = req.prompt.filter((p) => p.type === "image").map((p) => (p.type === "image" ? p.path : ""));
       const promptText = [req.systemPrompt, ...textParts, images.length ? `Attached images:\n${images.map((i) => `@${i}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
       const viaStdin = promptText.length > MAX_ARG_PROMPT;
-      const args = ["-p", viaStdin ? STDIN_MARKER : promptText, "--output-format", "stream-json", "--approval-mode", APPROVAL[req.permissionMode]];
+      // A restricted run (read-only task, mail work) gets the default mode: headless, it denies anything that needs approval (writes, shell, MCP tools).
+      const args = ["-p", viaStdin ? STDIN_MARKER : promptText, "--output-format", "stream-json", "--approval-mode", req.readOnly ? APPROVAL.ask : APPROVAL[req.permissionMode]];
       if (req.model) args.push("-m", req.model);
       // req.effort is ignored: the Gemini CLI has no thinking/effort flag (the UI hides effort for Gemini).
       if (req.sessionId) args.push("--resume", req.sessionId);

@@ -156,6 +156,14 @@ describe("CodexRuntime edge cases", () => {
     expect(sandboxFor("auto", "linux", { edit: false, shell: true, web: false, screenshot: false })).toBe("danger-full-access");
   });
 
+  it("disables web search when the agent may not use the web, whatever ~/.codex says", async () => {
+    const cap: Capture = {};
+    const off = { edit: false, shell: false, web: false, screenshot: false };
+    await new CodexRuntime({ sdk: fakeSdk(cap), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "codex" }).run(req({ readOnly: true, tools: off, bridgeTools: [], permissionMode: "auto" }), () => {}, new AbortController().signal);
+    expect(cap.threadOpts).toMatchObject({ sandboxMode: "read-only", webSearchMode: "disabled" });
+    expect(codexThreadOptions(req({ tools: { ...off, web: true } }), "linux").webSearchMode).toBeUndefined();
+  });
+
   it("maps auto-edit per platform and never uses the sandbox for auto", () => {
     expect(sandboxFor("auto", "win32")).toBe("danger-full-access");
     expect(sandboxFor("auto", "linux")).toBe("danger-full-access");

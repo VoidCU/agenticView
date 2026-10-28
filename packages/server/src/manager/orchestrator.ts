@@ -110,7 +110,15 @@ export interface UserMessageInput {
  * that can change anything. Mail *requests* are not restricted: the Manager still delegates them.
  */
 export function isRestricted(task: Task): boolean {
-  return Boolean(task.readOnly) || (task.kind === "work" && task.mail !== undefined);
+  return Boolean(task.readOnly) || isMailWork(task);
+}
+
+/**
+ * A work task answering Gmail threads. Its result is shaped by untrusted email, so it never reaches the
+ * agent's memory or recent-work digest (later unrestricted runs read those).
+ */
+export function isMailWork(task: Task): boolean {
+  return task.kind === "work" && task.mail !== undefined;
 }
 
 const SessionFileSchema = z.record(z.string(), z.object({ provider: ProviderSchema, sessionId: z.string() }));
@@ -768,6 +776,8 @@ export class Orchestrator {
   /** Append a finished worker task to its agent's memory (any provider). */
   private async remember(task: Task, provider: Provider | undefined, model: string | undefined): Promise<void> {
     if (!this.deps.memory || (task.status !== "done" && task.status !== "failed")) return;
+    // Untrusted mail must not ride into later unrestricted runs via "Your recent work".
+    if (isMailWork(task)) return;
     try {
       const agent = await this.deps.registry.get(task.assigneeId);
       if (!agent || agent.role !== "worker") return;
@@ -968,7 +978,7 @@ export class Orchestrator {
         agent,
         cwd,
         prompt: await this.buildPrompt((await tasks.get(task.id)) ?? task, agent, provider, Boolean(sessionId)),
-        systemPrompt: task.kind === "work" && task.mail ? MAIL_WORKER_SYSTEM_PROMPT(agent) : task.readOnly ? `You are ${agent.name}, an expert in ${agent.specialty || "general engineering"}. Give your expert view in 5-10 bullet points. Do not edit files or run commands.` : agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
+        systemPrompt: isMailWork(task) ? MAIL_WORKER_SYSTEM_PROMPT(agent) : task.readOnly ? `You are ${agent.name}, an expert in ${agent.specialty || "general engineering"}. Give your expert view in 5-10 bullet points. Do not edit files or run commands.` : agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
         sessionId,
         tools: agent.tools,
         bridgeTools,

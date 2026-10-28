@@ -106,6 +106,13 @@ describe("buildAgyArgs", () => {
     expect(buildAgyArgs({ ...base, permissionMode: "auto-edit" }).slice(-2)).toEqual(["--mode", "accept-edits"]);
     expect(buildAgyArgs({ ...base, permissionMode: "auto" }).slice(-1)).toEqual(["--dangerously-skip-permissions"]);
   });
+  it("a restricted (readOnly) run without bridge tools never skips agy's permission checks", () => {
+    for (const m of ["ask", "auto-edit", "auto"] as const) {
+      const args = buildAgyArgs({ ...base, permissionMode: m, readOnly: true });
+      expect(args).not.toContain("--dangerously-skip-permissions");
+      expect(args).not.toContain("--mode");
+    }
+  });
   it("skips agy's permission checks when bridge tools must be callable", () => {
     for (const m of ["ask", "auto-edit", "auto"] as const) expect(buildAgyArgs({ ...base, permissionMode: m, bridge: true }).slice(-1)).toEqual(["--dangerously-skip-permissions"]);
   });

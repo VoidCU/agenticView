@@ -68,6 +68,8 @@ export interface AgyArgsInput {
   tools: ToolAllowance;
   /** Whether the run exposes bridge tools over MCP (forces skip-permissions, see above). */
   bridge?: boolean;
+  /** Restricted run (read-only task, mail work): agy's default mode, which denies shell and MCP calls headless. */
+  readOnly?: boolean;
 }
 
 export const AGY_EDIT_TOOLS = ["write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"] as const;
@@ -128,7 +130,7 @@ export function buildAgyArgs(input: AgyArgsInput): string[] {
   if (input.model) args.push("--model", input.model);
   if (input.effort && AGY_EFFORTS.has(input.effort)) args.push("--effort", input.effort);
   if (input.sessionId) args.push("--conversation", input.sessionId);
-  args.push(...modeArgs(input.permissionMode, input.bridge));
+  args.push(...(input.readOnly && !input.bridge ? [] : modeArgs(input.permissionMode, input.bridge)));
   return args;
 }
 
@@ -523,7 +525,7 @@ export class AntigravityRuntime implements Runtime {
         await writeFile(promptFile, promptText, "utf8");
         promptText = `The full task is in the file ${promptFile}. Read that whole file first with view_file, then follow it exactly.`;
       }
-      const args = buildAgyArgs({ prompt: promptText, model: req.model, effort: req.effort, sessionId: req.sessionId, permissionMode: req.permissionMode, tools: req.tools, bridge: useBridge });
+      const args = buildAgyArgs({ prompt: promptText, model: req.model, effort: req.effort, sessionId: req.sessionId, permissionMode: req.permissionMode, tools: req.tools, bridge: useBridge, readOnly: req.readOnly });
       const env: Record<string, string> = {};
       for (const [k, v] of Object.entries(process.env)) if (typeof v === "string") env[k] = v;
 

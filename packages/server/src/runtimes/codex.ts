@@ -205,6 +205,8 @@ export function codexThreadOptions(req: RunRequest, platform: NodeJS.Platform): 
   const opts: Record<string, unknown> = { workingDirectory: req.cwd, skipGitRepoCheck: true, sandboxMode: sandboxFor(req.permissionMode, platform, req.tools) };
   if (req.model) opts.model = req.model;
   if (req.effort) opts.modelReasoningEffort = req.effort;
+  // The user's ~/.codex config may turn web search on; an agent without web access never gets it.
+  if (!req.tools.web) opts.webSearchMode = "disabled";
   return opts;
 }
 
