@@ -84,20 +84,6 @@ export class TaskService {
     return task;
   }
 
-  /** Link more Gmail threads to a task (a live request the user forwarded more mail to). Deduplicated. */
-  addMailThreads(id: string, threadIds: string[]): Promise<Task> {
-    return this.locked(id, async () => {
-      const cur = await this.store.read(id);
-      if (!cur) throw new Error(`Unknown task ${id}`);
-      const merged = [...new Set([...(cur.mail?.threadIds ?? []), ...threadIds])];
-      if (merged.length === 0) return cur;
-      const next: Task = { ...cur, mail: { threadIds: merged } };
-      await this.store.write(id, next);
-      this.onChange(next, "state");
-      return next;
-    });
-  }
-
   get(id: string): Promise<Task | undefined> {
     return this.store.read(id);
   }

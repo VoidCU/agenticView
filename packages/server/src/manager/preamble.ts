@@ -1,4 +1,5 @@
 import { isTerminal, type Agent, type Task, type WorldInfo } from "@agenticview/shared";
+import { MAIL_TASK_TITLE } from "./tools.js";
 
 /** Fresh, authoritative roster + open-task map injected at the top of every Manager turn. */
 export function buildRosterPreamble(world: WorldInfo, agents: Agent[], tasks: Task[]): string {
@@ -18,7 +19,8 @@ export function buildRosterPreamble(world: WorldInfo, agents: Agent[], tasks: Ta
   if (workers.length === 0) lines.push("- (no workers yet; use create_agent)");
   lines.push("", "## Open tasks");
   for (const t of open) {
-    lines.push(`- ${t.id} ${t.kind} "${t.title}" (${t.status}) → ${t.assigneeId}${t.parentId ? `, parent ${t.parentId}` : ""}`);
+    // A mail task's title was written while reading untrusted email: never shown to the Manager here.
+    lines.push(`- ${t.id} ${t.kind} "${t.mail ? MAIL_TASK_TITLE : t.title}" (${t.status}) → ${t.assigneeId}${t.parentId ? `, parent ${t.parentId}` : ""}`);
   }
   if (open.length === 0) lines.push("- none");
   return lines.join("\n");

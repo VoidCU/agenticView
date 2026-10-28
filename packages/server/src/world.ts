@@ -49,7 +49,7 @@ import { AgentMemory } from "./agents/memory.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { coverInsteadOfRetry } from "./tasks/retryGuard.js";
-import { Orchestrator, isMailWork, isRestricted, type ResolvedSettings, type WorldDeps } from "./manager/orchestrator.js";
+import { Orchestrator, isMailTask, isRestricted, type ResolvedSettings, type WorldDeps } from "./manager/orchestrator.js";
 import type { Runtime, BridgeTool } from "./runtimes/types.js";
 import type { ToolRegistry } from "./bridge/toolRegistry.js";
 import type { EventBus } from "./events/bus.js";
@@ -510,10 +510,10 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     }
     return historyWork(agentId, exceptTaskId);
   };
-  // Mail work tasks are left out: their results are shaped by untrusted email (see isMailWork).
+  // Mail tasks (work and requests) are left out: their results are shaped by untrusted email (see isMailTask).
   const historyWork = async (agentId: string, exceptTaskId?: string): Promise<RecentWork[]> =>
     (await tasks.list())
-      .filter((t) => t.assigneeId === agentId && t.id !== exceptTaskId && isTerminal(t.status) && !isMailWork(t))
+      .filter((t) => t.assigneeId === agentId && t.id !== exceptTaskId && isTerminal(t.status) && !isMailTask(t))
       .sort((a, b) => (b.finishedAt ?? b.createdAt).localeCompare(a.finishedAt ?? a.createdAt))
       .slice(0, 5)
       .map((t) => {
