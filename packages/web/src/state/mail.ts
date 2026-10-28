@@ -33,7 +33,10 @@ async function call<T>(path: string, init?: { method?: string; body?: unknown })
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
     const msg = typeof data.error === "string" ? data.error : `Mail request failed (${res.status})`;
-    throw new MailApiError(msg, res.status, data.needsReconnect === true, typeof data.accountId === "string" ? data.accountId : undefined);
+    const needsReconnect = data.needsReconnect === true;
+    // A revoked account: re-read the accounts so the Reconnect chip shows immediately.
+    if (needsReconnect) void useMail.getState().refresh("accounts");
+    throw new MailApiError(msg, res.status, needsReconnect, typeof data.accountId === "string" ? data.accountId : undefined);
   }
   return data as T;
 }

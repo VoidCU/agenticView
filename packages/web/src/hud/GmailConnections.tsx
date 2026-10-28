@@ -33,7 +33,7 @@ export function GmailConnections() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [acked, setAcked] = useState(readAck);
-  const [showNotice, setShowNotice] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [ticked, setTicked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -64,10 +64,6 @@ export function GmailConnections() {
 
   function connect() {
     if (!acked) {
-      if (!showNotice) {
-        setShowNotice(true);
-        return;
-      }
       if (!ticked) return;
       writeAck();
       setAcked(true);
@@ -142,7 +138,7 @@ export function GmailConnections() {
               </li>
             ))}
           </ul>
-          {showNotice && !acked && (
+          {!acked && (
             <div className="gmail-privacy" role="note">
               <p>{PRIVACY_NOTICE}</p>
               <label className="gmail-ack">
@@ -152,15 +148,37 @@ export function GmailConnections() {
             </div>
           )}
           <div>
-            <button type="button" className="btn btn-primary" disabled={busy || (showNotice && !acked && !ticked)} onClick={connect}>
+            <button type="button" className="btn btn-primary" disabled={busy || (!acked && !ticked)} onClick={connect}>
               Connect a Gmail account
             </button>
           </div>
-          <div>
-            <button type="button" className="btn btn-ghost gmail-reset" disabled={busy} onClick={() => void run(() => useMail.getState().setClient(null))}>
-              Change Google client
-            </button>
-          </div>
+          {confirmReset ? (
+            <div className="gmail-privacy" role="alertdialog" aria-label="Remove Google client">
+              <p>Remove the saved Google client? Connected accounts will stop syncing until you add one again.</p>
+              <div className="gmail-account-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setConfirmReset(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void run(async () => {
+                    await useMail.getState().setClient(null);
+                    setConfirmReset(false);
+                  })}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <button type="button" className="btn btn-ghost gmail-reset" disabled={busy} onClick={() => setConfirmReset(true)}>
+                Change Google client
+              </button>
+            </div>
+          )}
         </div>
       )}
       {error && (

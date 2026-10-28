@@ -42,7 +42,8 @@ describe("GmailConnections", () => {
     const open = vi.fn();
     vi.stubGlobal("open", open);
     render(<GmailConnections />);
-    await userEvent.click(await screen.findByRole("button", { name: "Connect a Gmail account" }));
+    const connectBtn = await screen.findByRole("button", { name: "Connect a Gmail account" });
+    expect(connectBtn).toBeDisabled();
     expect(open).not.toHaveBeenCalled();
     expect(screen.getByText("Emails you send to Atlas are shared with the AI provider your agents use.")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("checkbox", { name: "I understand" }));
@@ -73,5 +74,30 @@ describe("GmailConnections", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Choose senders" }));
     expect((got.mock.calls[0]![0] as CustomEvent).detail).toEqual({ accountId: "a1", view: "sources" });
     window.removeEventListener("agenticview:open-mail", got as EventListener);
+  });
+
+  it("Change Google client only clears the client after Remove is confirmed", async () => {
+    const fn = mockFetch({ clientConfigured: true, accounts: [] });
+    const puts = () => fn.mock.calls.filter(([u, i]) => u === "/api/mail/client" && (i as RequestInit).method === "PUT");
+    render(<GmailConnections />);
+    await userEvent.click(await screen.findByRole("button", { name: "Change Google client" }));
+    expect(screen.getByText(/Remove the saved Google client?/)).toBeInTheDocument();
+    expect(puts()).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(puts()).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Change Google client" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(puts()).toHaveLength(1));
+    expect((puts()[0]![1] as RequestInit).body).toBe("null");
+  });
+
+  it("refreshes accounts when an action fails with needsReconnect", async () => {
+    const fn = vi.fn(async (url: string) => {
+      if (String(url).startsWith("/api/mail/accounts/a1/senders")) return new Response(JSON.stringify({ error: "x", accountId: "a1", needsReconnect: true }), { status: 409 });
+      return new Response(JSON.stringify({ clientConfigured: true, accounts: [] }));
+    });
+    vi.stubGlobal("fetch", fn);
+    await expect(useMail.getState().senders("a1")).rejects.toMatchObject({ needsReconnect: true });
+    await waitFor(() => expect(fn.mock.calls.some(([u]) => u === "/api/mail/status")).toBe(true));
   });
 });
