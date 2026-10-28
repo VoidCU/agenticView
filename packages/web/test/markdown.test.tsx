@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
-import { SimpleMarkdown } from "../src/hud/markdown";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { SimpleMarkdown, markdownToPlainText } from "../src/hud/markdown";
 import { ChatPanel } from "../src/hud/ChatPanel";
 import { useStore } from "../src/state/store";
 import { manager, snapshot, worker } from "./fixtures";
@@ -30,6 +30,57 @@ describe("SimpleMarkdown", () => {
   it("a code block still streaming (no closing fence) renders as code", () => {
     const { container } = render(<SimpleMarkdown text={"```\nnpm test"} />);
     expect(container.querySelector("pre code")!.textContent).toBe("npm test");
+  });
+
+  it("renders headings, quotes, rules and safe links", () => {
+    const { container } = render(
+      <SimpleMarkdown text={"## Subject: Hi\nBody line\n\n> quoted\n> more\n\n---\n\nSee [docs](https://x.dev) or [bad](javascript:alert(1))"} />,
+    );
+    expect(container.querySelector("h4.smd-h")!.textContent).toBe("Subject: Hi");
+    expect(container.querySelector("p")!.textContent).toBe("Body line");
+    expect(container.querySelector("blockquote")!.textContent).toBe("quoted\nmore");
+    expect(container.querySelector("hr")).not.toBeNull();
+    const links = container.querySelectorAll("a");
+    expect(links).toHaveLength(1);
+    expect(links[0]!.getAttribute("href")).toBe("https://x.dev");
+    expect(links[0]!.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(container.textContent).toContain("[bad](javascript:alert(1))");
+  });
+});
+
+describe("markdownToPlainText", () => {
+  it("drops markers and fences but keeps list structure and link targets", () => {
+    const md = "# Hi Sam\n\nThanks **so** much for the `report`.\n\n- one\n- two\n\n1. first\n\n```\nraw *text*\n```\n\nSee [the doc](https://x.dev).";
+    expect(markdownToPlainText(md)).toBe(
+      "Hi Sam\n\nThanks so much for the report.\n\n- one\n- two\n\n1. first\n\nraw *text*\n\nSee the doc (https://x.dev).",
+    );
+  });
+});
+
+describe("chat copy", () => {
+  beforeEach(() => {
+    useStore.getState().reset();
+    useStore.getState().apply(snapshot([manager, worker]));
+    useStore.getState().select(worker.id);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("Copy on an agent reply puts clean plain text on the clipboard", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    useStore.getState().apply({ type: "run.event", taskId: "t", agentId: worker.id, event: { type: "text", text: "Dear **Sam**,\n- a" } });
+    render(<ChatPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy reply" }));
+    expect(writeText).toHaveBeenCalledWith("Dear Sam,\n- a");
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
+  it("code blocks have their own Copy button that copies just the code", () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    render(<SimpleMarkdown text={"Run:\n```\nnpm test\n```"} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
+    expect(writeText).toHaveBeenCalledWith("npm test");
   });
 });
 

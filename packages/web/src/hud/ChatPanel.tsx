@@ -8,7 +8,7 @@ import { AgentMenu } from "./AgentMenu";
 import { LimitChip, SwitchAgentModal } from "./LimitChip";
 import { ServingChip, SessionChip, SessionNotice, displayModelOf } from "./sessions";
 import { WorkLog } from "./WorkLog";
-import { SimpleMarkdown } from "./markdown";
+import { CopyButton, SimpleMarkdown, markdownToPlainText } from "./markdown";
 import { ImageIcon, SendIcon, basename, defaultProviderOf, prettyInput, providerLabel, xpProgress } from "./ui";
 
 interface Attachment {
@@ -19,12 +19,32 @@ interface Attachment {
 
 const STATUS_WORD = { idle: "Idle", thinking: "Thinking", editing: "Editing", waiting: "Waiting on you", error: "Hit an error" } as const;
 
+/**
+ * An agent reply: markdown (bold, code, lists...) rendered safely, with a Copy button that puts the
+ * whole reply on the clipboard as formatted HTML (pastes styled into Gmail) and as clean plain text.
+ */
+function AgentReply({ text }: { text: string }) {
+  const body = useRef<HTMLDivElement>(null);
+  const html = () => {
+    const clone = body.current?.cloneNode(true) as HTMLElement | undefined;
+    if (!clone) return undefined;
+    clone.querySelectorAll(".copy-btn").forEach((b) => b.remove());
+    return clone.innerHTML;
+  };
+  return (
+    <div className="msg msg-agent">
+      <div ref={body}><SimpleMarkdown text={text} className="msg-md" /></div>
+      <CopyButton className="msg-copy" label="Copy reply" getText={() => markdownToPlainText(text)} getHtml={html} />
+    </div>
+  );
+}
+
 /** One feed event. Memoised on the (immutable) event object: a streaming feed re-renders only its new lines. */
 const EventLine = memo(function EventLine({ event }: { event: RunEvent }) {
   switch (event.type) {
     case "text":
-      // Agent replies are markdown (bold, code, lists...), rendered safely; user lines stay plain text.
-      return <div className="msg msg-agent"><SimpleMarkdown text={event.text} className="msg-md" /></div>;
+      // User lines stay plain text (see Feed); agent replies are markdown.
+      return <AgentReply text={event.text} />;
     case "tool_start":
       return (
         <div className="evt evt-tool">
