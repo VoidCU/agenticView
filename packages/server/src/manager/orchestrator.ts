@@ -31,7 +31,7 @@ import { readJsonFile, writeJsonFile } from "../store/jsonStore.js";
 import { buildRosterPreamble } from "./preamble.js";
 import { SessionRuntime } from "../runtimes/session.js";
 import { identityLine, memoryBlock, recordFor, type AgentMemory } from "../agents/memory.js";
-import { MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
+import { MAIL_WORKER_SYSTEM_PROMPT, MANAGER_SYSTEM_PROMPT, managerTools, workerSystemPrompt } from "./tools.js";
 
 export interface ResolvedSettings extends ProjectSettings {
   globalDefaultProvider: Provider | null;
@@ -100,6 +100,17 @@ export interface UserMessageInput {
   projectPath?: string;
   /** Internal: the request whose run ended before it read this message (see execute). */
   followUpOf?: string;
+  /** Gmail threads this message is about. The request carries them; its mail work tasks run restricted. */
+  mail?: { threadIds: string[] };
+}
+
+/**
+ * Runs that must not edit files, run commands or use worker bridge tools: read-only tasks (brainstorms)
+ * and work tasks that answer Gmail threads, whose untrusted email content must never drive an agent
+ * that can change anything. Mail *requests* are not restricted: the Manager still delegates them.
+ */
+export function isRestricted(task: Task): boolean {
+  return Boolean(task.readOnly) || (task.kind === "work" && task.mail !== undefined);
 }
 
 const SessionFileSchema = z.record(z.string(), z.object({ provider: ProviderSchema, sessionId: z.string() }));
@@ -120,6 +131,8 @@ export class Orchestrator {
   private readonly liveRequests = new Map<string, string>();
   /** Chat messages waiting for a live Manager request run, by task id (see interruptManager). */
   private readonly inbox = new Map<string, string[]>();
+  /** Gmail threads that arrived with the inbox messages, by task id (carried to a follow-up request). */
+  private readonly inboxMail = new Map<string, string[]>();
   private readonly waiters = new Map<string, Array<(t: Task) => void>>();
   private readonly pendingPermissions = new Map<string, { info: PendingPermissionInfo; resolve: (allow: boolean) => void }>();
   private readonly pendingQuestions = new Map<string, { info: PendingQuestionInfo; resolve: (answer: string) => void }>();
@@ -222,6 +235,7 @@ export class Orchestrator {
       assigneeId: agent.id,
       projectPath,
       images: input.images ?? [],
+      ...(input.mail?.threadIds.length ? { mail: { threadIds: input.mail.threadIds } } : {}),
     });
     await this.deps.tasks.log(task.id, "user", input.text);
     await this.deps.tasks.transition(task.id, "assigned");
@@ -243,6 +257,8 @@ export class Orchestrator {
    * and waiting for workers) is free: the message starts a request on the same conversation.
    */
   private async interruptManager(live: Task, input: UserMessageInput): Promise<Task> {
+    const threadIds = input.mail?.threadIds ?? [];
+    if (threadIds.length) live = await this.deps.tasks.addMailThreads(live.id, threadIds);
     await this.deps.tasks.log(live.id, "user", input.text);
     const text = input.images?.length ? `${input.text}\n(Attached images: ${input.images.join(", ")})` : input.text;
     const question = [...this.pendingQuestions.values()].find((q) => q.info.taskId === live.id);
@@ -251,6 +267,7 @@ export class Orchestrator {
       return live;
     }
     this.inbox.set(live.id, [...(this.inbox.get(live.id) ?? []), text]);
+    if (threadIds.length) this.inboxMail.set(live.id, [...(this.inboxMail.get(live.id) ?? []), ...threadIds]);
     this.deps.bus.emit({ type: "run.event", taskId: live.id, agentId: live.assigneeId, event: { type: "status", text: "Got your message; reading it next" } });
     return live;
   }
@@ -259,6 +276,8 @@ export class Orchestrator {
   private takeMessages(taskId: string): string | undefined {
     const texts = this.inbox.get(taskId)?.splice(0);
     if (!texts?.length) return undefined;
+    // The run reads them now; their threads were merged into this request already.
+    this.inboxMail.delete(taskId);
     return [
       `## New message${texts.length > 1 ? "s" : ""} from the user (sent while you were working on this request)`,
       texts.join("\n---\n"),
@@ -845,7 +864,7 @@ export class Orchestrator {
         providerOf: async (a) => (await this.resolveProviderLive(a)).provider,
       }));
     }
-    return task.readOnly ? [] : this.deps.workerTools?.(agent, task) ?? [];
+    return isRestricted(task) ? [] : this.deps.workerTools?.(agent, task) ?? [];
   }
 
   private async appendLog(taskId: string, ev: RunEvent): Promise<void> {
@@ -902,7 +921,8 @@ export class Orchestrator {
     let runModelName: string | undefined;
     try {
       const savedAgent = await registry.get(task.assigneeId);
-      const agent = savedAgent && task.readOnly ? { ...savedAgent, tools: { edit: false, shell: false, web: false, screenshot: false } } : savedAgent;
+      const restricted = isRestricted(task);
+      const agent = savedAgent && restricted ? { ...savedAgent, tools: { edit: false, shell: false, web: false, screenshot: false } } : savedAgent;
       if (!agent) {
         final = await this.finish(task, "failed", { error: `unknown agent ${task.assigneeId}` });
         return;
@@ -928,7 +948,9 @@ export class Orchestrator {
       // Managers take several requests at once. Only one run may resume a CLI conversation at a time, so a
       // request that starts while another run holds that conversation begins a fresh one instead.
       const convo = `${agent.id}\u0000${key}`;
-      const resumeBusy = Boolean(task.readOnly) || this.resuming.has(convo);
+      // A restricted run never resumes (or becomes) the agent's main conversation: untrusted mail must
+      // not reach a later run that can edit files.
+      const resumeBusy = restricted || this.resuming.has(convo);
       const sessionId = resumeBusy ? undefined : await this.loadSession(agent, key, provider);
       if (!resumeBusy) this.resuming.add(convo);
       releaseConvo = () => {
@@ -942,11 +964,11 @@ export class Orchestrator {
       const req: RunRequest = {
         runId,
         taskId: task.id,
-        readOnly: task.readOnly,
+        readOnly: restricted,
         agent,
         cwd,
         prompt: await this.buildPrompt((await tasks.get(task.id)) ?? task, agent, provider, Boolean(sessionId)),
-        systemPrompt: task.readOnly ? `You are ${agent.name}, an expert in ${agent.specialty || "general engineering"}. Give your expert view in 5-10 bullet points. Do not edit files or run commands.` : agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
+        systemPrompt: task.kind === "work" && task.mail ? MAIL_WORKER_SYSTEM_PROMPT(agent) : task.readOnly ? `You are ${agent.name}, an expert in ${agent.specialty || "general engineering"}. Give your expert view in 5-10 bullet points. Do not edit files or run commands.` : agent.role === "manager" ? MANAGER_SYSTEM_PROMPT : workerSystemPrompt(agent, cwd),
         sessionId,
         tools: agent.tools,
         bridgeTools,
@@ -1043,11 +1065,14 @@ export class Orchestrator {
     } finally {
       releaseConvo();
       let unread: string[] = [];
+      let unreadMail: string[] = [];
       if (runAgent && this.liveRequests.get(runAgent.id) === task.id) {
         this.liveRequests.delete(runAgent.id);
         unread = this.inbox.get(task.id) ?? [];
+        unreadMail = this.inboxMail.get(task.id) ?? [];
       }
       this.inbox.delete(task.id);
+      this.inboxMail.delete(task.id);
       this.aborts.delete(task.id);
       this.resolvePendingFor(task.id);
       const settled = final ?? (await tasks.get(task.id));
@@ -1060,7 +1085,7 @@ export class Orchestrator {
       }
       // Messages the run ended before reading: one follow-up request, resuming the same conversation.
       if (unread.length && runAgent) {
-        void this.handleUserMessage({ agentId: runAgent.id, text: unread.join("\n\n"), projectPath: task.projectPath || undefined, followUpOf: task.id })
+        void this.handleUserMessage({ agentId: runAgent.id, text: unread.join("\n\n"), projectPath: task.projectPath || undefined, followUpOf: task.id, ...(unreadMail.length ? { mail: { threadIds: unreadMail } } : {}) })
           .catch((e) => console.error("[agenticview] follow-up request failed", (e as Error).message));
       }
       // The Manager's conversation is free again: its delegated requests (this one included) may wake.

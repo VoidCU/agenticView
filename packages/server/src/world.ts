@@ -49,7 +49,7 @@ import { AgentMemory } from "./agents/memory.js";
 import { AgentRegistry, type WorldRef } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { coverInsteadOfRetry } from "./tasks/retryGuard.js";
-import { Orchestrator, type ResolvedSettings, type WorldDeps } from "./manager/orchestrator.js";
+import { Orchestrator, isRestricted, type ResolvedSettings, type WorldDeps } from "./manager/orchestrator.js";
 import type { Runtime, BridgeTool } from "./runtimes/types.js";
 import type { ToolRegistry } from "./bridge/toolRegistry.js";
 import type { EventBus } from "./events/bus.js";
@@ -543,8 +543,9 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
         sessionAgentIds: async () => (await sessionAgents()).map((a) => a.id),
         prepare: async (req) => {
           const task = req.taskId ? await tasks.get(req.taskId) : undefined;
-          // A brainstorm must not inherit the saved subagent's editing tools or instructions.
-          const readOnly = task?.readOnly === true;
+          // A brainstorm or a mail work task (restricted run: req.readOnly) must not inherit the saved
+          // subagent's editing tools or instructions.
+          const readOnly = req.readOnly === true || (task ? isRestricted(task) : false);
           const target = task?.projectPath || (ref.kind === "project" ? ref.projectPath : "");
           const work = await recentWork(req.agent.id, req.taskId, task?.projectPath);
           // Hub runs without a target project: no folder to put a subagent in, the session does it itself.
