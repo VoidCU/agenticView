@@ -19,6 +19,7 @@ import { workerRoutes } from "./api/worker.js";
 import { MailAccounts } from "./mail/accounts.js";
 import { OAuthFlow } from "./mail/oauth.js";
 import { oauthRoutes } from "./mail/oauthRoutes.js";
+import { mailRoutes } from "./mail/routes.js";
 
 export interface ServerOptions {
   world: WorldRef;
@@ -65,7 +66,14 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
     opts.mailFetch ?? fetch,
   );
   const mail = { accounts: mailAccounts, flow: oauthFlow };
-  const world = await createWorld(opts.world, { runtimes, bus, toolRegistry, bridgeUrl, workerTools: workerToolsFor, mail });
+  const world = await createWorld(opts.world, {
+    runtimes,
+    bus,
+    toolRegistry,
+    bridgeUrl,
+    workerTools: workerToolsFor,
+    mail: { ...mail, fetch: opts.mailFetch ?? fetch },
+  });
 
   const app = new Hono();
   app.get("/healthz", (c) => c.json({ ok: true, world: opts.world.kind }));
@@ -90,8 +98,12 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
   // Sessions go offline by time alone; re-check now and then so the office sees it.
   const pulse = session instanceof SessionRuntime ? setInterval(() => session.pulse(), 15_000) : undefined;
   pulse?.unref();
+  // Before apiRoutes: it ends with an /api/* 404 catch-all.
+  app.route("/", mailRoutes(world.mail, oauthFlow));
   app.route("/", apiRoutes(world));
   if (opts.staticDir) app.route("/", staticRoutes(opts.staticDir));
+
+  const stopMailCheck = world.mail.startAutoCheck();
 
   const httpServer = createAdaptorServer({ fetch: app.fetch }) as HttpServer;
   const ws = attachWs(httpServer, { token: opts.token, world, openProject: opts.openProject });
@@ -113,6 +125,7 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
     mail,
     close: async () => {
       if (pulse) clearInterval(pulse);
+      stopMailCheck();
       await ws.close();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     },

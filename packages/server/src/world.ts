@@ -62,8 +62,11 @@ import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
 import { cleanupCopilotTemp } from "./runtimes/copilot.js";
 import { GameService } from "./games/gameService.js";
 import { IdleBehaviourService } from "./games/idleBehaviour.js";
-import type { MailAccounts } from "./mail/accounts.js";
-import type { OAuthFlow } from "./mail/oauth.js";
+import { MailAccounts } from "./mail/accounts.js";
+import { OAuthFlow } from "./mail/oauth.js";
+import { GmailClient } from "./mail/gmail.js";
+import { MailStore } from "./mail/store.js";
+import { MailService } from "./mail/service.js";
 
 export interface WorldOptions {
   runtimes: Map<Provider, Runtime>;
@@ -72,7 +75,7 @@ export interface WorldOptions {
   bridgeUrl: () => string;
   workerTools?: (agent: Agent, task: Task) => BridgeTool[];
   /** Global Gmail accounts + the server's OAuth flow, built in createServer (consumed by mail services). */
-  mail?: { accounts: MailAccounts; flow: OAuthFlow };
+  mail?: { accounts: MailAccounts; flow: OAuthFlow; fetch?: typeof fetch };
 }
 
 /** Outcome of World.retryTask: re-run, or already covered and marked solved. */
@@ -147,6 +150,8 @@ export interface World {
    * (move_worker semantics, including the designated-desk swap). Returns the tool message ("ERROR: ..." on refusal).
    */
   moveDesk: (agentId: string, desk: Placement) => Promise<string>;
+  /** This office's Gmail sources, pulled threads and tags (accounts are global). */
+  mail: MailService;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -709,6 +714,20 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
     return { ok: true };
   };
 
+  // Gmail: global accounts + OAuth flow from createServer, or defaults (tests that call createWorld directly).
+  const mailAccounts = opts.mail?.accounts ?? new MailAccounts();
+  const mailFetch = opts.mail?.fetch ?? fetch;
+  const mailFlow =
+    opts.mail?.flow ??
+    new OAuthFlow(mailAccounts, () => `${opts.bridgeUrl()}/oauth/google/callback`, () => opts.bus.emit({ type: "mail.changed", what: "accounts" }), mailFetch);
+  const mail = new MailService({
+    store: new MailStore(join(root, "mail")),
+    accounts: mailAccounts,
+    gmail: new GmailClient((id) => mailFlow.accessToken(id), mailFetch),
+    emit: (what) => opts.bus.emit({ type: "mail.changed", what }),
+    forgetToken: (id) => mailFlow.forget(id),
+  });
+
   return {
     ref,
     root,
@@ -847,6 +866,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       ),
     decorate,
     snapshot,
+    mail,
   };
 }
 

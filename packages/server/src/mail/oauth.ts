@@ -58,6 +58,8 @@ export class OAuthFlow {
   private readonly pending = new Map<string, Pending>();
   private readonly tokens = new Map<string, { token: string; expiresAt: number }>();
   private readonly refreshing = new Map<string, Promise<string>>();
+  /** Bumped by forget(), so a refresh that started before it cannot re-cache a token. */
+  private readonly generation = new Map<string, number>();
 
   constructor(
     private readonly accounts: MailAccounts,
@@ -148,12 +150,15 @@ export class OAuthFlow {
     if (hit && Date.now() < hit.expiresAt) return hit.token;
     const inflight = this.refreshing.get(accountId);
     if (inflight) return inflight;
-    const run = this.refresh(accountId).finally(() => this.refreshing.delete(accountId));
+    const run: Promise<string> = this.refresh(accountId).finally(() => {
+      if (this.refreshing.get(accountId) === run) this.refreshing.delete(accountId);
+    });
     this.refreshing.set(accountId, run);
     return run;
   }
 
   private async refresh(accountId: string): Promise<string> {
+    const gen = this.generation.get(accountId) ?? 0;
     this.tokens.delete(accountId);
     const secret = await this.accounts.getSecret(accountId);
     if (!secret) throw new Error("Unknown mail account");
@@ -180,12 +185,15 @@ export class OAuthFlow {
     }
     const token = typeof body.access_token === "string" ? body.access_token : "";
     if (!token) throw new Error("Google did not return an access token");
-    this.cache(accountId, token, body.expires_in);
+    // forget() ran while this refresh was in flight (account removed): hand the token back, don't cache it.
+    if ((this.generation.get(accountId) ?? 0) === gen) this.cache(accountId, token, body.expires_in);
     return token;
   }
 
-  /** Drops any cached access token (e.g. after the account is removed). */
+  /** Drops any cached access token (e.g. after the account is removed); an in-flight refresh won't re-cache. */
   forget(accountId: string): void {
     this.tokens.delete(accountId);
+    this.refreshing.delete(accountId);
+    this.generation.set(accountId, (this.generation.get(accountId) ?? 0) + 1);
   }
 }

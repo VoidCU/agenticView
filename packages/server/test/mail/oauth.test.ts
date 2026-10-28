@@ -174,6 +174,28 @@ describe("mail oauth", () => {
     expect(refreshes[0]!.body?.get("refresh_token")).toBe("rt-x");
   });
 
+  it("forget during an in-flight refresh does not re-cache the token", async () => {
+    const accounts = new MailAccounts();
+    await accounts.setClient(CLIENT);
+    const a = await accounts.save({ email: "me@example.com", refreshToken: "rt-x" });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let n = 0;
+    const g = fakeGoogle({ refresh: () => Response.json({ access_token: `at-r${++n}`, expires_in: 3599 }) });
+    const slow = (async (input: string | URL | Request, init?: RequestInit) => {
+      await gate;
+      return g.impl(input, init);
+    }) as typeof fetch;
+    const flow = new OAuthFlow(accounts, () => REDIRECT, () => undefined, slow);
+    const first = flow.accessToken(a.id);
+    await new Promise((r) => setTimeout(r, 20));
+    flow.forget(a.id);
+    release();
+    expect(await first).toBe("at-r1");
+    // Not cached: the next call refreshes again.
+    expect(await flow.accessToken(a.id)).toBe("at-r2");
+  });
+
   it("marks account needsReconnect on invalid_grant", async () => {
     const accounts = new MailAccounts();
     await accounts.setClient(CLIENT);
