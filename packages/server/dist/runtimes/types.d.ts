@@ -14,6 +14,11 @@ export interface PermissionRequest {
 }
 export interface RunRequest {
     readOnly?: boolean;
+    /**
+     * The prompt carries untrusted outside content (Gmail threads). Runtimes then fail closed on anything
+     * the user configured outside AgenticView (project settings, user MCP servers): see each runtime.
+     */
+    untrusted?: boolean;
     runId: string;
     /** Office task this run belongs to. */
     taskId?: string;

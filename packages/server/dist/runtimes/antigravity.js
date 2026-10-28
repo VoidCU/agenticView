@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { which as defaultWhich } from "./which.js";
 import { extractCliError } from "./errors.js";
+import { UNTRUSTED_MCP_REFUSAL, anyUserMcpServers } from "./untrusted.js";
 export const ANTIGRAVITY_MISSING_REASON = "Install the Antigravity CLI (agy) and sign in by running `agy` once.";
 const PLUGIN_PREFIX = "agenticview-";
 const SERVER_NAME = "agenticview";
@@ -345,6 +346,22 @@ export function killTree(child, platform = process.platform, spawn = nodeSpawn) 
     }
     child.kill();
 }
+/** Whether agy would load a user MCP server: its global config or a workspace plugin that is not ours. */
+async function agyUserMcp(home, cwd) {
+    const files = [join(home, ".gemini", "config", "mcp_config.json")];
+    const plugins = join(cwd, ".agents", "plugins");
+    let names = [];
+    try {
+        names = await readdir(plugins);
+    }
+    catch {
+        names = [];
+    }
+    for (const n of names)
+        if (!n.startsWith(PLUGIN_PREFIX))
+            files.push(join(plugins, n, "mcp_config.json"));
+    return anyUserMcpServers(files);
+}
 export class AntigravityRuntime {
     opts;
     provider = "antigravity";
@@ -413,6 +430,11 @@ export class AntigravityRuntime {
         let sessionId = req.sessionId;
         if (signal.aborted)
             return { text, stopReason: "aborted" };
+        // An untrusted run (it reads Gmail threads) fails closed when the user has MCP servers of their own
+        // (agy's global mcp_config.json or a workspace plugin): a mail request with bridge tools needs
+        // --dangerously-skip-permissions, which would let it call them too.
+        if (req.untrusted && (await agyUserMcp(this.home, req.cwd)))
+            return { text, stopReason: "error", error: UNTRUSTED_MCP_REFUSAL };
         const useBridge = req.bridgeTools.length > 0;
         let restore = async () => undefined;
         let promptFile;

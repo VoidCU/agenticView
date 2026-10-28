@@ -1,12 +1,13 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { createInterface } from "node:readline";
 import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import { which as defaultWhich } from "./which.js";
 import { extractCliError } from "./errors.js";
 import { resolveNodeShim } from "./gemini.js";
 import { killTree } from "./antigravity.js";
+import { UNTRUSTED_MCP_REFUSAL, anyUserMcpServers } from "./untrusted.js";
 export const COPILOT_MISSING_REASON = "Install the GitHub Copilot CLI (npm i -g @github/copilot) and sign in with `copilot login`.";
 const TEMP_PREFIX = "agenticview-copilot-";
 const SERVER_PREFIX = "agenticview-";
@@ -314,6 +315,11 @@ export class CopilotRuntime {
     async run(req, sink, signal) {
         if (signal.aborted)
             return { text: "", stopReason: "aborted" };
+        // An untrusted run (it reads Gmail threads) fails closed: --allow-all-tools would let it call the user's
+        // own MCP servers from ~/.copilot/mcp-config.json, and no verified flag switches those off.
+        if (req.untrusted && (await anyUserMcpServers([join(this.opts.home ?? homedir(), ".copilot", "mcp-config.json")]))) {
+            return { text: "", stopReason: "error", error: UNTRUSTED_MCP_REFUSAL };
+        }
         const dir = join(this.opts.tmpDir ?? tmpdir(), `${TEMP_PREFIX}${req.runId}`);
         try {
             await mkdir(dir, { recursive: true });

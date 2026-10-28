@@ -38,6 +38,8 @@ export interface CopilotRuntimeOptions {
     platform?: NodeJS.Platform;
     /** Directory for per-run temp dirs (tests). */
     tmpDir?: string;
+    /** Home directory holding ~/.copilot (tests). */
+    home?: string;
 }
 export declare const COPILOT_MISSING_REASON = "Install the GitHub Copilot CLI (npm i -g @github/copilot) and sign in with `copilot login`.";
 /**

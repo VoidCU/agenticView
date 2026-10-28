@@ -25,17 +25,65 @@ function decodeEntities(s) {
         return ENTITIES[e.toLowerCase()] ?? whole;
     });
 }
-/** Regex-based HTML to plain text (no DOM). */
+const BLOCK_END = new Set(["div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6"]);
+const BLOCK_START = new Set(["p", "div", "li"]);
+/**
+ * HTML to plain text (no DOM) in one linear scan: script/style blocks and comments are dropped, block
+ * tags become line breaks, every other tag is removed. Hostile input (thousands of unclosed `<script>`
+ * or `<!--`) stays linear: once a closing marker is known to be missing, it is never searched for again.
+ */
 export function htmlToText(html) {
-    const s = html
-        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
-        .replace(/<!--[\s\S]*?-->/g, "")
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<\/p\s*>/gi, "\n\n")
-        .replace(/<\/(div|li|tr|h[1-6])\s*>/gi, "\n")
-        .replace(/<(p|div|li)\b[^>]*>/gi, "\n")
-        .replace(/<[^>]*>/g, "");
-    return decodeEntities(s)
+    const out = [];
+    const missing = new Set();
+    let i = 0;
+    while (i < html.length) {
+        const lt = html.indexOf("<", i);
+        if (lt === -1) {
+            out.push(html.slice(i));
+            break;
+        }
+        out.push(html.slice(i, lt));
+        if (html.startsWith("<!--", lt) && !missing.has("-->")) {
+            const end = html.indexOf("-->", lt + 4);
+            if (end !== -1) {
+                i = end + 3;
+                continue;
+            }
+            missing.add("-->");
+        }
+        const gt = missing.has(">") ? -1 : html.indexOf(">", lt + 1);
+        if (gt === -1) {
+            // No tag can close any more: the rest is text.
+            missing.add(">");
+            out.push(html.slice(lt));
+            break;
+        }
+        const m = /^(\/?)([a-z][a-z0-9]*)/i.exec(html.slice(lt + 1, Math.min(gt, lt + 12)));
+        const closing = m?.[1] === "/";
+        const name = m?.[2]?.toLowerCase() ?? "";
+        i = gt + 1;
+        if (!closing && (name === "script" || name === "style")) {
+            const close = `</${name}`;
+            if (!missing.has(close)) {
+                const re = new RegExp(`<\\/${name}\\s*>`, "gi");
+                re.lastIndex = gt + 1;
+                const end = re.exec(html);
+                if (end) {
+                    i = end.index + end[0].length;
+                    continue;
+                }
+                missing.add(close);
+            }
+            continue;
+        }
+        if (name === "br")
+            out.push("\n");
+        else if (closing && name === "p")
+            out.push("\n\n");
+        else if (closing ? BLOCK_END.has(name) : BLOCK_START.has(name))
+            out.push("\n");
+    }
+    return decodeEntities(out.join(""))
         .replace(/[ \t]+\n/g, "\n")
         .replace(/\n{3,}/g, "\n\n")
         .trim();

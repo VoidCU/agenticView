@@ -17,7 +17,11 @@ export declare function parseAddress(header: string): {
     name: string;
     email: string;
 };
-/** Regex-based HTML to plain text (no DOM). */
+/**
+ * HTML to plain text (no DOM) in one linear scan: script/style blocks and comments are dropped, block
+ * tags become line breaks, every other tag is removed. Hostile input (thousands of unclosed `<script>`
+ * or `<!--`) stays linear: once a closing marker is known to be missing, it is never searched for again.
+ */
 export declare function htmlToText(html: string): string;
 /** Drop the quoted history ("On ... wrote:" and trailing "> " lines). */
 export declare function trimQuoted(text: string): string;

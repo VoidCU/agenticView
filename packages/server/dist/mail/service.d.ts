@@ -28,6 +28,8 @@ export interface MailServiceDeps {
     managerId?: () => string | undefined;
     /** An agent's display name, for the tag routing lines. */
     agentName?: (agentId: string) => Promise<string | undefined>;
+    /** True for an existing worker agent (a tag's preferred agent); without it no preferred agent is accepted. */
+    isWorker?: (agentId: string) => Promise<boolean>;
     /** A request's direct child tasks (to tell whether a worker already drafted its thread). */
     taskChildren?: (taskId: string) => Promise<Task[]>;
 }
@@ -111,14 +113,25 @@ export declare class MailService {
     /** Runs `fn` on the thread and draft under the thread lock; unknown keys or draft ids are 404. */
     private withDraft;
     private static replace;
-    /** New body; a Gmail copy saved earlier no longer matches, so its id is dropped. Sent drafts are final. */
+    /**
+     * New body. The Gmail draft saved earlier keeps its id: the next save or send updates that same Gmail
+     * draft, so no stale copy is left behind. Sent drafts are final.
+     */
     editDraft(key: string, draftId: string, body: string): Promise<MailDraft>;
+    /** Removes the draft; its saved Gmail copy (not yet sent) is deleted too, unless the account is gone. */
     discardDraft(key: string, draftId: string): Promise<void>;
     /** The draft as a reply MIME (base64url) to the newest message not sent by the account itself. */
     private replyRaw;
-    /** Saves the draft as a Gmail draft reply in its thread and records the Gmail draft id. */
+    /**
+     * Saves the draft as a Gmail draft reply in its thread and records the Gmail draft id. Saved before:
+     * that Gmail draft is updated in place instead of creating another.
+     */
     saveDraftToGmail(key: string, draftId: string): Promise<MailDraft>;
-    /** Sends the draft as a reply in its thread. Runs under the thread lock, so it can never send twice. */
+    /**
+     * Sends the draft as a reply in its thread. Runs under the thread lock, so it can never send twice. A
+     * draft saved to Gmail is updated to the current body and sent as that Gmail draft (Gmail then drops it
+     * from Drafts), so no saved copy remains; otherwise it goes out via messages/send.
+     */
     sendDraft(key: string, draftId: string): Promise<MailDraft>;
     /** Pulls every `autoCheck` source every 10 minutes (unref'd timer). Returns a stop function. */
     startAutoCheck(): () => void;

@@ -1,9 +1,11 @@
 import { spawn as nodeSpawn } from "node:child_process";
-import { mkdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { which as defaultWhich } from "./which.js";
 import { extractCliError } from "./errors.js";
+import { UNTRUSTED_MCP_REFUSAL, anyUserMcpServers } from "./untrusted.js";
 export const GEMINI_MISSING_REASON = "Install the Gemini CLI (npm i -g @google/gemini-cli) and sign in, or set GEMINI_API_KEY.";
 /** `ask` cannot prompt through a headless CLI, so it gets the CLI's own most restrictive mode (`default`). */
 const APPROVAL = { auto: "yolo", "auto-edit": "auto_edit", ask: "default" };
@@ -230,6 +232,25 @@ export async function cleanupGeminiSettings(projectPath) {
     }
     await writeFile(file, JSON.stringify(settings, null, 2), "utf8");
 }
+/**
+ * Whether the user configured Gemini MCP servers: ~/.gemini/settings.json, the project's
+ * .gemini/settings.json (minus AgenticView's own per-run entries) or an installed extension.
+ */
+async function geminiUserMcp(home, cwd) {
+    const files = [join(home, ".gemini", "settings.json"), settingsPath(cwd)];
+    for (const base of [join(home, ".gemini", "extensions"), join(cwd, ".gemini", "extensions")]) {
+        let names = [];
+        try {
+            names = await readdir(base);
+        }
+        catch {
+            continue;
+        }
+        for (const n of names)
+            files.push(join(base, n, "gemini-extension.json"));
+    }
+    return anyUserMcpServers(files, (name) => name.startsWith(ENTRY_PREFIX));
+}
 export class GeminiRuntime {
     opts;
     provider = "gemini";
@@ -251,6 +272,11 @@ export class GeminiRuntime {
         let sessionId = req.sessionId;
         if (signal.aborted)
             return { text, stopReason: "aborted" };
+        // An untrusted run (it reads Gmail threads) fails closed when the user has MCP servers of their own:
+        // a server with `trust: true` skips approval even in the default mode, and no verified flag turns them off.
+        if (req.untrusted && (await geminiUserMcp(this.opts.home ?? homedir(), req.cwd))) {
+            return { text, stopReason: "error", error: UNTRUSTED_MCP_REFUSAL };
+        }
         const useBridge = req.bridgeTools.length > 0;
         const exclude = excludedToolsFor(req.tools);
         const serverName = `${ENTRY_PREFIX}${req.runId}`;

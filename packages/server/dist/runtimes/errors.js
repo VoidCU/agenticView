@@ -125,7 +125,10 @@ export function classifyError(errorText) {
         /sign in with/.test(text) ||
         /not logged in/.test(text) ||
         /login required/.test(text) ||
-        /permission denied/.test(text)) {
+        /permission denied/.test(text) ||
+        // An untrusted (email) run refused over the user's own MCP servers: a setup problem the user fixes,
+        // never a crash that switches the agent's provider (see runtimes/untrusted.ts).
+        /can't be switched off for an email reply/.test(text)) {
         return "auth";
     }
     // 4. Fallback to crash

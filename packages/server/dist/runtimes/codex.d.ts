@@ -23,6 +23,8 @@ export interface CodexRuntimeOptions {
     bridgeUrl: () => string;
     apiKey?: string;
     which?: Which;
+    /** Lists the user's Codex MCP servers for an untrusted run (tests); default `codex mcp list --json`. */
+    listMcp?: ListCodexMcp;
 }
 export declare const CODEX_MISSING_REASON = "Install the Codex CLI (npm i -g @openai/codex) and sign in with `codex login` or set CODEX_API_KEY.";
 /**
@@ -44,6 +46,18 @@ export declare class CodexRuntime implements Runtime {
 }
 /** ThreadOptions for a run: sandbox, plus model and `modelReasoningEffort` when the agent sets them. */
 export declare function codexThreadOptions(req: RunRequest, platform: NodeJS.Platform): Record<string, unknown>;
+/** One MCP server as `codex mcp list --json` reports it. */
+export interface CodexMcpEntry {
+    name: string;
+    enabled?: boolean;
+}
+/** Lists the MCP servers Codex would load in `cwd` (config, project config and plugins). */
+export type ListCodexMcp = (cwd: string, env: Record<string, string>) => Promise<CodexMcpEntry[]>;
+/**
+ * `codex mcp list --json` with the Codex CLI the SDK runs (the @openai/codex package it depends on).
+ * Rejects on any failure, so callers can fail closed.
+ */
+export declare const listCodexMcp: ListCodexMcp;
 /** Env var a custom endpoint's key is passed in (model_providers.<id>.env_key); only ever in the child env. */
 export declare const CUSTOM_KEY_ENV = "AGENTICVIEW_CUSTOM_KEY";
 /** Codex config-table id for a custom provider ("custom:my-llm" -> "agenticview_my_llm"). */

@@ -9,6 +9,8 @@ export interface GeminiRuntimeOptions {
     apiKey?: string;
     spawn?: typeof nodeSpawn;
     which?: Which;
+    /** Home directory holding ~/.gemini (tests). */
+    home?: string;
 }
 export declare const GEMINI_MISSING_REASON = "Install the Gemini CLI (npm i -g @google/gemini-cli) and sign in, or set GEMINI_API_KEY.";
 /** Gemini tool names to exclude for each allowance that is off. */

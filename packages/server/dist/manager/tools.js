@@ -47,6 +47,8 @@ export function MAIL_WORKER_SYSTEM_PROMPT(agent) {
         .filter(Boolean)
         .join("\n\n");
 }
+/** How a mail task's title shows outside mail requests: its real title was written while reading untrusted email. */
+export const MAIL_TASK_TITLE = "(email reply task)";
 const MODEL_HINT = "Model id or alias for the agent's provider, e.g. claude: opus | sonnet | haiku | fable; codex: gpt-6-sol; copilot: auto (Copilot routes per request) | gpt-5.6-sol | claude-sonnet-5 | claude-opus-5 (availability depends on the user's Copilot plan); antigravity: gemini-3.8-flash-high | gemini-3.1-pro-high | claude-sonnet-4-6 | claude-opus-4-6-thinking (run `agy models`); gemini: pro | flash. Omit for the provider default.";
 const EFFORT_HINT = "Reasoning effort: low | medium | high (claude also xhigh | max; codex also xhigh | max | ultra on supporting models; copilot also minimal | xhigh | max, ignored for copilot model auto; antigravity also max, ignored for its -high/-medium/-low model ids; ignored for gemini). Omit for the default.";
 function agentLine(a, tasks, sessions = []) {
@@ -214,7 +216,11 @@ export function managerTools(ctx) {
                 // Resolved failures are terminal (failed status) and are hidden in the default view,
                 // just like other terminal tasks.  They appear when includeDone=true.
                 const rows = all.filter((t) => args.includeDone === true || !isTerminal(t.status));
-                return JSON.stringify(rows.map((t) => ({ id: t.id, kind: t.kind, title: t.title, status: t.status, assigneeId: t.assigneeId, parentId: t.parentId, projectPath: t.projectPath, result: t.result?.slice(0, 300), error: t.error, resolution: t.resolution })), null, 2);
+                // Only a mail request (already reading untrusted email) sees mail tasks' Atlas/email-shaped text.
+                const seesMail = ctx.requestTask.mail !== undefined;
+                return JSON.stringify(rows.map((t) => t.mail && !seesMail
+                    ? { id: t.id, kind: t.kind, title: MAIL_TASK_TITLE, status: t.status, assigneeId: t.assigneeId, parentId: t.parentId, projectPath: t.projectPath }
+                    : { id: t.id, kind: t.kind, title: t.title, status: t.status, assigneeId: t.assigneeId, parentId: t.parentId, projectPath: t.projectPath, result: t.result?.slice(0, 300), error: t.error, resolution: t.resolution }), null, 2);
             },
         },
         {
@@ -318,9 +324,8 @@ export function managerTools(ctx) {
                 threadId: z.string().optional().describe("Mail thread this task answers (mail requests only)"),
             },
             handler: async (args) => {
-                // Re-read the request: threads the user forwarded while this run was live are merged into it.
-                const request = (await ctx.tasks.get(ctx.requestTask.id)) ?? ctx.requestTask;
-                const threads = request.mail?.threadIds ?? [];
+                // A request's threads are fixed when it starts (mail never joins a live request).
+                const threads = ctx.requestTask.mail?.threadIds ?? [];
                 let threadId = args.threadId === undefined ? undefined : String(args.threadId);
                 if (threadId !== undefined && !threads.includes(threadId))
                     return `ERROR: threadId ${threadId} is not part of this request`;
@@ -381,6 +386,9 @@ export function managerTools(ctx) {
                 const task = await ctx.tasks.get(taskId);
                 if (!task)
                     return `ERROR: unknown task ${taskId}`;
+                // A mail request only settles its own tasks.
+                if (ctx.requestTask.mail && task.parentId !== ctx.requestTask.id)
+                    return `ERROR: task ${taskId} is not part of this request`;
                 if (task.status !== "failed" && task.status !== "cancelled") {
                     return `ERROR: only failed or cancelled tasks can be resolved (status is ${task.status})`;
                 }

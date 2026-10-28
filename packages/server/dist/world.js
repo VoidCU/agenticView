@@ -8,7 +8,7 @@ import { AgentMemory } from "./agents/memory.js";
 import { AgentRegistry } from "./agents/registry.js";
 import { TaskService } from "./tasks/taskService.js";
 import { coverInsteadOfRetry } from "./tasks/retryGuard.js";
-import { Orchestrator, isMailWork, isRestricted } from "./manager/orchestrator.js";
+import { Orchestrator, isMailTask, isRestricted } from "./manager/orchestrator.js";
 import { readJsonFile, writeJsonFile } from "./store/jsonStore.js";
 import { ensureProjectGitignore, globalRoot, projectRoot } from "./store/paths.js";
 import { describeWorkSeatMoves, isTerminal, migrateWorkSeats } from "@agenticview/shared";
@@ -385,9 +385,9 @@ export async function createWorld(ref, opts) {
         }
         return historyWork(agentId, exceptTaskId);
     };
-    // Mail work tasks are left out: their results are shaped by untrusted email (see isMailWork).
+    // Mail tasks (work and requests) are left out: their results are shaped by untrusted email (see isMailTask).
     const historyWork = async (agentId, exceptTaskId) => (await tasks.list())
-        .filter((t) => t.assigneeId === agentId && t.id !== exceptTaskId && isTerminal(t.status) && !isMailWork(t))
+        .filter((t) => t.assigneeId === agentId && t.id !== exceptTaskId && isTerminal(t.status) && !isMailTask(t))
         .sort((a, b) => (b.finishedAt ?? b.createdAt).localeCompare(a.finishedAt ?? a.createdAt))
         .slice(0, 5)
         .map((t) => {
@@ -623,6 +623,7 @@ export async function createWorld(ref, opts) {
             return orchestrator.handleUserMessage(input);
         },
         agentName: async (id) => (await registry.get(id))?.name,
+        isWorker: async (id) => (await registry.get(id))?.role === "worker",
         taskChildren: (id) => tasks.children(id),
     });
     mailService = mail;

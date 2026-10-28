@@ -20,6 +20,11 @@ export class GmailClient {
         this.token = token;
         this.fetchImpl = fetchImpl;
     }
+    /**
+     * One Gmail call. 429 and 5xx are retried with backoff, except that a non-idempotent call (`once`: a send
+     * or a draft create) is never retried on 5xx: Google may have accepted it, and a retry could send twice.
+     * A 429 means Google did not accept it, so that is retried for every call.
+     */
     async request(accountId, path, init = {}) {
         for (let attempt = 0;; attempt++) {
             const token = await this.token(accountId);
@@ -35,7 +40,7 @@ export class GmailClient {
                 const text = await res.text();
                 return (text ? JSON.parse(text) : {});
             }
-            const retryable = res.status === 429 || res.status >= 500;
+            const retryable = res.status === 429 || (res.status >= 500 && !init.once);
             if (retryable && attempt < BACKOFF_MS.length) {
                 await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
                 continue;
@@ -189,12 +194,34 @@ export class GmailClient {
     async createDraft(accountId, gmailThreadId, raw) {
         const d = await this.request(accountId, "drafts", {
             method: "POST",
+            once: true,
             body: { message: { raw, threadId: gmailThreadId } },
         });
         return d.id;
     }
+    /** Replaces a saved Gmail draft's message (the same draft id, so no second copy). */
+    async updateDraft(accountId, draftId, gmailThreadId, raw) {
+        await this.request(accountId, `drafts/${encodeURIComponent(draftId)}`, {
+            method: "PUT",
+            body: { id: draftId, message: { raw, threadId: gmailThreadId } },
+        });
+    }
+    /** Sends a saved Gmail draft; Gmail removes it from Drafts. */
+    async sendDraftById(accountId, draftId) {
+        await this.request(accountId, "drafts/send", { method: "POST", body: { id: draftId }, once: true });
+    }
+    /** Deletes a saved Gmail draft; one that is already gone (404) is fine. */
+    async deleteDraft(accountId, draftId) {
+        try {
+            await this.request(accountId, `drafts/${encodeURIComponent(draftId)}`, { method: "DELETE" });
+        }
+        catch (e) {
+            if (e.status !== 404)
+                throw e;
+        }
+    }
     async send(accountId, gmailThreadId, raw) {
-        await this.request(accountId, "messages/send", { method: "POST", body: { raw, threadId: gmailThreadId } });
+        await this.request(accountId, "messages/send", { method: "POST", body: { raw, threadId: gmailThreadId }, once: true });
     }
 }
 //# sourceMappingURL=gmail.js.map

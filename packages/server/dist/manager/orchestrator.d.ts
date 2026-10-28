@@ -70,7 +70,7 @@ export interface UserMessageInput {
     projectPath?: string;
     /** Internal: the request whose run ended before it read this message (see execute). */
     followUpOf?: string;
-    /** Gmail threads this message is about. The request carries them; its mail work tasks run restricted. */
+    /** Gmail threads this message is about. Always a new mail request (never joins a live one); see isMailRequest. */
     mail?: {
         threadIds: string[];
     };
@@ -78,7 +78,8 @@ export interface UserMessageInput {
 /**
  * Runs that must not edit files, run commands or use worker bridge tools: read-only tasks (brainstorms)
  * and work tasks that answer Gmail threads, whose untrusted email content must never drive an agent
- * that can change anything. Mail *requests* are not restricted: the Manager still delegates them.
+ * that can change anything. Mail *requests* still delegate, but only with MAIL_REQUEST_TOOLS on a
+ * conversation of their own (see isMailRequest).
  */
 export declare function isRestricted(task: Task): boolean;
 /**
@@ -86,6 +87,21 @@ export declare function isRestricted(task: Task): boolean;
  * agent's memory or recent-work digest (later unrestricted runs read those).
  */
 export declare function isMailWork(task: Task): boolean;
+/**
+ * A Manager request carrying Gmail threads. Its prompt holds the untrusted email, so it runs with
+ * MAIL_REQUEST_TOOLS only, on a conversation that is never Atlas's main one (not resumed from or saved
+ * to it, never the live request), and it never reaches memory or recent work.
+ */
+export declare function isMailRequest(task: Task): boolean;
+/** Any task whose prompt or result is shaped by untrusted email. */
+export declare function isMailTask(task: Task): boolean;
+/**
+ * The only Manager tools a mail request gets: reading the office and delegating to (restricted) mail
+ * work. Nothing that makes a lasting change (create/update agents, sessions, layout) or re-runs work.
+ */
+export declare const MAIL_REQUEST_TOOLS: readonly string[];
+/** Appended to the Manager's system prompt for a mail request. */
+export declare const MAIL_REQUEST_NOTE: string;
 /** Runs tasks on runtimes, keeps the Manager's map truthful, and mediates permissions and questions. */
 export declare class Orchestrator {
     private readonly deps;
@@ -98,8 +114,6 @@ export declare class Orchestrator {
     private readonly liveRequests;
     /** Chat messages waiting for a live Manager request run, by task id (see interruptManager). */
     private readonly inbox;
-    /** Gmail threads that arrived with the inbox messages, by task id (carried to a follow-up request). */
-    private readonly inboxMail;
     private readonly waiters;
     private readonly pendingPermissions;
     private readonly pendingQuestions;

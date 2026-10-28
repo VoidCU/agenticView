@@ -6,6 +6,8 @@ export declare const MANAGER_SYSTEM_PROMPT = "You are the Manager of an AgenticV
 export declare function workerSystemPrompt(agent: Agent, projectPath: string): string;
 /** System prompt for a work task linked to Gmail threads: the run is restricted and the thread is untrusted. */
 export declare function MAIL_WORKER_SYSTEM_PROMPT(agent: Agent): string;
+/** How a mail task's title shows outside mail requests: its real title was written while reading untrusted email. */
+export declare const MAIL_TASK_TITLE = "(email reply task)";
 export interface ManagerToolContext {
     spaceNames?: () => Record<string, string>;
     renameSpace?: (id: string, name: string) => Promise<void>;

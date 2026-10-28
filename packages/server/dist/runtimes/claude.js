@@ -163,7 +163,9 @@ export class ClaudeRuntime {
                 cwd: req.cwd,
                 systemPrompt: { type: "preset", preset: "claude_code", append: req.systemPrompt },
                 maxTurns: req.maxTurns ?? 60,
-                settingSources: ["project"],
+                // An untrusted run (it reads Gmail threads) loads no settings at all: no project MCP servers and no
+                // permission allow-rules from .claude/settings*.json can reach it.
+                settingSources: req.untrusted ? [] : ["project"],
                 abortController,
             };
             if (req.sessionId)
