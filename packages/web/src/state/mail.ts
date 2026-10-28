@@ -86,6 +86,8 @@ interface MailState {
   removeSource(id: string): Promise<void>;
   pull(id: string): Promise<unknown>;
   loadThreads(filter?: ThreadFilter): Promise<void>;
+  /** Re-reads one thread (after a draft edit, send or discard) and merges it into `threads`. */
+  loadThread(key: string): Promise<MailThread | undefined>;
   setTags(threadKey: string, tagIds: string[]): Promise<MailThread>;
   saveTag(input: TagInput): Promise<MailTag>;
   removeTag(id: string): Promise<void>;
@@ -151,6 +153,13 @@ export const useMail = create<MailState>((set, get) => ({
     const f = filter ?? get().threadFilter;
     const threads = await call<MailThread[]>(`/api/mail/threads${query(f)}`);
     set({ threads, threadFilter: f });
+  },
+
+  async loadThread(key) {
+    const t = await call<MailThread>(`/api/mail/threads/${enc(key)}`);
+    if (typeof t?.id !== "string") return undefined;
+    set((s) => ({ threads: s.threads.some((x) => x.id === t.id) ? s.threads.map((x) => (x.id === t.id ? t : x)) : [...s.threads, t] }));
+    return t;
   },
 
   async setTags(threadKey, tagIds) {

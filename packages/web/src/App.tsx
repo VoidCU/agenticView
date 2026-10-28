@@ -12,6 +12,7 @@ import { QuestionToast } from "./hud/QuestionToast";
 import { CreateAgentModal } from "./hud/CreateAgentModal";
 import { SettingsModal, type SettingsTab } from "./hud/SettingsModal";
 import { SessionsModal } from "./hud/sessions";
+import { MailModal, type MailView } from "./hud/MailModal";
 import { Timeline } from "./hud/Timeline";
 import { ProjectsPanel } from "./hub/HubView";
 import { CloseIcon } from "./hud/ui";
@@ -26,7 +27,7 @@ import { PlayRpsModal } from "./hud/PlayRpsModal";
 import { challengeRps } from "./state/rps";
 import { useHudPrefs } from "./state/hudPrefs";
 
-type Modal = "create" | "settings" | "sessions" | "inbox" | "scoreboard" | undefined;
+type Modal = "create" | "settings" | "sessions" | "inbox" | "scoreboard" | "mail" | undefined;
 type Tab = "office" | "tasks" | "chat";
 const SETTINGS_TABS: readonly SettingsTab[] = ["general", "providers", "office", "layout", "connections", "usage"];
 /** Keyboard shortcuts hint overlay */
@@ -46,6 +47,7 @@ function ShortcutsHint({ onClose }: { onClose: () => void }) {
         </div>
         <dl className="shortcuts-list">
           <dt><kbd>I</kbd></dt><dd>Open Inbox</dd>
+          <dt><kbd>E</kbd></dt><dd>Mail</dd>
           <dt><kbd>T</kbd></dt><dd>Toggle Tasks panel</dd>
           <dt><kbd>L</kbd></dt><dd>Toggle Timeline</dd>
           <dt><kbd>V</kbd></dt><dd>Toggle Walk mode</dd>
@@ -101,6 +103,7 @@ export function App() {
   const [modal, setModal] = useState<Modal>();
   const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>();
   const [playAgentId, setPlayAgentId] = useState<string | undefined>();
+  const [mailOpen, setMailOpen] = useState<{ view?: MailView; accountId?: string }>({});
   const [tab, setTab] = useState<Tab>("office");
   const [showTimeline, setShowTimeline] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -152,6 +155,19 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const handleOpenMail = (event: Event) => {
+      const detail = (event as CustomEvent<{ accountId?: unknown; view?: unknown } | undefined>).detail;
+      setMailOpen({
+        view: detail?.view === "sources" ? "sources" : "threads",
+        ...(typeof detail?.accountId === "string" ? { accountId: detail.accountId } : {}),
+      });
+      setModal("mail");
+    };
+    window.addEventListener("agenticview:open-mail", handleOpenMail);
+    return () => window.removeEventListener("agenticview:open-mail", handleOpenMail);
+  }, []);
+
+  useEffect(() => {
     const handleOpenScoreboard = () => setModal("scoreboard");
     window.addEventListener("agenticview:open-scoreboard", handleOpenScoreboard);
     return () => window.removeEventListener("agenticview:open-scoreboard", handleOpenScoreboard);
@@ -181,7 +197,7 @@ export function App() {
     return () => window.removeEventListener("agenticview:play-rps", handlePlayRps);
   }, []);
 
-  // Keyboard shortcuts: I=Inbox, T=Tasks, L=Timeline, V=Walk, M=MiniMap, ?=help
+  // Keyboard shortcuts: I=Inbox, E=Mail, T=Tasks, L=Timeline, V=Walk, M=MiniMap, ?=help
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Skip when typing in inputs/textareas/selects or contenteditable
@@ -200,6 +216,12 @@ export function App() {
         case "I":
           e.preventDefault();
           setModal((m) => (m === "inbox" ? undefined : "inbox"));
+          break;
+        case "e":
+        case "E":
+          e.preventDefault();
+          setMailOpen({});
+          setModal((m) => (m === "mail" ? undefined : "mail"));
           break;
         case "t":
         case "T":
@@ -259,6 +281,7 @@ export function App() {
           onCreate={() => setModal("create")}
           onSessions={() => setModal("sessions")}
           onInbox={() => setModal("inbox")}
+          onMail={() => { setMailOpen({}); setModal("mail"); }}
           onTimeline={() => setShowTimeline((v) => !v)}
           timelineActive={showTimeline}
           onWalk={() => setWalking(!walking)}
@@ -313,6 +336,7 @@ export function App() {
       {modal === "settings" && <SettingsModal initialTab={settingsTab} onClose={() => setModal(undefined)} />}
       {modal === "sessions" && <SessionsModal onClose={() => setModal(undefined)} />}
       {modal === "inbox" && <Inbox onClose={() => setModal(undefined)} />}
+      {modal === "mail" && <MailModal initialView={mailOpen.view} initialAccountId={mailOpen.accountId} onClose={() => setModal(undefined)} />}
       {modal === "scoreboard" && (
         <ScoreboardModal
           onClose={() => setModal(undefined)}

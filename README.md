@@ -228,6 +228,20 @@ The skill restores the original `statusLine` value from the backup (or removes `
 - The data arrives after the first response in each window, not before it. The office shows counters as soon as Claude Code delivers them.
 - The relay is a lightweight Node.js script with no extra dependencies. The office does not need the relay to function; turning it off has no other effect.
 
+## Mail (Gmail)
+
+Bring email threads into the office so Atlas can hand them to a worker, who drafts a reply for you.
+
+1. Create a Google Cloud project and enable the **Gmail API**.
+2. Set up the OAuth consent screen. Choose **Internal** if you use Google Workspace, otherwise publish the app **In production**. Google apps left in **Testing** mode sign you out every 7 days.
+3. Create an OAuth client of type **Desktop app**, then paste its Client ID and Client secret in **Settings → Connections → Gmail**.
+4. Click **Connect a Gmail account**, then **Choose senders**. Pick the senders and how much mail to pull (latest N, last 7/30/90 days, a date range, or since the last pull), and press **Save & Pull**.
+5. Open **Mail** in the top bar (or press <kbd>E</kbd>). Tag threads, select some and press **Send to Atlas**. The worker's reply arrives as a draft on the thread, where you can edit it, copy it, save it to your Gmail drafts, or send it.
+
+Emails you send to Atlas are shared with the AI provider your agents use.
+
+Agents never send email. Only you can send a draft, from the Mail view, after a confirm step that shows the recipient, subject and body.
+
 ## Scopes and where data lives
 
 | | Project agents | Global agents |

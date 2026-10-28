@@ -24,6 +24,7 @@ interface Props {
   onCreate: () => void;
   onSessions?: () => void;
   onInbox?: () => void;
+  onMail?: () => void;
   onTimeline?: () => void;
   timelineActive?: boolean;
   onWalk?: () => void;
@@ -33,7 +34,7 @@ interface Props {
   chatCollapsed?: boolean;
 }
 
-export function TopBar({ onSettings, onProviderSettings, onCreate, onSessions, onInbox, onTimeline, timelineActive, onWalk, walkActive, onToggleTags, onToggleChat, chatCollapsed }: Props) {
+export function TopBar({ onSettings, onProviderSettings, onCreate, onSessions, onInbox, onMail, onTimeline, timelineActive, onWalk, walkActive, onToggleTags, onToggleChat, chatCollapsed }: Props) {
   const sessions = useStore((s) => s.sessions);
   const online = sessions.filter((s) => s.online).length;
   const world = useStore((s) => s.world);
@@ -87,6 +88,12 @@ export function TopBar({ onSettings, onProviderSettings, onCreate, onSessions, o
             {pendingCount}
           </span>
         </button>
+        {onMail && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onMail} title="Mail (E)" aria-label="Mail" data-testid="mail-button">
+            <span className="topbar-icon" aria-hidden="true">✉</span>
+            Mail
+          </button>
+        )}
         {onWalk && (
           <button
             type="button"
