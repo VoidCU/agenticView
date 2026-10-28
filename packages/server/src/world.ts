@@ -62,6 +62,8 @@ import { cleanupAntigravityPlugins } from "./runtimes/antigravity.js";
 import { cleanupCopilotTemp } from "./runtimes/copilot.js";
 import { GameService } from "./games/gameService.js";
 import { IdleBehaviourService } from "./games/idleBehaviour.js";
+import type { MailAccounts } from "./mail/accounts.js";
+import type { OAuthFlow } from "./mail/oauth.js";
 
 export interface WorldOptions {
   runtimes: Map<Provider, Runtime>;
@@ -69,6 +71,8 @@ export interface WorldOptions {
   toolRegistry: ToolRegistry;
   bridgeUrl: () => string;
   workerTools?: (agent: Agent, task: Task) => BridgeTool[];
+  /** Global Gmail accounts + the server's OAuth flow, built in createServer (consumed by mail services). */
+  mail?: { accounts: MailAccounts; flow: OAuthFlow };
 }
 
 /** Outcome of World.retryTask: re-run, or already covered and marked solved. */

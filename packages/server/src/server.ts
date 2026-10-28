@@ -16,6 +16,9 @@ import type { Orchestrator } from "./manager/orchestrator.js";
 import { workerTools } from "./manager/workerTools.js";
 import { SessionRuntime } from "./runtimes/session.js";
 import { workerRoutes } from "./api/worker.js";
+import { MailAccounts } from "./mail/accounts.js";
+import { OAuthFlow } from "./mail/oauth.js";
+import { oauthRoutes } from "./mail/oauthRoutes.js";
 
 export interface ServerOptions {
   world: WorldRef;
@@ -27,6 +30,8 @@ export interface ServerOptions {
   workerTools?: (agent: Agent, task: Task) => BridgeTool[];
   /** Called after an authenticated POST /api/shutdown has been answered (the CLI's `close`). */
   onShutdown?: () => void;
+  /** fetch used for Google OAuth/Gmail calls (tests inject a fake). Defaults to global fetch. */
+  mailFetch?: typeof fetch;
 }
 
 export interface RunningServer {
@@ -36,6 +41,8 @@ export interface RunningServer {
   world: World;
   orchestrator: Orchestrator;
   bus: EventBus;
+  /** Global Gmail accounts and this server's OAuth flow (its loopback callback points at this port). */
+  mail: { accounts: MailAccounts; flow: OAuthFlow };
   close(): Promise<void>;
 }
 
@@ -50,11 +57,23 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
 
   const runtimes = opts.runtimes ?? (await (await import("./runtimes/index.js")).createRuntimes({ bridgeUrl }));
   const workerToolsFor = opts.workerTools ?? ((agent: Agent, task: Task) => workerTools({ projectPath: task.projectPath || process.cwd(), agent }));
-  const world = await createWorld(opts.world, { runtimes, bus, toolRegistry, bridgeUrl, workerTools: workerToolsFor });
+  const mailAccounts = new MailAccounts();
+  const oauthFlow = new OAuthFlow(
+    mailAccounts,
+    () => `${bridgeUrl()}/oauth/google/callback`,
+    () => bus.emit({ type: "mail.changed", what: "accounts" }),
+    opts.mailFetch ?? fetch,
+  );
+  const mail = { accounts: mailAccounts, flow: oauthFlow };
+  const world = await createWorld(opts.world, { runtimes, bus, toolRegistry, bridgeUrl, workerTools: workerToolsFor, mail });
 
   const app = new Hono();
   app.get("/healthz", (c) => c.json({ ok: true, world: opts.world.kind }));
   app.route("/", bridgeRoutes(toolRegistry));
+  // Google's OAuth redirect arrives from the user's browser without the office token, so this route is
+  // deliberately mounted BEFORE the token middleware (and is outside /api/* anyway). The single-use,
+  // 10-minute OAuth state issued by OAuthFlow.start() is what guards it.
+  app.route("/", oauthRoutes(oauthFlow));
   app.use("/api/*", requireToken(opts.token));
   app.use("/hooks", requireToken(opts.token));
   // Graceful stop for `agenticview close`: answer first, then let the owner tear down (signals are unreliable on Windows).
@@ -91,6 +110,7 @@ export async function createServer(opts: ServerOptions): Promise<RunningServer> 
     world,
     orchestrator: world.orchestrator,
     bus,
+    mail,
     close: async () => {
       if (pulse) clearInterval(pulse);
       await ws.close();
