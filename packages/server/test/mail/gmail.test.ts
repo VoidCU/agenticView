@@ -186,6 +186,28 @@ describe("GmailClient", () => {
     expect(JSON.parse(c.body!)).toEqual({ message: { raw: "RAWDATA", threadId: "gt" } });
   });
 
+  it("never retries a send or draft create on 5xx (Google may have accepted it)", async () => {
+    for (const call of [
+      (gc: GmailClient) => gc.send("a1", "gt", "RAW"),
+      (gc: GmailClient) => gc.sendDraftById("a1", "d1"),
+      (gc: GmailClient) => gc.createDraft("a1", "gt", "RAW"),
+    ]) {
+      const { impl, calls } = fake(() => json({}, 503));
+      await expect(call(client(impl))).rejects.toThrow(/503/);
+      expect(calls).toHaveLength(1);
+    }
+  });
+
+  it("retries a send after 429 (Google did not accept it)", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    const { impl, calls } = fake(() => (n++ === 0 ? json({}, 429) : json({ id: "m1" })));
+    const p = client(impl).send("a1", "gt", "RAW");
+    await vi.advanceTimersByTimeAsync(600);
+    await p;
+    expect(calls).toHaveLength(2);
+  });
+
   it("updateDraft puts id, message.raw and threadId", async () => {
     const { impl, calls } = fake(() => json({ id: "d1" }));
     await client(impl).updateDraft("a1", "d1", "gt", "RAW2");

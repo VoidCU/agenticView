@@ -30,7 +30,12 @@ export class GmailClient {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  private async request<T>(accountId: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
+  /**
+   * One Gmail call. 429 and 5xx are retried with backoff, except that a non-idempotent call (`once`: a send
+   * or a draft create) is never retried on 5xx: Google may have accepted it, and a retry could send twice.
+   * A 429 means Google did not accept it, so that is retried for every call.
+   */
+  private async request<T>(accountId: string, path: string, init: { method?: string; body?: unknown; once?: boolean } = {}): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const token = await this.token(accountId);
       const res = await this.fetchImpl(BASE + path, {
@@ -45,7 +50,7 @@ export class GmailClient {
         const text = await res.text();
         return (text ? JSON.parse(text) : {}) as T;
       }
-      const retryable = res.status === 429 || res.status >= 500;
+      const retryable = res.status === 429 || (res.status >= 500 && !init.once);
       if (retryable && attempt < BACKOFF_MS.length) {
         await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
         continue;
@@ -210,6 +215,7 @@ export class GmailClient {
   async createDraft(accountId: string, gmailThreadId: string, raw: string): Promise<string> {
     const d = await this.request<{ id: string }>(accountId, "drafts", {
       method: "POST",
+      once: true,
       body: { message: { raw, threadId: gmailThreadId } },
     });
     return d.id;
@@ -225,7 +231,7 @@ export class GmailClient {
 
   /** Sends a saved Gmail draft; Gmail removes it from Drafts. */
   async sendDraftById(accountId: string, draftId: string): Promise<void> {
-    await this.request(accountId, "drafts/send", { method: "POST", body: { id: draftId } });
+    await this.request(accountId, "drafts/send", { method: "POST", body: { id: draftId }, once: true });
   }
 
   /** Deletes a saved Gmail draft; one that is already gone (404) is fine. */
@@ -238,6 +244,6 @@ export class GmailClient {
   }
 
   async send(accountId: string, gmailThreadId: string, raw: string): Promise<void> {
-    await this.request(accountId, "messages/send", { method: "POST", body: { raw, threadId: gmailThreadId } });
+    await this.request(accountId, "messages/send", { method: "POST", body: { raw, threadId: gmailThreadId }, once: true });
   }
 }
