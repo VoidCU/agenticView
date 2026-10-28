@@ -102,6 +102,8 @@ function TagPicker({ thread, run }: { thread: MailThread; run: MailRun }) {
 }
 
 function DraftCard({ thread, draft, to, run, label }: { thread: MailThread; draft: MailDraft; to: string; run: MailRun; label: string }) {
+  // One reply per thread: once any version went out, the others cannot be sent too.
+  const otherSent = thread.drafts.some((d) => d.id !== draft.id && d.sentAt);
   const [value, setValue] = useState(draft.body);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -174,7 +176,7 @@ function DraftCard({ thread, draft, to, run, label }: { thread: MailThread; draf
           <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={() => void act(() => useMail.getState().saveDraftToGmail(thread.id, draft.id))}>
             Save to Gmail drafts
           </button>
-          <button type="button" className="btn btn-ghost btn-xs" disabled={busy || !to} onClick={() => setConfirming(true)}>
+          <button type="button" className="btn btn-ghost btn-xs" disabled={busy || !to || otherSent} onClick={() => setConfirming(true)}>
             Send…
           </button>
           <button type="button" className="btn btn-ghost btn-xs" disabled={busy} onClick={() => void act(() => useMail.getState().discardDraft(thread.id, draft.id))}>
@@ -182,7 +184,8 @@ function DraftCard({ thread, draft, to, run, label }: { thread: MailThread; draf
           </button>
         </div>
       )}
-      {confirming && (
+      {!sent && otherSent && <p className="hint">Another version of this reply was already sent.</p>}
+      {confirming && !otherSent && (
         <div className="mail-confirm" role="alertdialog" aria-label="Send this reply?">
           <strong>Send this reply?</strong>
           <dl className="mail-confirm-meta">

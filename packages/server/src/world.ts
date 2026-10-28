@@ -741,6 +741,7 @@ export async function createWorld(ref: WorldRef, opts: WorldOptions): Promise<Wo
       return orchestrator.handleUserMessage(input);
     },
     agentName: async (id) => (await registry.get(id))?.name,
+    isWorker: async (id) => (await registry.get(id))?.role === "worker",
     taskChildren: (id) => tasks.children(id),
   });
   mailService = mail;

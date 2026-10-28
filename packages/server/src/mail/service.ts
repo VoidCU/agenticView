@@ -61,6 +61,8 @@ export interface MailServiceDeps {
   managerId?: () => string | undefined;
   /** An agent's display name, for the tag routing lines. */
   agentName?: (agentId: string) => Promise<string | undefined>;
+  /** True for an existing worker agent (a tag's preferred agent); without it no preferred agent is accepted. */
+  isWorker?: (agentId: string) => Promise<boolean>;
   /** A request's direct child tasks (to tell whether a worker already drafted its thread). */
   taskChildren?: (taskId: string) => Promise<Task[]>;
 }
@@ -305,6 +307,9 @@ export class MailService {
     if (!parsed.success) throw bad(`Invalid tag: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`);
     const tag = parsed.data;
     if (tag.name.includes("/")) throw bad("Tag names cannot contain '/'");
+    if (t.preferredAgentId !== undefined && !(await this.deps.isWorker?.(t.preferredAgentId))) {
+      throw bad("The preferred agent must be an existing worker");
+    }
     const clash = (await this.deps.store.tags.list()).find((x) => x.id !== tag.id && x.name.toLowerCase() === tag.name.toLowerCase());
     if (clash) throw bad(`A tag named "${clash.name}" already exists`);
     await this.deps.store.tags.write(tag.id, tag);

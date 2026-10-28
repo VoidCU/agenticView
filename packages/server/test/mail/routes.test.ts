@@ -128,4 +128,20 @@ describe("mail routes", () => {
     expect((await fetch(`${s.url}/api/mail/tags/${t.id}`, { method: "DELETE", headers: H })).status).toBe(200);
     expect(await (await fetch(`${s.url}/api/mail/threads`, { headers: H })).json()).toEqual([]);
   });
+
+  it("tags: a preferred agent must be an existing worker", async () => {
+    const s = await boot();
+    const worker = await s.world.registry.create({ name: "Nova", specialty: "" });
+    const manager = await s.world.registry.managerId();
+    const post = (body: unknown, path = "") => fetch(`${s.url}/api/mail/tags${path}`, { method: "POST", headers: H, body: JSON.stringify(body) });
+    for (const id of ["ag_nope", manager]) {
+      const r = await post({ name: "X", color: "#ff0000", meaning: "", preferredAgentId: id });
+      expect(r.status).toBe(400);
+      expect((await r.json()).error).toMatch(/worker/i);
+    }
+    const ok = await post({ name: "X", color: "#ff0000", meaning: "", preferredAgentId: worker.id });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).preferredAgentId).toBe(worker.id);
+    expect(await (await fetch(`${s.url}/api/mail/tags`, { headers: H })).json()).toHaveLength(1);
+  });
 });

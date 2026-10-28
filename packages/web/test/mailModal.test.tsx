@@ -185,6 +185,27 @@ describe("Mail modal", () => {
     expect((sends()[0]![1] as RequestInit).body).toBe(JSON.stringify({ confirm: true }));
   });
 
+  it("once one version was sent, Send is disabled on the other versions", async () => {
+    mockFetch({
+      threads: [
+        thread({
+          drafts: [
+            { id: "d2", body: "Newest reply", createdAt: "2026-10-22T10:00:00Z", flagged: false },
+            { id: "d1", body: "Older reply", createdAt: "2026-10-21T10:00:00Z", flagged: false, sentAt: "2026-10-21T11:00:00Z" },
+          ],
+        }),
+      ],
+    });
+    render(<MailModal onClose={() => undefined} />);
+    await userEvent.click(await screen.findByRole("button", { name: "Invoice question" }));
+    expect(await screen.findByText("Previous versions (1)")).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Send…" });
+    expect(send).toBeDisabled();
+    expect(screen.getByText(/another version of this reply was already sent/i)).toBeInTheDocument();
+    // The other actions stay available.
+    expect(screen.getByRole("button", { name: "Save to Gmail drafts" })).toBeEnabled();
+  });
+
   it("draft edits save on blur", async () => {
     const fn = mockFetch({
       threads: [thread({ drafts: [{ id: "d1", body: "Hi", createdAt: "2026-10-21T10:00:00Z", flagged: false }] })],

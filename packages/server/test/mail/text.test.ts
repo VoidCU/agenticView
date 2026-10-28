@@ -30,6 +30,29 @@ describe("htmlToText", () => {
   it("decodes numeric entities", () => {
     expect(htmlToText("a&#65;&#x42;&nbsp;&lt;&gt;&quot;")).toBe('aAB <>"');
   });
+
+  it("keeps the old shape: blocks, comments, upper case, unclosed script content", () => {
+    expect(htmlToText("<DIV>a</DIV><!-- hidden --><SCRIPT type=x>evil()</SCRIPT >b<li>c</li><pre>d</pre>")).toBe("a\nb\nc\nd");
+    expect(htmlToText("x<script>never closed")).toBe("xnever closed");
+    expect(htmlToText("1 < 2 and 3 > 2")).toBe("1  2");
+    expect(htmlToText("a <b")).toBe("a <b");
+    expect(htmlToText("<style>p{}</style><p>Hi</p>")).toBe("Hi");
+  });
+
+  it("stays linear on hostile input (thousands of unclosed tags)", () => {
+    const hostile = [
+      "<script>".repeat(5000) + "x".repeat(1000),
+      "<style a=b>".repeat(5000),
+      "<!--".repeat(5000) + ">",
+      "<".repeat(20000),
+      "<p ".repeat(20000),
+    ];
+    for (const h of hostile) {
+      const t0 = performance.now();
+      htmlToText(h);
+      expect(performance.now() - t0).toBeLessThan(250);
+    }
+  });
 });
 
 describe("trimQuoted", () => {
@@ -113,6 +136,25 @@ describe("buildReplyMime", () => {
     const m = decode(buildReplyMime({ from: "a@b.c", to: "d@e.f", subject: "Re: Hello", body: "x" }));
     expect(m).toContain("Subject: Re: Hello");
     expect(m).not.toContain("Re: Re:");
+  });
+
+  it("CR/LF in subject, to or from cannot inject a header", () => {
+    for (const evil of ["x\r\nBcc: evil@x", "x\nBcc: evil@x", "x\rBcc: evil@x"]) {
+      const m = decode(buildReplyMime({ from: `me@x.org${evil}`, to: `sam@x.org${evil}`, subject: evil, inReplyTo: `<m1@x>${evil}`, references: `<m0@x>${evil}`, body: "Hi" }));
+      const head = m.split("\r\n\r\n")[0]!;
+      const lines = head.split("\r\n");
+      expect(lines.some((l) => /^bcc:/i.test(l))).toBe(false);
+      expect(lines.every((l) => !l.includes("\r") && !l.includes("\n"))).toBe(true);
+      expect(lines).toHaveLength(8);
+    }
+  });
+
+  it("a non-ASCII subject round-trips as a UTF-8 encoded word", () => {
+    const m = decode(buildReplyMime({ from: "a@b.c", to: "d@e.f", subject: "Grüße – 日本", body: "x" }));
+    const line = m.split("\r\n").find((l) => l.startsWith("Subject: "))!;
+    const enc = /^Subject: =\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=$/.exec(line);
+    expect(enc).not.toBeNull();
+    expect(Buffer.from(enc![1]!, "base64").toString("utf8")).toBe("Re: Grüße – 日本");
   });
 });
 
