@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Agent, BrainstormParticipant, ClientMessage, GamesData, GameRoundResult, Match, OfficeLayout, SocialHubState, PendingLimitInfo, ProjectSettings, Provider, ProviderStatus, RunEvent, ServerMessage, Space, Task, WorkerSessionInfo, WorldInfo, ProviderConfigInfo } from "@agenticview/shared";
+import { useMail } from "./mail";
 import { compareStandings, emptySocialHub, setCustomProviders } from "@agenticview/shared";
 
 export type FeedItem = { ts: number; taskId: string; event: RunEvent } | { ts: number; taskId: string; user: string };
@@ -231,6 +232,9 @@ export const useStore = create<Store>()((set, get) => ({
           delete agents[msg.id];
           return { agents, selectedAgentId: s.selectedAgentId === msg.id ? undefined : s.selectedAgentId };
         });
+        return;
+      case "mail.changed":
+        void useMail.getState().refresh(msg.what);
         return;
       case "task.updated": {
         const t = msg.task;

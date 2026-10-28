@@ -6,6 +6,7 @@ import { ProvidersPanel } from "./ProvidersPanel";
 import { Modal, ProviderOptions, automaticLabel, providerLabel } from "./ui";
 import { getNotificationPref, requestNotificationPermission, setNotificationPref } from "./useNotifications";
 import { LayoutEditor } from "./LayoutEditor";
+import { GmailConnections } from "./GmailConnections";
 
 export type SettingsTab = "general" | "providers" | "office" | "layout" | "connections" | "usage";
 
@@ -279,6 +280,7 @@ export function SettingsModal({ onClose, initialTab }: { onClose: () => void; in
         <div {...panel("usage")}>{tab === "usage" && <UsagePanel />}</div>
         <div {...panel("layout")}>{tab === "layout" && <LayoutEditor />}</div>
         <div {...panel("connections")}>
+          {tab === "connections" && <GmailConnections />}
           <section className="settings-section connections-section">
             <header><h3>Connections</h3><p className="section-desc">Messages, comments, likes and recent feeds will appear on the My Office wall screen.</p></header>
             <div className="connection-options">
