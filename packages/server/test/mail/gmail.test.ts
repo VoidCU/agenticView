@@ -51,6 +51,7 @@ describe("GmailClient", () => {
     expect(all[0]!.name).toBe("Bob");
     expect(all[0]!.lastDate).toBe(new Date(5000).toISOString());
     expect(calls[0]!.auth).toBe("Bearer tok");
+    expect(new URL(calls[0]!.url).searchParams.get("labelIds")).toBe("INBOX");
     expect(calls.some((c) => c.url.includes("format=metadata") && c.url.includes("metadataHeaders=From"))).toBe(true);
     expect(await gc.recentSenders("a1", { limit: 2 })).toHaveLength(2);
   });

@@ -50,7 +50,7 @@ export class GmailClient {
         await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt]));
         continue;
       }
-      throw new Error(`Gmail ${init.method ?? "GET"} ${path.split("?")[0]} failed: ${res.status}`);
+      throw Object.assign(new Error(`Gmail ${init.method ?? "GET"} ${path.split("?")[0]} failed: ${res.status}`), { status: res.status });
     }
   }
 
@@ -65,7 +65,7 @@ export class GmailClient {
     const ids: string[] = [];
     let pageToken: string | undefined;
     while (ids.length < scan) {
-      const qs = new URLSearchParams({ maxResults: String(Math.min(500, scan - ids.length)) });
+      const qs = new URLSearchParams({ labelIds: "INBOX", maxResults: String(Math.min(500, scan - ids.length)) });
       if (pageToken) qs.set("pageToken", pageToken);
       const page = await this.request<{ messages?: { id: string }[]; nextPageToken?: string }>(
         accountId,
@@ -82,10 +82,16 @@ export class GmailClient {
     const worker = async () => {
       while (next < ids.length) {
         const id = ids[next++]!;
-        const m = await this.request<RawMessage>(
-          accountId,
-          `messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From`,
-        );
+        let m: RawMessage;
+        try {
+          m = await this.request<RawMessage>(
+            accountId,
+            `messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From`,
+          );
+        } catch (e) {
+          if ((e as { status?: number }).status === 404) continue;
+          throw e;
+        }
         const from = header(m.payload, "From");
         if (!from) continue;
         const { name, email } = parseAddress(from);
