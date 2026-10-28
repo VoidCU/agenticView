@@ -1,8 +1,12 @@
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import type { PermissionMode, Provider, ProviderStatus, RunEvent, RunResult, ToolAllowance } from "@agenticview/shared";
 import type { Codex as CodexClass, ThreadEvent, ThreadItem, UserInput, SandboxMode } from "@openai/codex-sdk";
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 import { which as defaultWhich, type Which } from "./which.js";
 import { extractCliError } from "./errors.js";
+import { UNTRUSTED_MCP_REFUSAL } from "./untrusted.js";
 
 export interface CodexSdk {
   Codex: typeof CodexClass;
@@ -27,6 +31,8 @@ export interface CodexRuntimeOptions {
   bridgeUrl: () => string;
   apiKey?: string;
   which?: Which;
+  /** Lists the user's Codex MCP servers for an untrusted run (tests); default `codex mcp list --json`. */
+  listMcp?: ListCodexMcp;
 }
 
 export const CODEX_MISSING_REASON = "Install the Codex CLI (npm i -g @openai/codex) and sign in with `codex login` or set CODEX_API_KEY.";
@@ -134,6 +140,13 @@ export class CodexRuntime implements Runtime {
       if (signal.aborted) return { text, stopReason: "aborted" };
       const sdk = await this.loadSdk();
       const { env, config } = codexEnvAndConfig(process.env, this.opts);
+      // An untrusted run (it reads Gmail threads) fails closed when the user has MCP servers of their own
+      // (~/.codex config, a project config or a plugin). `--config mcp_servers={}` cannot remove them: Codex
+      // merges overrides into its tables (verified with codex 0.156 `mcp list`), so they would still load.
+      if (req.untrusted) {
+        const servers = await (this.opts.listMcp ?? listCodexMcp)(req.cwd, env).catch(() => undefined);
+        if (!servers || servers.some((s) => s.enabled !== false)) return { text, stopReason: "error", error: UNTRUSTED_MCP_REFUSAL };
+      }
       if (req.bridgeTools.length > 0) {
         config.mcp_servers = {
           agenticview: {
@@ -209,6 +222,48 @@ export function codexThreadOptions(req: RunRequest, platform: NodeJS.Platform): 
   if (!req.tools.web) opts.webSearchMode = "disabled";
   return opts;
 }
+
+/** One MCP server as `codex mcp list --json` reports it. */
+export interface CodexMcpEntry {
+  name: string;
+  enabled?: boolean;
+}
+
+/** Lists the MCP servers Codex would load in `cwd` (config, project config and plugins). */
+export type ListCodexMcp = (cwd: string, env: Record<string, string>) => Promise<CodexMcpEntry[]>;
+
+/**
+ * `codex mcp list --json` with the Codex CLI the SDK runs (the @openai/codex package it depends on).
+ * Rejects on any failure, so callers can fail closed.
+ */
+export const listCodexMcp: ListCodexMcp = async (cwd, env) => {
+  const sdkEntry = fileURLToPath(import.meta.resolve("@openai/codex-sdk"));
+  const cli = createRequire(sdkEntry).resolve("@openai/codex/bin/codex.js");
+  const out = await new Promise<string>((resolve, reject) => {
+    const child = spawn(process.execPath, [cli, "mcp", "list", "--json"], { cwd, env, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    let buf = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("codex mcp list timed out"));
+    }, 30_000);
+    child.stdout.on("data", (d) => (buf += String(d)));
+    child.once("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve(buf);
+      else reject(new Error(`codex mcp list exited ${code}`));
+    });
+  });
+  const parsed: unknown = JSON.parse(out);
+  if (!Array.isArray(parsed)) throw new Error("codex mcp list: unexpected output");
+  return parsed.map((e) => {
+    if (!e || typeof e !== "object" || typeof (e as CodexMcpEntry).name !== "string") throw new Error("codex mcp list: unexpected entry");
+    return { name: (e as CodexMcpEntry).name, enabled: (e as CodexMcpEntry).enabled };
+  });
+};
 
 /** Env var a custom endpoint's key is passed in (model_providers.<id>.env_key); only ever in the child env. */
 export const CUSTOM_KEY_ENV = "AGENTICVIEW_CUSTOM_KEY";

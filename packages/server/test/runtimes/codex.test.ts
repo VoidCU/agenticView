@@ -3,6 +3,7 @@ import { z } from "zod";
 import { defaultAgent } from "@agenticview/shared";
 import { CodexRuntime, codexThreadOptions, sandboxFor, type CodexSdk } from "../../src/runtimes/codex.js";
 import type { RunRequest } from "../../src/runtimes/types.js";
+import { UNTRUSTED_MCP_REFUSAL } from "../../src/runtimes/untrusted.js";
 
 const agent = defaultAgent({ name: "C", role: "worker", scope: "project", specialty: "", provider: "codex" });
 
@@ -154,6 +155,34 @@ describe("CodexRuntime edge cases", () => {
     expect(cap.threadOpts!.sandboxMode).toBe("read-only");
     expect(sandboxFor("auto", "linux", { edit: false, shell: false, web: false, screenshot: false })).toBe("read-only");
     expect(sandboxFor("auto", "linux", { edit: false, shell: true, web: false, screenshot: false })).toBe("danger-full-access");
+  });
+
+  it("an untrusted run is refused when the user has enabled Codex MCP servers, or the list fails", async () => {
+    const off = { edit: false, shell: false, web: false, screenshot: false };
+    const untrusted = req({ readOnly: true, untrusted: true, tools: off, bridgeTools: [], permissionMode: "auto" });
+    for (const listMcp of [async () => [{ name: "blender", enabled: true }], async () => [{ name: "x" }], async () => { throw new Error("no codex"); }]) {
+      const cap: Capture = {};
+      const res = await new CodexRuntime({ sdk: fakeSdk(cap), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "codex", listMcp }).run(untrusted, () => {}, new AbortController().signal);
+      expect(res).toMatchObject({ stopReason: "error", error: UNTRUSTED_MCP_REFUSAL });
+      expect(cap.ctor).toBeUndefined();
+    }
+  });
+
+  it("an untrusted run goes ahead when every user server is disabled; a non-untrusted readOnly run never lists", async () => {
+    const off = { edit: false, shell: false, web: false, screenshot: false };
+    const seen: string[] = [];
+    const listMcp = async (cwd: string) => {
+      seen.push(cwd);
+      return [{ name: "code-review", enabled: false }];
+    };
+    const cap: Capture = {};
+    const res = await new CodexRuntime({ sdk: fakeSdk(cap), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "codex", listMcp }).run(req({ readOnly: true, untrusted: true, tools: off, bridgeTools: [], permissionMode: "auto" }), () => {}, new AbortController().signal);
+    expect(res.stopReason).toBe("done");
+    expect(seen).toEqual(["C:/p"]);
+    const cap2: Capture = {};
+    await new CodexRuntime({ sdk: fakeSdk(cap2), bridgeEntry: "b", bridgeUrl: () => "u", which: async () => "codex", listMcp }).run(req({ readOnly: true, tools: off, bridgeTools: [], permissionMode: "auto" }), () => {}, new AbortController().signal);
+    expect(seen).toHaveLength(1);
+    expect(cap2.threadOpts).toMatchObject({ sandboxMode: "read-only" });
   });
 
   it("disables web search when the agent may not use the web, whatever ~/.codex says", async () => {

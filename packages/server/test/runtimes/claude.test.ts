@@ -163,6 +163,24 @@ describe("ClaudeRuntime.run", () => {
     expect(cap.options!.mcpServers).toBeUndefined();
   });
 
+  it("an untrusted run loads no settings (no project MCP servers or allow rules) and still denies everything", async () => {
+    const off = { edit: false, shell: false, web: false, screenshot: false };
+    const cap: Capture = {};
+    await new ClaudeRuntime({ sdk: fakeSdk(cap), apiKey: "k" }).run(req({ readOnly: true, untrusted: true, permissionMode: "auto", tools: off, bridgeTools: [] }), () => {}, new AbortController().signal);
+    expect(cap.options!.settingSources).toEqual([]);
+    const canUse = cap.options!.canUseTool as (n: string, i: unknown, o: unknown) => Promise<{ behavior: string }>;
+    for (const tool of ["Bash", "mcp__project__anything"]) expect((await canUse(tool, {}, {})).behavior).toBe("deny");
+    // An untrusted Manager run (mail request) keeps its bridge tools.
+    const cap2: Capture = {};
+    await new ClaudeRuntime({ sdk: fakeSdk(cap2), apiKey: "k" }).run(req({ untrusted: true, permissionMode: "auto", tools: off }), () => {}, new AbortController().signal);
+    expect(cap2.options!.settingSources).toEqual([]);
+    expect((cap2.options!.mcpServers as Record<string, unknown>).agenticview).toBeDefined();
+    // A restricted run that is not untrusted (brainstorm) is unchanged.
+    const cap3: Capture = {};
+    await new ClaudeRuntime({ sdk: fakeSdk(cap3), apiKey: "k" }).run(req({ readOnly: true, permissionMode: "auto", tools: off, bridgeTools: [] }), () => {}, new AbortController().signal);
+    expect(cap3.options!.settingSources).toEqual(["project"]);
+  });
+
   it("maps error subtypes and max turns", async () => {
     const cap: Capture = {};
     const rt = new ClaudeRuntime({ sdk: fakeSdk(cap, [{ type: "result", subtype: "error_max_turns", session_id: "s2", total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, num_turns: 60 }]), apiKey: "k" });

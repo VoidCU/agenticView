@@ -7,6 +7,7 @@ import type { Effort, PermissionMode, ProviderStatus, RunEvent, RunResult, ToolA
 import type { EventSink, Runtime, RunRequest } from "./types.js";
 import { which as defaultWhich, type Which } from "./which.js";
 import { extractCliError } from "./errors.js";
+import { UNTRUSTED_MCP_REFUSAL, anyUserMcpServers } from "./untrusted.js";
 
 /**
  * Google Antigravity CLI (`agy`) runtime.
@@ -420,6 +421,20 @@ export function killTree(child: ChildProcess, platform: NodeJS.Platform = proces
   child.kill();
 }
 
+/** Whether agy would load a user MCP server: its global config or a workspace plugin that is not ours. */
+async function agyUserMcp(home: string, cwd: string): Promise<boolean> {
+  const files = [join(home, ".gemini", "config", "mcp_config.json")];
+  const plugins = join(cwd, ".agents", "plugins");
+  let names: string[] = [];
+  try {
+    names = await readdir(plugins);
+  } catch {
+    names = [];
+  }
+  for (const n of names) if (!n.startsWith(PLUGIN_PREFIX)) files.push(join(plugins, n, "mcp_config.json"));
+  return anyUserMcpServers(files);
+}
+
 export class AntigravityRuntime implements Runtime {
   readonly provider = "antigravity" as const;
   private readonly spawn: typeof nodeSpawn;
@@ -486,6 +501,10 @@ export class AntigravityRuntime implements Runtime {
     let text = "";
     let sessionId: string | undefined = req.sessionId;
     if (signal.aborted) return { text, stopReason: "aborted" };
+    // An untrusted run (it reads Gmail threads) fails closed when the user has MCP servers of their own
+    // (agy's global mcp_config.json or a workspace plugin): a mail request with bridge tools needs
+    // --dangerously-skip-permissions, which would let it call them too.
+    if (req.untrusted && (await agyUserMcp(this.home, req.cwd))) return { text, stopReason: "error", error: UNTRUSTED_MCP_REFUSAL };
     const useBridge = req.bridgeTools.length > 0;
     let restore: () => Promise<void> = async () => undefined;
     let promptFile: string | undefined;
